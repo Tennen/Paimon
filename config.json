@@ -1,0 +1,4 @@
+{
+  "haEntityAllowlist": ["light.living_room"],
+  "haEntityAllowlistPrefixes": ["switch."]
+}
