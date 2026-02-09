@@ -9,8 +9,7 @@ export type AuditEntry = {
   actionType: string;
   latencyMs: number;
   tool?: string;
-  ha_action?: "call_service" | "get_state";
-  entity_id?: string | string[];
+  tool_meta?: unknown;
   llm_provider?: "ollama";
   model?: string;
   retries?: number;

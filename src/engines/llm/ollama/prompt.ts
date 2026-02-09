@@ -1,6 +1,6 @@
 import { LLMRuntimeContext } from "../llm";
 
-export function buildSystemPrompt(runtimeContext: LLMRuntimeContext, toolSchema: string, strictJson: boolean, extraHint?: string): string {
+export function buildSystemPrompt(toolSchema: string, strictJson: boolean, extraHint?: string): string {
   const strictRule = strictJson
     ? "You MUST output a single JSON object only. No markdown, no code fences, no explanations."
     : "Output a single JSON object only.";
@@ -12,12 +12,25 @@ export function buildSystemPrompt(runtimeContext: LLMRuntimeContext, toolSchema:
     strictRule,
     "Detect the user's language and respond in the same language.",
     "Return exactly one action object with fields {\"type\", \"params\"}.",
-    "If no tool is suitable, you may respond the user directly.",
+    "Use tool calls as {\"type\":\"tool.call\",\"params\":{\"tool\":\"...\",\"op\":\"...\",\"args\":{...}}}.",
+    "Runtime context may include tools_context.{toolName}. If a tool schema defines a resource field, use tools_context.{toolName}.{resource} for matching.",
+    "Use skill calls as {\"type\":\"skill.call\",\"params\":{\"name\":\"...\",\"input\":\"...\"}}.",
+    "If no tool is suitable, you may return {\"type\":\"respond\",\"params\":{\"text\":\"...\"}} to answer the user directly.",
+    "If runtime context contains action_history, use it to avoid repeating tool calls.",
     "",
     "Tool schema:",
-    toolSchema,
+    toolSchema
+  ].join("\n") + hint;
+}
+
+export function buildUserPrompt(text: string, runtimeContext: LLMRuntimeContext, hasImages?: boolean): string {
+  const context = JSON.stringify(runtimeContext, null, 2);
+  return [
+    "User input:",
+    text,
+    ...(hasImages ? ["", "Note: An image is attached to this message."] : []),
     "",
     "Runtime context:",
-    JSON.stringify(runtimeContext, null, 2)
-  ].join("\n") + hint;
+    context
+  ].join("\n");
 }

@@ -3,15 +3,13 @@ import { Action } from "../../types";
 export type LLMRuntimeContext = {
   now: string;
   timezone: string;
-  defaults?: Record<string, unknown>;
-  allowed_ha_entities?: string[];
-  ha_entities?: Array<{
-    entity_id: string;
-    name: string;
-    area?: string;
-    device?: string;
-    domain?: string;
+  memory?: string;
+  action_history?: Array<{
+    iteration: number;
+    action: { type: string; params: Record<string, unknown> };
   }>;
+  tools_context?: Record<string, Record<string, unknown>> | null;
+  next_step_context?: Record<string, unknown> | null;
 };
 
 export type LLMPlanMeta = {
@@ -24,7 +22,7 @@ export type LLMPlanMeta = {
 };
 
 export interface LLMEngine {
-  plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string): Promise<Action>;
+  plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<Action>;
 }
 
 export type LLMPlanResult = {

@@ -55,6 +55,7 @@ export OLLAMA_VISION_MODEL="qwen3-vl:4b" # optional, used for image describe
 export LLM_TIMEOUT_MS="15000"
 export LLM_MAX_RETRIES="2"
 export LLM_STRICT_JSON="true"
+export LLM_MAX_ITERATIONS="2"
 export VISION_TIMEOUT_MS="30000"
 export VISION_MAX_RETRIES="1"
 export HA_SNAPSHOT_DESCRIBE="true"
@@ -179,3 +180,20 @@ Local (agent):
 export WECOM_BRIDGE_URL="http://your-vps-domain:8080"
 export WECOM_BRIDGE_TOKEN="YOUR_STREAM_TOKEN"
 ```
+
+## Session memory (MEMORY.MD)
+
+Per-session memory is stored at `data/memory/<sessionId>/MEMORY.md` and injected into LLM runtime context as `memory`.
+
+## Skills (extensible)
+
+Create a skill under `skills/<name>/SKILL.md`. Optionally add `skills/<name>/handler.js` exporting `execute(input, context)`.
+
+Example structure:
+
+```
+skills/my-skill/SKILL.md
+skills/my-skill/handler.js
+```
+
+LLM can call `skill.invoke` with `{ name, input }`.

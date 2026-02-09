@@ -9,9 +9,22 @@ export type Envelope = {
   receivedAt: string;
 };
 
+export enum ActionType {
+  Respond = "respond",
+  SkillCall = "skill.call",
+  ToolCall = "tool.call"
+}
+
 export type Action = {
-  type: string;
+  type: ActionType;
+  rawType?: string;
   params: Record<string, unknown>;
+};
+
+export type Image = {
+  data: string;
+  contentType?: string;
+  filename?: string;
 };
 
 export type ToolResult = {
@@ -22,5 +35,7 @@ export type ToolResult = {
 
 export type Response = {
   text: string;
-  data?: unknown;
+  data?: {
+    image?: Image;
+  };
 };

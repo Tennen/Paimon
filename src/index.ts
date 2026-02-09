@@ -9,25 +9,29 @@ import { HttpIngressAdapter } from "./ingress/http";
 import { HANotifyIngressAdapter } from "./ingress/haNotify";
 import { WeComIngressAdapter } from "./ingress/wecom";
 import { WeComBridgeIngressAdapter } from "./ingress/wecomBridge";
-import { HAEntityRegistry } from "./ha/entityRegistry";
-import { HAClient } from "./ha/client";
+import { MemoryStore } from "./memory/memoryStore";
+import { SkillManager } from "./skills/skillManager";
+import { ToolRegistry, loadTools } from "./tools/toolRegistry";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-const haClient = new HAClient();
-const haRegistry = new HAEntityRegistry(haClient);
-haRegistry.start();
 
-const toolRouter = new ToolRouter(haClient, (entityId) => haRegistry.has(entityId));
+const skillManager = new SkillManager();
+const memoryStore = new MemoryStore();
+
+const registry = new ToolRegistry();
+loadTools(registry, { skillManager });
+const toolRouter = new ToolRouter(registry);
 const llmEngine = new OllamaLLMEngine();
-const toolSchema = buildToolSchema();
+const toolSchema = buildToolSchema(registry);
 const orchestrator = new Orchestrator(
   toolRouter,
   llmEngine,
   toolSchema,
-  () => haRegistry.getEntities(),
-  () => haRegistry.getEntityInfo()
+  memoryStore,
+  skillManager,
+  registry
 );
 const sessionManager = new SessionManager(orchestrator);
 

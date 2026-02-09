@@ -2,7 +2,7 @@ import { Action } from "../../../types";
 import { LLMEngine, LLMPlanMeta, LLMPlanResult, LLMRuntimeContext } from "../llm";
 import { mockLLM } from "../../../mockLLM";
 import { ollamaChat } from "./client";
-import { buildSystemPrompt } from "./prompt";
+import { buildSystemPrompt, buildUserPrompt } from "./prompt";
 import { parseAction } from "./parser";
 
 export type OllamaLLMOptions = {
@@ -26,20 +26,21 @@ export class OllamaLLMEngine implements LLMEngine {
     };
   }
 
-  async plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string): Promise<Action> {
-    const result = await this.planWithMeta(text, runtimeContext, toolSchema);
+  async plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<Action> {
+    const result = await this.planWithMeta(text, runtimeContext, toolSchema, images);
     return result.action;
   }
 
-  async planWithMeta(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string): Promise<LLMPlanResult> {
-    const basePrompt = buildSystemPrompt(runtimeContext, toolSchema, this.options.strictJson);
+  async planWithMeta(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<LLMPlanResult> {
+    const basePrompt = buildSystemPrompt(toolSchema, this.options.strictJson);
     let retries = 0;
     let lastRaw = "";
+    const userPrompt = buildUserPrompt(text, runtimeContext, !!(images && images.length));
 
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
       const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
       const systemPrompt = attempt > 0
-        ? buildSystemPrompt(runtimeContext, toolSchema, this.options.strictJson, extraHint)
+        ? buildSystemPrompt(toolSchema, this.options.strictJson, extraHint)
         : basePrompt;
 
       try {
@@ -49,7 +50,7 @@ export class OllamaLLMEngine implements LLMEngine {
           timeoutMs: this.options.timeoutMs,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: text }
+            { role: "user", content: userPrompt, images }
           ]
         });
 

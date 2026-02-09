@@ -47,13 +47,11 @@ export class WeComBridgeIngressAdapter implements IngressAdapter {
 
       try {
         const response = await sessionManager.enqueue(envelope);
-        const image = (response.data as any)?.image as { data?: string; contentType?: string; filename?: string } | undefined;
+        const image = response.data?.image;
         if (image?.data) {
-          await this.sender.sendImage(payload.fromUser, image.data, image.filename, image.contentType);
-          if (response.text && response.text !== "OK") {
-            await this.sender.sendText(payload.fromUser, response.text);
-          }
-        } else {
+          await this.sender.sendImage(payload.fromUser, image.data, image.filename, image.contentType); 
+        }
+        if (response.text) {
           await this.sender.sendText(payload.fromUser, response.text);
         }
       } catch (err: any) {

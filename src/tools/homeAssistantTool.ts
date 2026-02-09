@@ -1,26 +1,37 @@
-import { Action, ToolResult } from "../types";
+import { Action, ActionType, ToolResult } from "../types";
 import { HAClient } from "../ha/client";
-import { describeImage } from "../engines/llm/ollama/vision";
+import { ToolDependencies, ToolRegistry } from "./toolRegistry";
+import { HAEntityRegistry } from "../ha/entityRegistry";
 
 export type HaEntityChecker = (entityId: string) => boolean;
 
 export class HomeAssistantTool {
   private readonly client: HAClient;
   private readonly isEntityAllowed: HaEntityChecker;
-  private readonly describeSnapshots: boolean;
 
   constructor(client: HAClient, isEntityAllowed: HaEntityChecker) {
     this.client = client;
     this.isEntityAllowed = isEntityAllowed;
-    this.describeSnapshots = (process.env.HA_SNAPSHOT_DESCRIBE ?? "true") === "true";
   }
 
   async execute(action: Action): Promise<ToolResult> {
-    if (action.type === "ha.call_service") {
-      const domain = action.params.domain as string;
-      const service = action.params.service as string;
-      const entityId = action.params.entity_id as string | string[] | undefined;
-      const data = (action.params.data as Record<string, unknown>) ?? {};
+    if (action.type !== ActionType.ToolCall) {
+      return { ok: false, error: `Unsupported action: ${action.type}` };
+    }
+
+    const toolName = action.params.tool as string | undefined;
+    if (toolName !== "homeassistant") {
+      return { ok: false, error: `Unsupported tool: ${toolName ?? "unknown"}` };
+    }
+
+    const op = action.params.op as string | undefined;
+    const args = (action.params.args as Record<string, unknown>) ?? {};
+
+    if (op === "call_service") {
+      const domain = args.domain as string;
+      const service = args.service as string;
+      const entityId = args.entity_id as string | string[] | undefined;
+      const data = (args.data as Record<string, unknown>) ?? {};
 
       if (!domain || !service || !entityId) {
         return { ok: false, error: "Missing domain/service/entity_id" };
@@ -39,14 +50,14 @@ export class HomeAssistantTool {
 
       try {
         const output = await this.client.requestJson("POST", `/api/services/${domain}/${service}`, body);
-        return { ok: true, output };
+        return { ok: true, output: { data: output, meta: { ha_action: "call_service", entity_id: entityId } } };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
     }
 
-    if (action.type === "ha.get_state") {
-      const entityId = action.params.entity_id as string | undefined;
+    if (op === "get_state") {
+      const entityId = args.entity_id as string | undefined;
       if (!entityId) {
         return { ok: false, error: "Missing entity_id" };
       }
@@ -57,14 +68,14 @@ export class HomeAssistantTool {
 
       try {
         const output = await this.client.requestJson("GET", `/api/states/${entityId}`);
-        return { ok: true, output };
+        return { ok: true, output: { data: output, meta: { ha_action: "get_state", entity_id: entityId } } };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
     }
 
-    if (action.type === "ha.camera_snapshot") {
-      const entityId = action.params.entity_id as string | undefined;
+    if (op === "camera_snapshot") {
+      const entityId = args.entity_id as string | undefined;
       if (!entityId) {
         return { ok: false, error: "Missing entity_id" };
       }
@@ -76,34 +87,62 @@ export class HomeAssistantTool {
       try {
         const { buffer, contentType } = await this.client.requestBinary(`/api/camera_proxy/${entityId}`);
         const ext = contentType.includes("png") ? "png" : "jpg";
-        const output: {
-          image: { data: string; contentType: string; filename: string };
-          caption?: string;
-        } = {
+        const output = {
           image: {
             data: buffer.toString("base64"),
             contentType,
             filename: `${entityId.replace(".", "_")}.${ext}`
-          }
+          },
+          meta: { ha_action: "camera_snapshot", entity_id: entityId }
         };
-
-        if (this.describeSnapshots) {
-          try {
-            const caption = await describeImage(output.image.data);
-            if (caption) {
-              output.caption = caption;
-            }
-          } catch (err) {
-            console.warn("[ha.camera_snapshot] describe failed:", (err as Error).message);
-          }
-        }
-
         return { ok: true, output };
       } catch (err) {
         return { ok: false, error: (err as Error).message };
       }
     }
 
-    return { ok: false, error: `Unsupported action: ${action.type}` };
+    return { ok: false, error: `Unsupported op: ${op ?? "unknown"}` };
   }
+}
+
+export function registerTool(registry: ToolRegistry, deps: ToolDependencies): void {
+  const haClient = new HAClient();
+  const haRegistry = new HAEntityRegistry(haClient);
+  haRegistry.start();
+  const tool = new HomeAssistantTool(haClient, (entityId) => haRegistry.has(entityId));
+
+  registry.register(
+    {
+      name: "homeassistant",
+      execute: (action) => tool.execute(action),
+      runtimeContext: () => ({ entities: haRegistry.getEntityInfo() })
+    },
+    {
+      name: "homeassistant",
+      resource: "entities",
+      operations: [
+        {
+          op: "call_service",
+          params: {
+            domain: "string",
+            service: "string",
+            entity_id: "string | string[]",
+            data: "object?"
+          }
+        },
+        {
+          op: "get_state",
+          params: {
+            entity_id: "string"
+          }
+        },
+        {
+          op: "camera_snapshot",
+          params: {
+            entity_id: "string"
+          }
+        }
+      ]
+    }
+  );
 }

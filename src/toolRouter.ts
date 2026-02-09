@@ -1,23 +1,40 @@
-import { Action, ToolResult } from "./types";
-import { MockTool } from "./tools/mockTool";
-import { HomeAssistantTool, HaEntityChecker } from "./tools/homeAssistantTool";
-import { HAClient } from "./ha/client";
+import { Action, ActionType, ToolResult } from "./types";
+import { ToolRegistry } from "./tools/toolRegistry";
 
 export class ToolRouter {
-  private readonly mockTool = new MockTool();
-  private readonly haTool: HomeAssistantTool;
+  private readonly registry: ToolRegistry;
 
-  constructor(client: HAClient, isEntityAllowed: HaEntityChecker) {
-    this.haTool = new HomeAssistantTool(client, isEntityAllowed);
+  constructor(registry: ToolRegistry) {
+    this.registry = registry;
   }
 
-  async route(action: Action): Promise<{ result: ToolResult; toolName: string }> {
-    if (action.type.startsWith("ha.")) {
-      const result = await this.haTool.execute(action);
-      return { result, toolName: "homeassistant" };
+  async route(action: Action, context: Record<string, unknown>): Promise<{ result: ToolResult; toolName: string }> {
+    if (action.type === ActionType.ToolCall) {
+      const name = action.params.tool as string | undefined;
+      if (name) {
+        const handler = this.registry.listHandlers().find((h) => h.name === name);
+        if (handler) {
+          const result = await handler.execute(action, context);
+          return { result, toolName: handler.name };
+        }
+      }
     }
 
-    const result = await this.mockTool.execute(action);
-    return { result, toolName: "mock" };
+    if (action.type === ActionType.SkillCall) {
+      const handler = this.registry.listHandlers().find((h) => h.name === "skill");
+      if (handler) {
+        const result = await handler.execute(action, context);
+        return { result, toolName: handler.name };
+      }
+    }
+
+    const result: ToolResult = {
+      ok: true,
+      output: {
+        text: `No matching tool for action: ${action.type}`,
+        unmatched_action: action
+      }
+    };
+    return { result, toolName: "unmatched" };
   }
 }
