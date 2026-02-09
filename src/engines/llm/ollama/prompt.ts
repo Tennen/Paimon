@@ -12,7 +12,7 @@ export function buildSystemPrompt(runtimeContext: LLMRuntimeContext, toolSchema:
     strictRule,
     "Detect the user's language and respond in the same language.",
     "Return exactly one action object with fields {\"type\", \"params\"}.",
-    "If no tool is suitable, you may return {\"type\": \"respond\", \"params\": {\"text\": \"...\"}} to answer the user directly.",
+    "If no tool is suitable, you may respond the user directly.",
     "",
     "Tool schema:",
     toolSchema,
