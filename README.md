@@ -50,8 +50,8 @@ Set Ollama env vars:
 
 ```bash
 export OLLAMA_BASE_URL="http://127.0.0.1:11434"
-export OLLAMA_MODEL="qwen2.5:4b-instruct"
-export OLLAMA_VISION_MODEL="qwen3:7b-vl" # optional, used for image describe
+export OLLAMA_MODEL="qwen3:4b"
+export OLLAMA_VISION_MODEL="qwen3-vl:4b" # optional, used for image describe
 export LLM_TIMEOUT_MS="15000"
 export LLM_MAX_RETRIES="2"
 export LLM_STRICT_JSON="true"
