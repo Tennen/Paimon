@@ -20,4 +20,8 @@ export class SessionManager {
     this.queues.set(sessionId, next);
     return next;
   }
+
+  getSessions(): string[] {
+    return Array.from(this.queues.keys());
+  }
 }

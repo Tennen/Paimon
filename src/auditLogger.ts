@@ -4,11 +4,19 @@ import path from "path";
 export type AuditEntry = {
   requestId: string;
   sessionId: string;
+  source?: string;
+  ingress_message_id?: string;
   actionType: string;
   latencyMs: number;
   tool?: string;
   ha_action?: "call_service" | "get_state";
   entity_id?: string | string[];
+  llm_provider?: "ollama";
+  model?: string;
+  retries?: number;
+  parse_ok?: boolean;
+  raw_output_length?: number;
+  fallback?: boolean;
 };
 
 const AUDIT_PATH = path.resolve(process.cwd(), "data", "audit.jsonl");

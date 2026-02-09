@@ -68,6 +68,9 @@
 - 不接企业微信
 - 不接 STT / 真实 LLM
 - 不接 Shortcuts
+
+【Pending】
+- 摄像头截图“脚本返回路径”的方案暂缓，当前使用 `camera_proxy` + REST `/api/states` 补齐 camera 实体。
 ```
 
 ---
