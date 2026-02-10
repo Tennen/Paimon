@@ -1,7 +1,4 @@
-import { ToolRegistry } from "../../../tools/toolRegistry";
-import { SkillManager } from "../../../skills/skillManager";
-
-export function buildToolSchema(registry: ToolRegistry, skillManager?: SkillManager): string {
+export function buildActionSchema(): string {
   const schema = {
     actions: [
       {
@@ -9,7 +6,9 @@ export function buildToolSchema(registry: ToolRegistry, skillManager?: SkillMana
         params: {
           tool: "string",
           op: "string",
-          args: "object"
+          args: "object",
+          on_success: "action?",
+          on_failure: "action?"
         }
       },
       {
@@ -20,14 +19,20 @@ export function buildToolSchema(registry: ToolRegistry, skillManager?: SkillMana
         }
       },
       {
+        type: "llm.call",
+        params: {
+          promptText: "string?",
+          context: "object?",
+          image: "object?"
+        }
+      },
+      {
         type: "respond",
         params: {
           text: "string"
         }
       }
-    ],
-    tools: registry.listSchema(),
-    skills: skillManager?.list() || []
+    ]
   };
 
   return JSON.stringify(schema, null, 2);

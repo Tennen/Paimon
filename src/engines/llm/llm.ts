@@ -9,6 +9,7 @@ export type LLMRuntimeContext = {
     action: { type: string; params: Record<string, unknown> };
   }>;
   tools_context?: Record<string, Record<string, unknown>> | null;
+  skills_context?: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null;
   next_step_context?: Record<string, unknown> | null;
 };
 
@@ -22,7 +23,7 @@ export type LLMPlanMeta = {
 };
 
 export interface LLMEngine {
-  plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<Action>;
+  plan(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<Action>;
 }
 
 export type LLMPlanResult = {

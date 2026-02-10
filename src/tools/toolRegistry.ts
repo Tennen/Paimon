@@ -14,6 +14,7 @@ export type ToolSchemaItem = {
   name: string;
   resource?: string;
   operations: Array<{ op: string; params: Record<string, string> }>;
+  keywords?: string[];
 };
 
 export type ToolDependencies = {
@@ -47,7 +48,9 @@ export class ToolRegistry {
   }
 
   buildRuntimeContext(): Record<string, ToolRuntimeContext> {
-    const merged: Record<string, ToolRuntimeContext> = {};
+    const merged: Record<string, ToolRuntimeContext> = {
+      _tools: { schema: this.listSchema() }
+    };
     for (const handler of this.handlers) {
       if (handler.runtimeContext) {
         merged[handler.name] = handler.runtimeContext();

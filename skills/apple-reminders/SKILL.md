@@ -5,7 +5,8 @@ terminal: true
 install: brew install steipete/tap/remindctl
 metadata:
   {
-    "command": "remindctl"
+    "command": "remindctl",
+    "keywords": ["reminder", "reminders", "todo", "to-do", "task", "tasks", "checklist", "待办", "提醒", "提醒事项", "备忘", "事项"]
   }
 ---
 

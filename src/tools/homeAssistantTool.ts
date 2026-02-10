@@ -120,6 +120,25 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
     {
       name: "homeassistant",
       resource: "entities",
+      keywords: [
+        "home assistant",
+        "ha",
+        "smart home",
+        "home automation",
+        "device",
+        "devices",
+        "light",
+        "lights",
+        "switch",
+        "sensor",
+        "camera",
+        "thermostat",
+        "设备",
+        "灯",
+        "开关",
+        "温度",
+        "摄像头"
+      ],
       operations: [
         {
           op: "call_service",

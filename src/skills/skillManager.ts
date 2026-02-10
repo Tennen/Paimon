@@ -10,11 +10,14 @@ export type SkillInfo = {
   description: string;
   terminal?: boolean;
   command?: string;
+  keywords?: string[];
+  hasHandler?: boolean;
   detail?: string;
   install?: string;
   metadata?: {
     command?: string;
     install?: string;
+    keywords?: string[];
     [key: string]: any;
   };
 };
@@ -63,11 +66,15 @@ export class SkillManager {
         const frontmetadata = extractFrontmatter(content);
         const name = frontmetadata.name ?? dirName;
         const description = frontmetadata.description ?? extractDescription(content);
+        const handlerPath = path.join(skillDir, "handler.js");
+        const handlerDeclared = fs.existsSync(handlerPath);
         const info: SkillInfo = {
           name,
           description,
           terminal: frontmetadata.terminal,
           command: frontmetadata.command,
+          keywords: frontmetadata.keywords,
+          hasHandler: false,
           install: frontmetadata.install,
           metadata: frontmetadata,
           detail: content
@@ -77,12 +84,15 @@ export class SkillManager {
           this.skillMap.set(name, info);
         }
 
-        const handlerPath = path.join(skillDir, "handler.js");
-        if (fs.existsSync(handlerPath) && !this.handlers.has(name)) {
+        if (handlerDeclared && !this.handlers.has(name)) {
           try {
             const mod = require(handlerPath) as { execute?: SkillHandler };
             if (mod.execute) {
               this.handlers.set(name, mod.execute);
+              const existing = this.skillMap.get(name);
+              if (existing) {
+                existing.hasHandler = true;
+              }
             }
           } catch {
             // ignore load errors
@@ -102,6 +112,10 @@ export class SkillManager {
 
   getDetail(name: string): string {
     return this.skillMap.get(name)?.detail ?? "";
+  }
+
+  hasHandler(name: string): boolean {
+    return this.handlers.has(name);
   }
 
   async invoke(name: string, input: string, context: Record<string, unknown>): Promise<SkillInvokeResult> {
@@ -226,7 +240,14 @@ function extractDescription(content: string): string {
   return first.replace(/^#+\s*/, "");
 }
 
-function extractFrontmatter(content: string): { name?: string; description?: string; terminal?: boolean; command?: string; install?: string } {
+function extractFrontmatter(content: string): {
+  name?: string;
+  description?: string;
+  terminal?: boolean;
+  command?: string;
+  install?: string;
+  keywords?: string[];
+} {
   const lines = content.split("\n");
   if (lines[0]?.trim() !== "---") return {};
   const end = lines.indexOf("---", 1);
@@ -237,6 +258,7 @@ function extractFrontmatter(content: string): { name?: string; description?: str
   let terminal: boolean | undefined;
   let command: string | undefined;
   let install: string | undefined;
+  let keywords: string[] | undefined;
 
   for (const line of fmLines) {
     const trimmed = line.trim();
@@ -250,8 +272,30 @@ function extractFrontmatter(content: string): { name?: string; description?: str
       command = trimmed.slice("command:".length).trim();
     } else if (trimmed.startsWith("install:")) {
       install = trimmed.slice("install:".length).trim();
+    } else if (trimmed.startsWith("keywords:") || trimmed.startsWith("aliases:")) {
+      const raw = trimmed.replace(/^(keywords|aliases):/i, "").trim();
+      const list = parseFrontmatterList(raw);
+      if (list.length > 0) {
+        keywords = keywords ? Array.from(new Set([...keywords, ...list])) : list;
+      }
     }
   }
 
-  return { name, description, terminal, command, install };
+  return { name, description, terminal, command, install, keywords };
+}
+
+function parseFrontmatterList(raw: string): string[] {
+  if (!raw) return [];
+  const text = raw.trim();
+  if (text.startsWith("[") && text.endsWith("]")) {
+    const inner = text.slice(1, -1);
+    return inner
+      .split(",")
+      .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+      .filter(Boolean);
+  }
+  return text
+    .split(",")
+    .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+    .filter(Boolean);
 }

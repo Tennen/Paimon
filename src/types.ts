@@ -12,7 +12,8 @@ export type Envelope = {
 export enum ActionType {
   Respond = "respond",
   SkillCall = "skill.call",
-  ToolCall = "tool.call"
+  ToolCall = "tool.call",
+  LlmCall = "llm.call"
 }
 
 export type Action = {

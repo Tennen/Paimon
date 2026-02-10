@@ -26,13 +26,13 @@ export class OllamaLLMEngine implements LLMEngine {
     };
   }
 
-  async plan(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<Action> {
-    const result = await this.planWithMeta(text, runtimeContext, toolSchema, images);
+  async plan(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<Action> {
+    const result = await this.planWithMeta(text, runtimeContext, actionSchema, images);
     return result.action;
   }
 
-  async planWithMeta(text: string, runtimeContext: LLMRuntimeContext, toolSchema: string, images?: string[]): Promise<LLMPlanResult> {
-    const basePrompt = buildSystemPrompt(toolSchema, this.options.strictJson);
+  async planWithMeta(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<LLMPlanResult> {
+    const basePrompt = buildSystemPrompt(actionSchema, this.options.strictJson);
     let retries = 0;
     let lastRaw = "";
     const userPrompt = buildUserPrompt(text, runtimeContext, !!(images && images.length));
@@ -40,7 +40,7 @@ export class OllamaLLMEngine implements LLMEngine {
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
       const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
       const systemPrompt = attempt > 0
-        ? buildSystemPrompt(toolSchema, this.options.strictJson, extraHint)
+        ? buildSystemPrompt(actionSchema, this.options.strictJson, extraHint)
         : basePrompt;
 
       try {
