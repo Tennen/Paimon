@@ -767,6 +767,116 @@ function appendHistory(
   return next;
 }
 
+function getToolSchemaFromContext(
+  context: Partial<LLMRuntimeContext> | null
+): Array<{ name: string; operations?: Array<{ op: string }> }> {
+  const toolsContext = context?.tools_context as Record<string, unknown> | undefined;
+  const schema = toolsContext?._tools as { schema?: Array<{ name: string; operations?: Array<{ op: string }> }> } | undefined;
+  return Array.isArray(schema?.schema) ? schema!.schema! : [];
+}
+
+function getSkillNamesFromContext(context: Partial<LLMRuntimeContext> | null): string[] {
+  const skillsContext = context?.skills_context as Record<string, unknown> | undefined;
+  return skillsContext ? Object.keys(skillsContext) : [];
+}
+
+function buildPlannerErrorFollowup(
+  context: Partial<LLMRuntimeContext> | null,
+  promptText: string | undefined,
+  error: string,
+  allowedTools: string[],
+  allowedSkills: string[],
+  allowedOps?: string[]
+): { type: ActionType.LlmCall; params: LlmCallParams } {
+  const memory = typeof context?.memory === "string" ? context.memory : "";
+  const actionHistory = Array.isArray(context?.action_history) ? (context!.action_history as any) : [];
+  return buildLlmCallAction({
+    promptText: promptText ?? "",
+    memory,
+    actionHistory,
+    toolsContext: context?.tools_context ?? undefined,
+    skillsContext: context?.skills_context ?? undefined,
+    nextStepContext: {
+      kind: "planner_error",
+      error,
+      allowed_tools: allowedTools,
+      allowed_skills: allowedSkills,
+      ...(allowedOps ? { allowed_ops: allowedOps } : {})
+    }
+  });
+}
+
+function validatePlannedAction(
+  action: { type: ActionType; params: Record<string, unknown> },
+  context: Partial<LLMRuntimeContext> | null
+): {
+  overrideAction?: { type: ActionType; params: Record<string, unknown> };
+  followupAction?: { type: ActionType; params: Record<string, unknown> };
+} {
+  if (!context) return {};
+  const stepKind = (context.next_step_context as Record<string, unknown> | null)?.kind;
+  const hasSkillDetail = stepKind === "skill_detail";
+
+  if (action.type === ActionType.ToolCall) {
+    const toolsSchema = getToolSchemaFromContext(context);
+    const toolName = action.params.tool as string | undefined;
+    const allowedTools = toolsSchema.map((t) => t.name);
+    const allowedSkills = getSkillNamesFromContext(context);
+    const toolSpec = toolsSchema.find((t) => t.name === toolName);
+    if (!toolSpec) {
+      if (toolName && allowedSkills.includes(toolName)) {
+        return { overrideAction: { type: ActionType.SkillCall, params: { name: toolName, input: "" } } };
+      }
+      return {
+        followupAction: buildPlannerErrorFollowup(
+          context,
+          getLlmPrompt(action),
+          `Unknown tool: ${toolName ?? "undefined"}`,
+          allowedTools,
+          allowedSkills
+        )
+      };
+    }
+    const op = action.params.op as string | undefined;
+    const allowedOps = (toolSpec.operations ?? []).map((o) => o.op);
+    if (op && allowedOps.length > 0 && !allowedOps.includes(op)) {
+      return {
+        followupAction: buildPlannerErrorFollowup(
+          context,
+          getLlmPrompt(action),
+          `Unknown op '${op}' for tool '${toolName}'`,
+          allowedTools,
+          allowedSkills,
+          allowedOps
+        )
+      };
+    }
+  }
+
+  if (action.type === ActionType.SkillCall) {
+    const allowedSkills = getSkillNamesFromContext(context);
+    const name = action.params.name as string | undefined;
+    const input = (action.params.input as string | undefined) ?? "";
+    if (name && !allowedSkills.includes(name)) {
+      const allowedTools = getToolSchemaFromContext(context).map((t) => t.name);
+      return {
+        followupAction: buildPlannerErrorFollowup(
+          context,
+          getLlmPrompt(action),
+          `Unknown skill: ${name}`,
+          allowedTools,
+          allowedSkills
+        )
+      };
+    }
+    if (!hasSkillDetail && name && input.trim().length > 0) {
+      return { overrideAction: { type: ActionType.SkillCall, params: { name, input: "" } } };
+    }
+  }
+
+  return {};
+}
+
 function propagateMetaToFollowups(action: { type: ActionType; params: Record<string, unknown> }, meta: LLMPlanMeta): void {
   if (action.type !== ActionType.ToolCall) return;
   const params = action.params as Record<string, unknown>;

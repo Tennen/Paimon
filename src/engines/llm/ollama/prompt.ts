@@ -43,6 +43,7 @@ export function buildSystemPrompt(
           "- Prefer skill for personal productivity intent; prefer tool for device/control intent.",
           "- Only use tool/op listed in tools_context._tools.schema.",
           "- Use keywords from tools_context._tools.schema[*].keywords and skills_context.{skill}.keywords to match intent.",
+          "- If you believe a skill is needed but you have no skill detail yet, return skill.call with input omitted (input must be empty).",
           "- If no tool/skill is suitable, return respond."
         ]
       : []),
@@ -51,6 +52,7 @@ export function buildSystemPrompt(
           "Skill planning:",
           "- next_step_context contains the selected skill detail.",
           "- Decide the next action based on the skill detail and user request.",
+          "- You may use skill.call with input only in this stage (skill_detail).",
           "- If terminal skill with command, prefer tool.call to terminal.exec.",
           "- When returning tool.call, include on_success/on_failure actions."
         ]
