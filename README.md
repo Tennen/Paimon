@@ -165,20 +165,60 @@ curl -s http://localhost:3000/ingress \
 
 If you cannot expose your local service, run a small VPS bridge and connect via SSE.
 
-VPS:
+VPS (Ubuntu 21, Go build + systemd):
 
 ```bash
-export WECOM_TOKEN="YOUR_WECOM_TOKEN"
-export WECOM_BRIDGE_TOKEN="YOUR_STREAM_TOKEN"
-export PORT=8080
-node tools/wecom-bridge.js
+sudo apt-get update
+sudo apt-get install -y golang
+cd /path/to/Paimon
+go build -o wecom-bridge ./tools/wecom-bridge.go
+```
+
+Create env file (e.g. `/etc/wecom-bridge.env`):
+
+```bash
+WECOM_TOKEN=your_wecom_token
+WECOM_AES_KEY=your_encoding_aes_key
+WECOM_RECEIVE_ID=your_receive_id_optional
+WECOM_BRIDGE_TOKEN=your_stream_token
+BRIDGE_BUFFER_SIZE=200
+PORT=8080
+```
+
+Systemd unit (silent run to avoid log noise):
+
+```ini
+[Unit]
+Description=WeCom Bridge
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wecom-bridge.env
+WorkingDirectory=/path/to/Paimon
+ExecStart=/path/to/Paimon/wecom-bridge
+Restart=on-failure
+RestartSec=2
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wecom-bridge
+sudo systemctl start wecom-bridge
 ```
 
 Local (agent):
 
 ```bash
 export WECOM_BRIDGE_URL="http://your-vps-domain:8080"
-export WECOM_BRIDGE_TOKEN="YOUR_STREAM_TOKEN"
+export WECOM_BRIDGE_TOKEN="your_stream_token"
 ```
 
 ## Session memory (MEMORY.MD)

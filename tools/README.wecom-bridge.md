@@ -2,9 +2,18 @@
 
 This small service receives WeCom callbacks on the VPS and forwards messages to your local agent via SSE.
 
-## Run on VPS
+## Run on VPS (Ubuntu 21)
 
-Create a `.env` file next to `tools/wecom-bridge.js` (or run from project root):
+Build:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y golang
+cd /path/to/Paimon
+go build -o wecom-bridge ./tools/wecom-bridge.go
+```
+
+Create env file (e.g. `/etc/wecom-bridge.env`):
 
 ```
 WECOM_TOKEN=your_wecom_token
@@ -15,12 +24,39 @@ BRIDGE_BUFFER_SIZE=200
 PORT=8080
 ```
 
-Run:
+Run (foreground):
 
 ```bash
-cd /path/to/wecom-bridge
-npm install
-npm start
+/path/to/Paimon/wecom-bridge
+```
+
+Run (silent, systemd):
+
+```ini
+[Unit]
+Description=WeCom Bridge
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/wecom-bridge.env
+WorkingDirectory=/path/to/Paimon
+ExecStart=/path/to/Paimon/wecom-bridge
+Restart=on-failure
+RestartSec=2
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable wecom-bridge
+sudo systemctl start wecom-bridge
 ```
 
 ## Endpoints
