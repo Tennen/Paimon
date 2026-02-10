@@ -54,11 +54,11 @@ export class Orchestrator {
     }> = [];
     const toolsSchemaContext = buildToolsSchemaContext(this.toolRegistry);
     const skillsContext = this.skillManager.list().length > 0
-      ? buildSkillsListContext(this.skillManager)
+      ? buildSkillsContext(this.skillManager)
       : null;
     let action: { type: ActionType; params: Record<string, unknown> } | null = buildLlmCallAction({
       promptText: text,
-      memory,
+      memory: "",
       actionHistory,
       toolsContext: toolsSchemaContext,
       skillsContext
@@ -565,18 +565,6 @@ function buildSkillsContext(
   return Object.fromEntries(entries);
 }
 
-function buildSkillsListContext(
-  skillManager: SkillManager
-): Record<string, { keywords?: string[] }> | null {
-  const skills = skillManager.list();
-  if (skills.length === 0) return null;
-  const entries = skills.map((skill) => {
-    const keywords = skill.metadata?.keywords ?? skill.keywords;
-    return [skill.name, { ...(keywords ? { keywords } : {}) }] as const;
-  });
-  return Object.fromEntries(entries);
-}
-
 function buildToolsSchemaContext(registry: ToolRegistry): Record<string, Record<string, unknown>> {
   return { _tools: { schema: registry.listSchema() } };
 }
@@ -590,11 +578,15 @@ function buildLlmCallAction(params: {
   nextStepContext?: Record<string, unknown> | null;
   image?: Image | null;
 }): { type: ActionType.LlmCall; params: LlmCallParams } {
+  const history = params.actionHistory.map((entry) => ({
+    iteration: entry.iteration,
+    action: { type: entry.action.type }
+  })) as Array<{ iteration: number; action: { type: string } }>;
   const context: Partial<LLMRuntimeContext> = {
     now: new Date().toISOString(),
     timezone: "Asia/Shanghai",
     memory: params.memory.length > 0 ? params.memory : undefined,
-    action_history: params.actionHistory.length > 0 ? params.actionHistory : undefined,
+    action_history: history.length > 0 ? (history as any) : undefined,
     ...(params.toolsContext ? { tools_context: params.toolsContext } : {}),
     ...(params.skillsContext ? { skills_context: params.skillsContext } : {}),
     ...(params.nextStepContext ? { next_step_context: params.nextStepContext } : {})
