@@ -24,7 +24,7 @@ const registry = new ToolRegistry();
 loadTools(registry, { skillManager });
 const toolRouter = new ToolRouter(registry);
 const llmEngine = new OllamaLLMEngine();
-const toolSchema = buildToolSchema(registry);
+const toolSchema = buildToolSchema(registry, skillManager);
 const orchestrator = new Orchestrator(
   toolRouter,
   llmEngine,

@@ -1,6 +1,7 @@
 import { ToolRegistry } from "../../../tools/toolRegistry";
+import { SkillManager } from "../../../skills/skillManager";
 
-export function buildToolSchema(registry: ToolRegistry): string {
+export function buildToolSchema(registry: ToolRegistry, skillManager?: SkillManager): string {
   const schema = {
     actions: [
       {
@@ -25,7 +26,8 @@ export function buildToolSchema(registry: ToolRegistry): string {
         }
       }
     ],
-    tools: registry.listSchema()
+    tools: registry.listSchema(),
+    skills: skillManager?.list() || []
   };
 
   return JSON.stringify(schema, null, 2);

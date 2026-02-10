@@ -69,6 +69,8 @@ export class Orchestrator {
         next_step_context: nextStep.context,
       };
 
+      console.log(this.toolSchema);
+
       llmResult = await this.planWithMeta(
         nextStep.promptText,
         runtimeContext,
@@ -171,7 +173,7 @@ export class Orchestrator {
     const handlers: Record<ActionType, ActionHandler> = {
       [ActionType.Respond]: this.handleRespond.bind(this),
       [ActionType.ToolCall]: this.handleToolCall.bind(this),
-      [ActionType.SkillCall]: this.handleToolCall.bind(this)
+      [ActionType.SkillCall]: this.handleSkillCall.bind(this)
     };
     return handlers[type] ?? this.handleUnsupported.bind(this);
   }
@@ -189,20 +191,6 @@ export class Orchestrator {
   }
 
   private async handleToolCall(ctx: ActionContext): Promise<ActionOutcome> {
-    if (ctx.action.type === ActionType.SkillCall) {
-      const name = ctx.action.params.name as string | undefined;
-      const input = (ctx.action.params.input as string | undefined) ?? "";
-      if (name && input.trim().length === 0) {
-        const detail = this.skillManager.getDetail(name);
-        if (detail) {
-          return {
-            followupPrompt: buildSkillFollowup(ctx.text, detail),
-            historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-          };
-        }
-      }
-    }
-
     const { result, toolName } = await this.toolRouter.route(ctx.action as any, {
       memory: ctx.memory,
       sessionId: ctx.envelope.sessionId
@@ -238,6 +226,55 @@ export class Orchestrator {
       fallback: ctx.llmResult.meta.fallback
     });
     return { historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } } };
+  }
+
+  private async handleSkillCall(ctx: ActionContext): Promise<ActionOutcome> {
+    if (ctx.action.type === ActionType.SkillCall) {
+      const name = ctx.action.params.name as string | undefined;
+      const input = (ctx.action.params.input as string | undefined) ?? "";
+      if (name && input.trim().length === 0) {
+        const detail = this.skillManager.getDetail(name);
+        if (detail) {
+          return {
+            followupPrompt: buildSkillFollowup(ctx.text, detail),
+            historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
+          };
+        }
+      }
+
+      const skillName = name || "";
+      const result = await this.skillManager.invoke(skillName, input, {
+        sessionId: ctx.envelope.sessionId
+      });
+
+      if (ctx.iteration + 1 < this.maxIterations) {
+        return {
+          followupPrompt: buildToolFollowup(ctx.text, result),
+          historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
+        };
+      }
+
+      const latencyMs = Date.now() - ctx.start;
+      const ingressMessageId = (ctx.envelope.meta as Record<string, unknown> | undefined)?.ingress_message_id;
+      writeAudit({
+        requestId: ctx.envelope.requestId,
+        sessionId: ctx.envelope.sessionId,
+        source: ctx.envelope.source,
+        ingress_message_id: typeof ingressMessageId === "string" ? ingressMessageId : undefined,
+        actionType: ctx.action.type,
+        latencyMs,
+        tool: "skill",
+        llm_provider: ctx.llmResult.meta.llm_provider,
+        model: ctx.llmResult.meta.model,
+        retries: ctx.llmResult.meta.retries,
+        parse_ok: ctx.llmResult.meta.parse_ok,
+        raw_output_length: ctx.llmResult.meta.raw_output_length,
+        fallback: ctx.llmResult.meta.fallback
+      });
+      return { historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } } };
+    }
+
+    return this.handleToolCall(ctx);
   }
 
   private async handleUnsupported(ctx: ActionContext): Promise<ActionOutcome> {
