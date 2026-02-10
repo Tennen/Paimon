@@ -52,29 +52,26 @@ export class Orchestrator {
       iteration: number;
       action: { type: string; params: Record<string, unknown> };
     }> = [];
-    const toolContext = this.toolRegistry.buildRuntimeContext();
+    const toolsSchemaContext = buildToolsSchemaContext(this.toolRegistry);
     const skillsContext = this.skillManager.list().length > 0
-      ? buildSkillsContext(this.skillManager)
+      ? buildSkillsListContext(this.skillManager)
       : null;
     let action: { type: ActionType; params: Record<string, unknown> } | null = buildLlmCallAction({
       promptText: text,
       memory,
       actionHistory,
-      toolsContext: toolContext,
+      toolsContext: toolsSchemaContext,
       skillsContext
     });
     for (let i = 0; i < this.maxIterations; i += 1) {
+      console.log("action", action);
       const step = await this.processStep({
         action: action ?? { type: ActionType.LlmCall, params: {} },
         envelope,
         text,
-        memory,
         start,
         iteration: i,
-        pendingImage,
-        actionHistory,
-        toolContext,
-        skillsContext
+        pendingImage
       });
       action = step.action;
       const result = step.result;
@@ -98,24 +95,18 @@ export class Orchestrator {
     action: { type: ActionType; params: Record<string, unknown> };
     envelope: Envelope;
     text: string;
-    memory: string;
     start: number;
     iteration: number;
     pendingImage: Image | null;
-    actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }>;
-    toolContext: Record<string, Record<string, unknown>>;
-    skillsContext: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null;
   }): Promise<{
     action: { type: ActionType; params: Record<string, unknown> };
     result: ActionOutcome;
   }> {
-    const { action, envelope, text, memory, start, iteration, pendingImage, actionHistory, toolContext, skillsContext } = params;
+    const { action, envelope, text, start, iteration, pendingImage } = params;
     if (action.type === ActionType.LlmCall) {
       const llmParams = action.params as LlmCallParams;
       const promptText = llmParams.promptText ?? text;
       const runtimeContext = normalizeLlmContext(llmParams.context);
-
-      console.log(this.actionSchema);
 
       const planned = await this.planWithMeta(
         promptText,
@@ -123,21 +114,19 @@ export class Orchestrator {
         this.actionSchema,
       );
 
-      const plannedAction = attachLlmMeta(planned.action, planned.meta);
+      const plannedAction = attachLlmContext(attachLlmMeta(planned.action, planned.meta), runtimeContext, promptText);
       propagateMetaToFollowups(plannedAction, planned.meta);
+      propagateContextToFollowups(plannedAction, runtimeContext, promptText);
       const handler = this.getActionHandler(plannedAction.type);
       const outcome = await handler({
         action: plannedAction,
         llmMeta: planned.meta,
+        llmContext: runtimeContext,
         envelope,
         text,
-        memory,
         start,
         iteration,
-        pendingImage,
-        actionHistory,
-        toolContext,
-        skillsContext
+        pendingImage
       });
       return { action: plannedAction, result: outcome };
     }
@@ -153,15 +142,12 @@ export class Orchestrator {
     const outcome = await handler({
       action,
       llmMeta: getLlmMeta(action),
+      llmContext: getLlmContext(action),
       envelope,
       text,
-      memory,
       start,
       iteration,
-      pendingImage,
-      actionHistory,
-      toolContext,
-      skillsContext
+      pendingImage
     });
 
     return { action, result: outcome };
@@ -254,8 +240,9 @@ export class Orchestrator {
   }
 
   private async handleToolCall(ctx: ActionContext): Promise<ActionOutcome> {
+    const memory = getMemoryFromContext(ctx.llmContext);
     const { result, toolName } = await this.toolRouter.route(ctx.action as any, {
-      memory: ctx.memory,
+      memory,
       sessionId: ctx.envelope.sessionId
     });
     console.log("result", result);
@@ -300,6 +287,8 @@ export class Orchestrator {
   private async handleSkillPlan(ctx: ActionContext): Promise<ActionOutcome> {
     const name = ctx.action.params.name as string | undefined;
     const input = (ctx.action.params.input as string | undefined) ?? "";
+    const actionHistory = appendHistory(getActionHistoryFromContext(ctx.llmContext), ctx);
+    const memory = getMemoryFromContext(ctx.llmContext);
     if (name && input.trim().length > 0 && this.skillManager.hasHandler(name)) {
       try {
         const result = await this.skillManager.invoke(name, input, {
@@ -307,8 +296,8 @@ export class Orchestrator {
         });
         const followupAction = buildLlmCallAction({
           promptText: ctx.text,
-          memory: ctx.memory,
-          actionHistory: ctx.actionHistory,
+          memory,
+          actionHistory,
           nextStepContext: {
             kind: "skill_result",
             skill_name: name,
@@ -324,8 +313,8 @@ export class Orchestrator {
       } catch (error) {
         const followupAction = buildLlmCallAction({
           promptText: ctx.text,
-          memory: ctx.memory,
-          actionHistory: ctx.actionHistory,
+          memory,
+          actionHistory,
           nextStepContext: {
             kind: "skill_result",
             skill_name: name,
@@ -346,11 +335,12 @@ export class Orchestrator {
     if (name && skillContext?.[name]?.terminal) {
       forceTools.push("terminal");
     }
-    const toolContext = filterToolContextForSkill(detail, ctx.toolContext, forceTools);
+    const fullToolContext = this.toolRegistry.buildRuntimeContext();
+    const toolContext = filterToolContextForSkill(detail, fullToolContext, forceTools);
     const followupAction = buildLlmCallAction({
       promptText: ctx.text,
-      memory: ctx.memory,
-      actionHistory: ctx.actionHistory,
+      memory,
+      actionHistory,
       toolsContext: toolContext,
       skillsContext: skillContext,
       nextStepContext: {
@@ -369,8 +359,10 @@ export class Orchestrator {
   }
 
   private async handleToolCallFollowup(ctx: ActionContext): Promise<ActionOutcome> {
+    const memory = getMemoryFromContext(ctx.llmContext);
+    const actionHistory = getActionHistoryFromContext(ctx.llmContext);
     const { result, toolName } = await this.toolRouter.route(ctx.action as any, {
-      memory: ctx.memory,
+      memory,
       sessionId: ctx.envelope.sessionId
     });
 
@@ -398,8 +390,8 @@ export class Orchestrator {
       if (followup.type === ActionType.LlmCall) {
         const followupAction = ensureLlmCallParams(followup, {
           promptText: ctx.text,
-          memory: ctx.memory,
-          actionHistory: ctx.actionHistory,
+          memory,
+          actionHistory: appendHistory(actionHistory, ctx),
           nextStepContext: {
             kind: "tool_result",
             tool_name: toolName,
@@ -419,8 +411,8 @@ export class Orchestrator {
       const image = extractImage(result.output);
       const followupAction = buildLlmCallAction({
         promptText: ctx.text,
-        memory: ctx.memory,
-        actionHistory: ctx.actionHistory,
+        memory,
+        actionHistory: appendHistory(actionHistory, ctx),
         nextStepContext: {
           kind: "tool_result",
           tool_name: toolName,
@@ -462,15 +454,12 @@ function formatMemoryEntry(userText: string, response: Response): string {
 type ActionContext = {
   action: { type: ActionType; params: Record<string, unknown> };
   llmMeta: LLMPlanMeta | null;
+  llmContext: Partial<LLMRuntimeContext> | null;
   envelope: Envelope;
   text: string;
-  memory: string;
   start: number;
   iteration: number;
   pendingImage: Image | null;
-  actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }>;
-  toolContext: Record<string, Record<string, unknown>>;
-  skillsContext: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null;
 };
 
 type ActionOutcome = {
@@ -556,7 +545,7 @@ function applyStepResult(
     return { nextAction: null, nextPendingImage: pendingImage };
   }
 
-  const nextAction = result.followupAction ?? buildFallbackLlmCall(currentAction, result);
+  const nextAction = result.followupAction ?? buildFallbackLlmCall(currentAction, result, history);
 
   const nextPendingImage = result.followupImage ?? pendingImage;
   return { nextAction, nextPendingImage };
@@ -574,6 +563,22 @@ function buildSkillsContext(
     return [skill.name, { description: skill.description, command, terminal: skill.terminal, has_handler: skill.hasHandler, ...(keywords ? { keywords } : {}) }] as const;
   });
   return Object.fromEntries(entries);
+}
+
+function buildSkillsListContext(
+  skillManager: SkillManager
+): Record<string, { keywords?: string[] }> | null {
+  const skills = skillManager.list();
+  if (skills.length === 0) return null;
+  const entries = skills.map((skill) => {
+    const keywords = skill.metadata?.keywords ?? skill.keywords;
+    return [skill.name, { ...(keywords ? { keywords } : {}) }] as const;
+  });
+  return Object.fromEntries(entries);
+}
+
+function buildToolsSchemaContext(registry: ToolRegistry): Record<string, Record<string, unknown>> {
+  return { _tools: { schema: registry.listSchema() } };
 }
 
 function buildLlmCallAction(params: {
@@ -652,18 +657,23 @@ function mergeLlmContext(
 
 function buildFallbackLlmCall(
   currentAction: { type: ActionType; params: Record<string, unknown> },
-  result: ActionOutcome
+  result: ActionOutcome,
+  actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }>
 ): { type: ActionType.LlmCall; params: LlmCallParams } {
-  const currentParams = (currentAction.params as LlmCallParams) ?? {};
-  const mergedContext = mergeLlmContext(currentParams.context ?? null, result.followupContext ?? null);
+  const baseContext = getLlmContext(currentAction);
+  const basePrompt = getLlmPrompt(currentAction);
+  const mergedContext = mergeLlmContext(baseContext ?? null, result.followupContext ?? null);
   if (mergedContext) {
+    if (actionHistory.length > 0) {
+      mergedContext.action_history = actionHistory;
+    }
     delete mergedContext.tools_context;
     delete mergedContext.skills_context;
   }
   return {
     type: ActionType.LlmCall,
     params: {
-      promptText: result.followupPrompt ?? currentParams.promptText ?? "",
+      promptText: result.followupPrompt ?? basePrompt ?? "",
       context: mergedContext
     }
   };
@@ -703,10 +713,66 @@ function attachLlmMeta(action: { type: ActionType; params: Record<string, unknow
   };
 }
 
+function attachLlmContext(
+  action: { type: ActionType; params: Record<string, unknown> },
+  context: Partial<LLMRuntimeContext> | null,
+  promptText?: string
+): { type: ActionType; params: Record<string, unknown> } {
+  const params = action.params as Record<string, unknown>;
+  return {
+    ...action,
+    params: {
+      ...params,
+      _llm_context: context ?? null,
+      ...(promptText ? { _llm_prompt: promptText } : {})
+    }
+  };
+}
+
 function getLlmMeta(action: { type: ActionType; params: Record<string, unknown> }): LLMPlanMeta | null {
   const meta = (action.params as Record<string, unknown>)?._llm_meta;
   if (!meta || typeof meta !== "object") return null;
   return meta as LLMPlanMeta;
+}
+
+function getLlmContext(action: { type: ActionType; params: Record<string, unknown> }): Partial<LLMRuntimeContext> | null {
+  const params = action.params as Record<string, unknown>;
+  if (action.type === ActionType.LlmCall) {
+    const llmParams = action.params as LlmCallParams;
+    return llmParams.context ?? null;
+  }
+  const context = params._llm_context;
+  if (!context || typeof context !== "object") return null;
+  return context as Partial<LLMRuntimeContext>;
+}
+
+function getLlmPrompt(action: { type: ActionType; params: Record<string, unknown> }): string | undefined {
+  const params = action.params as Record<string, unknown>;
+  if (action.type === ActionType.LlmCall) {
+    const llmParams = action.params as LlmCallParams;
+    return llmParams.promptText;
+  }
+  const prompt = params._llm_prompt;
+  return typeof prompt === "string" ? prompt : undefined;
+}
+
+function getMemoryFromContext(context: Partial<LLMRuntimeContext> | null): string {
+  return typeof context?.memory === "string" ? context.memory : "";
+}
+
+function getActionHistoryFromContext(
+  context: Partial<LLMRuntimeContext> | null
+): Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> {
+  return Array.isArray(context?.action_history) ? context!.action_history as any : [];
+}
+
+function appendHistory(
+  history: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }>,
+  ctx: ActionContext
+): Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> {
+  const next = history.slice();
+  next.push({ iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } });
+  return next;
 }
 
 function propagateMetaToFollowups(action: { type: ActionType; params: Record<string, unknown> }, meta: LLMPlanMeta): void {
@@ -724,6 +790,29 @@ function propagateMetaToFollowups(action: { type: ActionType; params: Record<str
     const obj = onFailure as Record<string, unknown>;
     if (typeof obj.type === "string" && typeof obj.params === "object" && obj.params !== null) {
       params.on_failure = attachLlmMeta({ type: obj.type as ActionType, params: obj.params as Record<string, unknown> }, meta);
+    }
+  }
+}
+
+function propagateContextToFollowups(
+  action: { type: ActionType; params: Record<string, unknown> },
+  context: Partial<LLMRuntimeContext> | null,
+  promptText?: string
+): void {
+  if (action.type !== ActionType.ToolCall) return;
+  const params = action.params as Record<string, unknown>;
+  const onSuccess = params.on_success as Record<string, unknown> | undefined;
+  const onFailure = params.on_failure as Record<string, unknown> | undefined;
+  if (onSuccess && typeof onSuccess === "object") {
+    const obj = onSuccess as Record<string, unknown>;
+    if (typeof obj.type === "string" && typeof obj.params === "object" && obj.params !== null) {
+      params.on_success = attachLlmContext({ type: obj.type as ActionType, params: obj.params as Record<string, unknown> }, context, promptText);
+    }
+  }
+  if (onFailure && typeof onFailure === "object") {
+    const obj = onFailure as Record<string, unknown>;
+    if (typeof obj.type === "string" && typeof obj.params === "object" && obj.params !== null) {
+      params.on_failure = attachLlmContext({ type: obj.type as ActionType, params: obj.params as Record<string, unknown> }, context, promptText);
     }
   }
 }

@@ -4,7 +4,8 @@ export function buildActionSchema(): string {
       actions: "Only use action types listed in actions.",
       tools: "tool/op MUST exist in tools_context._tools.schema.",
       skills: "skill.call name MUST exist in skills_context keys.",
-      no_invent: "Do NOT invent actions, tools, or skills."
+      no_invent: "Do NOT invent actions, tools, or skills.",
+      llm_call_reserved: "llm.call is internal; the model should not output llm.call."
     },
     actions: [
       {
