@@ -36,6 +36,7 @@ export class OllamaLLMEngine implements LLMEngine {
     let retries = 0;
     let lastRaw = "";
     const userPrompt = buildUserPrompt(text, runtimeContext, !!(images && images.length));
+    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
       const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
@@ -44,6 +45,10 @@ export class OllamaLLMEngine implements LLMEngine {
         : basePrompt;
 
       try {
+        if (logPrompts) {
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
+        }
         lastRaw = await ollamaChat({
           baseUrl: this.options.baseUrl,
           model: this.options.model,
@@ -53,6 +58,9 @@ export class OllamaLLMEngine implements LLMEngine {
             { role: "user", content: userPrompt, images }
           ]
         });
+        if (logPrompts) {
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
+        }
 
         const action = parseAction(lastRaw);
         return {
