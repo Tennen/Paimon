@@ -1,5 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 export type SkillInfo = {
   name: string;
@@ -7,6 +11,12 @@ export type SkillInfo = {
   terminal?: boolean;
   command?: string;
   detail?: string;
+  install?: string;
+  metadata?: {
+    command?: string;
+    install?: string;
+    [key: string]: any;
+  };
 };
 
 export type SkillInvokeResult = {
@@ -50,14 +60,16 @@ export class SkillManager {
         if (!fs.existsSync(skillPath)) continue;
 
         const content = fs.readFileSync(skillPath, "utf-8");
-        const frontmatter = extractFrontmatter(content);
-        const name = frontmatter.name ?? dirName;
-        const description = frontmatter.description ?? extractDescription(content);
+        const frontmetadata = extractFrontmatter(content);
+        const name = frontmetadata.name ?? dirName;
+        const description = frontmetadata.description ?? extractDescription(content);
         const info: SkillInfo = {
           name,
           description,
-          terminal: frontmatter.terminal,
-          command: frontmatter.command,
+          terminal: frontmetadata.terminal,
+          command: frontmetadata.command,
+          install: frontmetadata.install,
+          metadata: frontmetadata,
           detail: content
         };
         if (!this.skillMap.has(name)) {
@@ -100,6 +112,111 @@ export class SkillManager {
     const result = await handler(input, context);
     return result ?? { text: "" };
   }
+
+  async installSkill(skillName: string): Promise<void> {
+    const skill = this.get(skillName);
+    if (!skill) {
+      throw new Error(`Skill ${skillName} not found`);
+    }
+
+    if (!skill.install) {
+      return;
+    }
+
+    console.log(`Installing dependencies for skill: ${skillName}`);
+
+    try {
+      // Check if the command is available
+      const command = skill.install.trim();
+
+      if (command.startsWith("brew install")) {
+        const packageName = command.replace("brew install", "").trim();
+        console.log(`Checking if ${packageName} is installed...`);
+
+        try {
+          await execAsync(`brew list --versions ${packageName}`);
+          console.log(`${packageName} is already installed`);
+        } catch {
+          console.log(`Installing ${packageName} via Homebrew...`);
+          await execAsync(command);
+          console.log(`Successfully installed ${packageName}`);
+        }
+      } else if (command.startsWith("npm install")) {
+        const packageSpec = command.replace("npm install", "").trim();
+        console.log(`Installing ${packageSpec}...`);
+        await execAsync(command);
+        console.log(`Successfully installed ${packageSpec}`);
+      } else {
+        // Custom command
+        console.log(`Running install command: ${command}`);
+        await execAsync(command);
+        console.log(`Successfully ran install command`);
+      }
+    } catch (error) {
+      console.error(`Failed to install dependencies for skill ${skillName}:`, error);
+      throw error;
+    }
+  }
+
+  async checkSkillDependencies(skillName: string): Promise<{ installed: boolean; message: string }> {
+    const skill = this.get(skillName);
+    if (!skill) {
+      throw new Error(`Skill ${skillName} not found`);
+    }
+
+    if (!skill.install) {
+      return { installed: true, message: "No dependencies to install" };
+    }
+
+    try {
+      const command = skill.install.trim();
+
+      if (command.startsWith("brew install")) {
+        const packageName = command.replace("brew install", "").trim();
+        await execAsync(`brew list --versions ${packageName}`);
+        return { installed: true, message: `${packageName} is installed` };
+      } else if (command.startsWith("npm install")) {
+        // For npm, we assume it's installed if we can run it
+        await execAsync("npm --version");
+        return { installed: true, message: "npm is available" };
+      } else {
+        // For custom commands, try to run a dry run version if possible
+        // This is a simple check - you might want more sophisticated checks
+        return { installed: true, message: "Custom command assumed available" };
+      }
+    } catch (error) {
+      return {
+        installed: false,
+        message: `Dependency not installed: ${(error as Error).message}`
+      };
+    }
+  }
+
+  async ensureSkillsInstalled(): Promise<void> {
+    const skillsToCheck = this.list();
+    const failedSkills: string[] = [];
+
+    for (const skill of skillsToCheck) {
+      if (!skill.install) continue;
+
+      const { installed, message } = await this.checkSkillDependencies(skill.name);
+      if (!installed) {
+        console.log(`Skill ${skill.name} needs installation: ${message}`);
+        try {
+          await this.installSkill(skill.name);
+        } catch (error) {
+          console.error(`Failed to install ${skill.name}:`, error);
+          failedSkills.push(skill.name);
+        }
+      } else {
+        console.log(`Skill ${skill.name} dependencies OK: ${message}`);
+      }
+    }
+
+    if (failedSkills.length > 0) {
+      console.warn(`Failed to install dependencies for: ${failedSkills.join(", ")}`);
+    }
+  }
 }
 
 function extractDescription(content: string): string {
@@ -109,7 +226,7 @@ function extractDescription(content: string): string {
   return first.replace(/^#+\s*/, "");
 }
 
-function extractFrontmatter(content: string): { name?: string; description?: string; terminal?: boolean; command?: string } {
+function extractFrontmatter(content: string): { name?: string; description?: string; terminal?: boolean; command?: string; install?: string } {
   const lines = content.split("\n");
   if (lines[0]?.trim() !== "---") return {};
   const end = lines.indexOf("---", 1);
@@ -119,7 +236,8 @@ function extractFrontmatter(content: string): { name?: string; description?: str
   let description: string | undefined;
   let terminal: boolean | undefined;
   let command: string | undefined;
-  const metadataBlock = fmLines.join("\n");
+  let install: string | undefined;
+
   for (const line of fmLines) {
     const trimmed = line.trim();
     if (trimmed.startsWith("name:")) {
@@ -128,18 +246,12 @@ function extractFrontmatter(content: string): { name?: string; description?: str
       description = trimmed.slice("description:".length).trim();
     } else if (trimmed.startsWith("terminal:")) {
       terminal = trimmed.slice("terminal:".length).trim() === "true";
+    } else if (trimmed.startsWith("command:")) {
+      command = trimmed.slice("command:".length).trim();
+    } else if (trimmed.startsWith("install:")) {
+      install = trimmed.slice("install:".length).trim();
     }
   }
-  if (!command) {
-    command = extractFirstBin(metadataBlock);
-  }
-  return { name, description, terminal, command };
-}
 
-function extractFirstBin(metadata: string): string | undefined {
-  const match = metadata.match(/\"bins\"\\s*:\\s*\\[(.*?)\\]/s);
-  if (!match) return undefined;
-  const inner = match[1];
-  const binMatch = inner.match(/\"([^\"]+)\"/);
-  return binMatch ? binMatch[1] : undefined;
+  return { name, description, terminal, command, install };
 }

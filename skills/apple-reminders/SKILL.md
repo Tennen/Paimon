@@ -2,10 +2,10 @@
 name: apple-reminders
 description: Manage Apple Reminders via the `remindctl` CLI on macOS (list, add, edit, complete, delete). Supports lists, date filters, and JSON/plain output.
 terminal: true
+install: brew install steipete/tap/remindctl
 metadata:
   {
-    "command": "remindctl",
-    "install": "brew install steipete/tap/remindctl"
+    "command": "remindctl"
   }
 ---
 

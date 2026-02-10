@@ -41,6 +41,20 @@ new WeComIngressAdapter().register(app, sessionManager);
 new WeComBridgeIngressAdapter().register(app, sessionManager);
 
 const port = Number(process.env.PORT ?? 3000);
-app.listen(port, () => {
-  console.log(`Ingress listening on :${port}`);
-});
+
+async function startServer() {
+  try {
+    console.log("Checking and installing skill dependencies...");
+    await skillManager.ensureSkillsInstalled();
+    console.log("Skill dependencies check completed");
+
+    app.listen(port, () => {
+      console.log(`Ingress listening on :${port}`);
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
