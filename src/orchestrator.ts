@@ -7,7 +7,7 @@ import { LLMEngine, LLMPlanMeta, LLMPlanResult, LLMRuntimeContext } from "./engi
 import { ActionType } from "./types";
 import { MemoryStore } from "./memory/memoryStore";
 import { SkillManager } from "./skills/skillManager";
-import { ToolRegistry } from "./tools/toolRegistry";
+import { ToolRegistry, ToolSchemaItem } from "./tools/toolRegistry";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -48,47 +48,251 @@ export class Orchestrator {
     const memory = this.memoryStore.read(envelope.sessionId);
 
     let pendingImage: Image | null = null;
-    const actionHistory: Array<{
-      iteration: number;
-      action: { type: string; params: Record<string, unknown> };
-    }> = [];
-    const toolsSchemaContext = buildToolsSchemaContext(this.toolRegistry);
-    const skillsContext = this.skillManager.list().length > 0
-      ? buildSkillsContext(this.skillManager)
-      : null;
-    let action: { type: ActionType; params: Record<string, unknown> } | null = buildLlmCallAction({
-      promptText: text,
-      memory: "",
-      actionHistory,
-      toolsContext: toolsSchemaContext,
-      skillsContext
-    });
-    for (let i = 0; i < this.maxIterations; i += 1) {
-      console.log("action", action);
-      const step = await this.processStep({
-        action: action ?? { type: ActionType.LlmCall, params: {} },
-        envelope,
-        text,
-        start,
-        iteration: i,
-        pendingImage
-      });
-      action = step.action;
-      const result = step.result;
 
-      console.log("result", result);
-
-      const advance = applyStepResult(result, action, pendingImage, actionHistory);
-      pendingImage = advance.nextPendingImage;
-      if (advance.nextAction) {
-        action = advance.nextAction;
-        continue;
+    try {
+      // Step 1: LLM Call - Determine the skill to use
+      const llmResult = await this.llmCallStep(text, memory, envelope, start);
+      if (llmResult.response) {
+        this.processed.set(envelope.requestId, llmResult.response);
+        this.appendMemory(envelope, text, llmResult.response);
+        return llmResult.response;
       }
 
-      return result.response ?? { text: "No response" };
+      // Step 2: Skill Plan - Get detailed skill plan with response templates
+      const skillPlanResult = await this.skillPlanStep(llmResult.skillName!, text, memory, envelope, start);
+      if (skillPlanResult.response) {
+        this.processed.set(envelope.requestId, skillPlanResult.response);
+        this.appendMemory(envelope, text, skillPlanResult.response);
+        return skillPlanResult.response;
+      }
+
+      // Step 3: Tool Call - Execute the planned tool action
+      const toolResult = await this.toolCallStep(skillPlanResult.toolAction!, text, memory, envelope, start);
+
+      // Step 4: Respond - Generate final response based on tool result and prepared templates
+      const response = await this.respondStep(
+        toolResult.result,
+        skillPlanResult.successResponse || "Task completed successfully",
+        skillPlanResult.failureResponse || "Tool execution failed",
+        text,
+        envelope,
+        start,
+        pendingImage
+      );
+
+      return response;
+    } catch (error) {
+      console.error("Error in handle method:", error);
+      return { text: "Processing failed due to an error" };
+    }
+  }
+
+  // New step-based processing methods
+  private async llmCallStep(
+    text: string,
+    memory: string,
+    envelope: Envelope,
+    start: number
+  ): Promise<{ response?: Response; skillName?: string }> {
+    const extraSkills = buildExtraSkillsContext(this.toolRegistry);
+    const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
+
+    const runtimeContext: LLMRuntimeContext = {
+      now: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      memory,
+      skills_context: skillsContext,
+      tools_context: buildToolsSchemaContext(this.toolRegistry)
+    };
+
+    const planned = await this.planWithMeta(text, runtimeContext, this.actionSchema);
+    const llmMeta = planned.meta;
+
+    // Write audit log
+    this.writeLlmAudit(envelope, llmMeta, ActionType.LlmCall, start);
+
+    // Check if LLM directly wants to respond
+    if (planned.action.type === ActionType.Respond) {
+      const response = { text: String((planned.action.params as Record<string, unknown>).text ?? "").trim() || "OK" };
+      this.appendMemory(envelope, text, response);
+      return { response };
     }
 
-    return { text: "LLM failed" };
+    // Check if LLM wants to use a skill
+    if (planned.action.type === ActionType.SkillCall) {
+      const skillName = (planned.action.params as Record<string, unknown>).name as string;
+      if (skillName && skillsContext?.[skillName]) {
+        return { skillName };
+      }
+      const response = { text: `Unknown skill: ${skillName ?? "undefined"}` };
+      this.appendMemory(envelope, text, response);
+      return { response };
+    }
+
+    // Fallback response
+    const response = { text: "I don't understand. Please try rephrasing your request." };
+    this.appendMemory(envelope, text, response);
+    return { response };
+  }
+
+  private async skillPlanStep(
+    skillName: string,
+    text: string,
+    memory: string,
+    envelope: Envelope,
+    start: number
+  ): Promise<{
+    response?: Response;
+    toolAction?: { type: ActionType.ToolCall; params: Record<string, unknown> };
+    successResponse?: string;
+    failureResponse?: string;
+  }> {
+    const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
+    const extraSkills = buildExtraSkillsContext(this.toolRegistry);
+    const detail = getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry);
+    const skillContext = buildSkillsContext(this.skillManager, [skillName], extraSkills);
+    const forceTools: string[] = [];
+
+    if (skillName === "homeassistant") {
+      forceTools.push("homeassistant");
+    }
+    if (skillName && skillContext?.[skillName]?.terminal) {
+      forceTools.push("terminal");
+    }
+
+    const fullToolContext = this.toolRegistry.buildRuntimeContext();
+    const toolContext = filterToolContextForSkill(detail, fullToolContext, forceTools);
+
+    const runtimeContext: LLMRuntimeContext = {
+      now: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      memory,
+      action_history: actionHistory,
+      skills_context: skillContext,
+      tools_context: toolContext,
+      next_step_context: {
+        kind: "skill_detail",
+        skill_name: skillName,
+        skill_detail: detail,
+        instruction: "Use the skill detail to plan the tool call. Include on_success and on_failure response templates."
+      }
+    };
+
+    const planned = await this.planWithMeta(text, runtimeContext, this.actionSchema);
+    const llmMeta = planned.meta;
+
+    // Write audit log
+    this.writeLlmAudit(envelope, llmMeta, ActionType.SkillCall, start);
+
+    // Validate the planned action
+    const validation = validatePlannedAction(planned.action, runtimeContext);
+    if (validation.overrideAction) {
+      planned.action = validation.overrideAction;
+    }
+    if (validation.followupAction) {
+      // This shouldn't happen in our new flow, but handle it gracefully
+      const response = { text: "Invalid skill plan. Please try again." };
+      this.appendMemory(envelope, text, response);
+      return { response };
+    }
+
+    // For ToolCall, extract response templates
+    if (planned.action.type === ActionType.ToolCall) {
+      const toolParams = planned.action.params as Record<string, unknown>;
+      const successResponse = typeof toolParams.on_success === "object"
+        ? String((toolParams.on_success as Record<string, unknown>).text ?? "").trim()
+        : undefined;
+      const failureResponse = typeof toolParams.on_failure === "object"
+        ? String((toolParams.on_failure as Record<string, unknown>).text ?? "").trim()
+        : undefined;
+
+      return {
+        toolAction: { type: ActionType.ToolCall, params: planned.action.params },
+        successResponse,
+        failureResponse: failureResponse || "Tool execution failed"
+      };
+    }
+
+    // Convert other action types to ToolCall if possible
+    if (planned.action.type === ActionType.SkillCall) {
+      const skillName = (planned.action.params as Record<string, unknown>).name as string;
+      const toolParams = {
+        tool: skillName,
+        op: "execute",
+        params: { input: "" },
+        on_success: { type: ActionType.Respond as const, params: { text: "Skill executed successfully" } },
+        on_failure: { type: ActionType.Respond as const, params: { text: "Skill execution failed" } }
+      };
+
+      return {
+        toolAction: { type: ActionType.ToolCall, params: toolParams },
+        successResponse: "Skill executed successfully",
+        failureResponse: "Skill execution failed"
+      };
+    }
+
+    // Fallback for other action types
+    const response = { text: "Invalid skill plan. Please try again." };
+    this.appendMemory(envelope, text, response);
+    return { response };
+  }
+
+  private async toolCallStep(
+    toolAction: { type: ActionType; params: Record<string, unknown> },
+    _text: string,
+    memory: string,
+    envelope: Envelope,
+    _start: number
+  ): Promise<{ result: { ok: boolean; output?: unknown; error?: string } }> {
+    const policy = await policyCheck(toolAction as any);
+    if (!policy.allowed) {
+      return { result: { ok: false, error: "Policy rejected" } };
+    }
+
+    const { result } = await this.toolRouter.route(toolAction as any, {
+      memory,
+      sessionId: envelope.sessionId
+    });
+
+    return { result };
+  }
+
+  private async respondStep(
+    toolResult: { ok: boolean; output?: unknown; error?: string },
+    successResponse: string,
+    failureResponse: string,
+    text: string,
+    envelope: Envelope,
+    _start: number,
+    pendingImage: Image | null
+  ): Promise<Response> {
+    let response: Response;
+
+    if (toolResult.ok) {
+      if (successResponse) {
+        response = { text: successResponse };
+      } else {
+        // Fallback to building response from tool result
+        response = buildToolResultResponse(toolResult);
+      }
+    } else {
+      if (failureResponse) {
+        response = { text: failureResponse };
+      } else {
+        response = { text: toolResult.error ? `Tool error: ${toolResult.error}` : "Tool failed" };
+      }
+    }
+
+    // Handle image if present
+    if (pendingImage) {
+      response.data = { ...(response.data as Record<string, unknown> | undefined), image: pendingImage };
+    }
+
+    // Cache and log
+    this.processed.set(envelope.requestId, response);
+    this.appendMemory(envelope, text, response);
+
+    return response;
   }
 
   private async processStep(params: {
@@ -114,7 +318,9 @@ export class Orchestrator {
         this.actionSchema,
       );
 
-      const plannedAction = attachLlmContext(attachLlmMeta(planned.action, planned.meta), runtimeContext, promptText);
+      let plannedAction = attachLlmContext(attachLlmMeta(planned.action, planned.meta), runtimeContext, promptText);
+      plannedAction = enforcePlannedAction(plannedAction, runtimeContext);
+      plannedAction = attachLlmContext(attachLlmMeta(plannedAction, planned.meta), runtimeContext, promptText);
       propagateMetaToFollowups(plannedAction, planned.meta);
       propagateContextToFollowups(plannedAction, runtimeContext, promptText);
       const handler = this.getActionHandler(plannedAction.type);
@@ -239,99 +445,17 @@ export class Orchestrator {
     return { response, historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } } };
   }
 
-  private async handleToolCall(ctx: ActionContext): Promise<ActionOutcome> {
-    const memory = getMemoryFromContext(ctx.llmContext);
-    const { result, toolName } = await this.toolRouter.route(ctx.action as any, {
-      memory,
-      sessionId: ctx.envelope.sessionId
-    });
-    console.log("result", result);
-
-    if (ctx.iteration + 1 < this.maxIterations) {
-      const image = extractImage(result.output);
-      return {
-        followupPrompt: buildToolFollowup(ctx.text, result.output),
-        followupImage: image ?? null,
-        historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-      };
-    }
-
-    if (ctx.llmMeta) {
-      const latencyMs = Date.now() - ctx.start;
-      const ingressMessageId = (ctx.envelope.meta as Record<string, unknown> | undefined)?.ingress_message_id;
-      const toolMeta = extractToolMeta(result.output);
-      writeAudit({
-        requestId: ctx.envelope.requestId,
-        sessionId: ctx.envelope.sessionId,
-        source: ctx.envelope.source,
-        ingress_message_id: typeof ingressMessageId === "string" ? ingressMessageId : undefined,
-        actionType: ctx.action.type,
-        latencyMs,
-        tool: toolName,
-        tool_meta: toolMeta ?? undefined,
-        llm_provider: ctx.llmMeta.llm_provider,
-        model: ctx.llmMeta.model,
-        retries: ctx.llmMeta.retries,
-        parse_ok: ctx.llmMeta.parse_ok,
-        raw_output_length: ctx.llmMeta.raw_output_length,
-        fallback: ctx.llmMeta.fallback
-      });
-    }
-    return { historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } } };
-  }
-
-  private async handleSkillCall(ctx: ActionContext): Promise<ActionOutcome> {
-    return this.handleToolCall(ctx);
-  }
-
   private async handleSkillPlan(ctx: ActionContext): Promise<ActionOutcome> {
     const name = ctx.action.params.name as string | undefined;
-    const input = (ctx.action.params.input as string | undefined) ?? "";
     const actionHistory = appendHistory(getActionHistoryFromContext(ctx.llmContext), ctx);
     const memory = getMemoryFromContext(ctx.llmContext);
-    if (name && input.trim().length > 0 && this.skillManager.hasHandler(name)) {
-      try {
-        const result = await this.skillManager.invoke(name, input, {
-          sessionId: ctx.envelope.sessionId
-        });
-        const followupAction = buildLlmCallAction({
-          promptText: ctx.text,
-          memory,
-          actionHistory,
-          nextStepContext: {
-            kind: "skill_result",
-            skill_name: name,
-            skill_ok: true,
-            skill_result: result,
-            instruction: "Use the skill result to decide the next action."
-          }
-        });
-        return {
-          followupAction,
-          historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-        };
-      } catch (error) {
-        const followupAction = buildLlmCallAction({
-          promptText: ctx.text,
-          memory,
-          actionHistory,
-          nextStepContext: {
-            kind: "skill_result",
-            skill_name: name,
-            skill_ok: false,
-            error: (error as Error).message,
-            instruction: "Handle the skill error and decide the next action."
-          }
-        });
-        return {
-          followupAction,
-          historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-        };
-      }
-    }
-    const detail = name ? this.skillManager.getDetail(name) : "";
-    const skillContext = name ? buildSkillsContext(this.skillManager, [name]) : null;
+    const extraSkills = buildExtraSkillsContext(this.toolRegistry);
+    const detail = name ? getSkillDetail(name, this.skillManager, extraSkills, this.toolRegistry) : "";
+    const skillContext = name ? buildSkillsContext(this.skillManager, [name], extraSkills) : null;
     const forceTools: string[] = [];
+    if (name === "homeassistant") {
+      forceTools.push("homeassistant");
+    }
     if (name && skillContext?.[name]?.terminal) {
       forceTools.push("terminal");
     }
@@ -360,8 +484,7 @@ export class Orchestrator {
 
   private async handleToolCallFollowup(ctx: ActionContext): Promise<ActionOutcome> {
     const memory = getMemoryFromContext(ctx.llmContext);
-    const actionHistory = getActionHistoryFromContext(ctx.llmContext);
-    const { result, toolName } = await this.toolRouter.route(ctx.action as any, {
+    const { result } = await this.toolRouter.route(ctx.action as any, {
       memory,
       sessionId: ctx.envelope.sessionId
     });
@@ -386,49 +509,23 @@ export class Orchestrator {
           historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
         };
       }
-
-      if (followup.type === ActionType.LlmCall) {
-        const followupAction = ensureLlmCallParams(followup, {
-          promptText: ctx.text,
-          memory,
-          actionHistory: appendHistory(actionHistory, ctx),
-          nextStepContext: {
-            kind: "tool_result",
-            tool_name: toolName,
-            tool_ok: result.ok,
-            tool_result: result,
-            instruction: "Use the tool result to decide the next action."
-          }
-        });
-        return {
-          followupAction,
-          historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-        };
-      }
     }
 
-    if (ctx.iteration + 1 < this.maxIterations) {
-      const image = extractImage(result.output);
-      const followupAction = buildLlmCallAction({
-        promptText: ctx.text,
-        memory,
-        actionHistory: appendHistory(actionHistory, ctx),
-        nextStepContext: {
-          kind: "tool_result",
-          tool_name: toolName,
-          tool_ok: result.ok,
-          tool_result: result,
-          instruction: "Use the tool result to decide the next action."
-        }
-      });
-      return {
-        followupImage: image ?? null,
-        followupAction,
-        historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
-      };
+    const response = buildToolResultResponse(result);
+    const toolImage = extractImage(result.output);
+    const finalImage = toolImage ?? ctx.pendingImage;
+    if (finalImage) {
+      response.data = { ...(response.data as Record<string, unknown> | undefined), image: finalImage };
     }
-
-    return { historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } } };
+    this.processed.set(ctx.envelope.requestId, response);
+    if (ctx.llmMeta) {
+      this.writeLlmAudit(ctx.envelope, ctx.llmMeta, ctx.action.type, ctx.start);
+    }
+    this.appendMemory(ctx.envelope, ctx.text, response);
+    return {
+      response,
+      historyEntry: { iteration: ctx.iteration, action: { type: ctx.action.type, params: ctx.action.params } }
+    };
   }
 
   private async handleUnsupported(ctx: ActionContext): Promise<ActionOutcome> {
@@ -517,6 +614,28 @@ function sanitizeToolResult(input: unknown): unknown {
   return out;
 }
 
+function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?: string }): Response {
+  if (!result.ok) {
+    const errorText = result.error ? `Tool error: ${result.error}` : "Tool failed";
+    return { text: errorText };
+  }
+  const output = result.output as Record<string, unknown> | string | undefined;
+  if (typeof output === "string") {
+    return { text: output.trim() || "OK" };
+  }
+  if (output && typeof output === "object") {
+    const text = output.text;
+    if (typeof text === "string" && text.trim().length > 0) {
+      return { text: text.trim() };
+    }
+  }
+  const sanitized = sanitizeToolResult(output);
+  if (sanitized !== undefined) {
+    return { text: JSON.stringify(sanitized, null, 2) };
+  }
+  return { text: "OK" };
+}
+
 function extractImage(output: unknown): Image | null {
   if (!output || typeof output !== "object") return null;
   const image = (output as { image?: unknown }).image as Image | undefined;
@@ -553,16 +672,81 @@ function applyStepResult(
 
 function buildSkillsContext(
   skillManager: SkillManager,
-  onlyNames?: string[]
+  onlyNames?: string[],
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> = {}
 ): Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null {
   const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
-  if (skills.length === 0) return null;
   const entries = skills.map((skill) => {
     const command = skill.metadata?.command ?? skill.command;
     const keywords = skill.metadata?.keywords ?? skill.keywords;
     return [skill.name, { description: skill.description, command, terminal: skill.terminal, has_handler: skill.hasHandler, ...(keywords ? { keywords } : {}) }] as const;
   });
-  return Object.fromEntries(entries);
+  const extraEntries = Object.entries(extraSkills).filter(([name]) => !onlyNames || onlyNames.includes(name));
+  const merged = Object.fromEntries([...entries, ...extraEntries]);
+  if (Object.keys(merged).length === 0) return null;
+  return merged;
+}
+
+function buildExtraSkillsContext(
+  toolRegistry: ToolRegistry
+): Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> {
+  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> = {};
+  const haSchema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
+  if (haSchema) {
+    extra.homeassistant = {
+      description: "Control and query Home Assistant devices (services, state, snapshots).",
+      command: "homeassistant",
+      terminal: false,
+      has_handler: false,
+      ...(haSchema.keywords ? { keywords: haSchema.keywords } : {})
+    };
+  }
+  return extra;
+}
+
+function getSkillDetail(
+  name: string,
+  skillManager: SkillManager,
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }>,
+  toolRegistry: ToolRegistry
+): string {
+  if (extraSkills[name] && name === "homeassistant") {
+    const schema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
+    return buildHomeAssistantSkillDetail(schema);
+  }
+  return skillManager.getDetail(name);
+}
+
+function buildHomeAssistantSkillDetail(schema?: ToolSchemaItem): string {
+  const keywordsLine = schema?.keywords ? `    \"keywords\": ${JSON.stringify(schema.keywords)}` : "";
+  const ops = (schema?.operations ?? []).map((op) => `- ${op.op}: params ${JSON.stringify(op.params)}`);
+  const operations = ops.length > 0
+    ? ["Operations", ...ops]
+    : [
+        "Operations",
+        "- call_service: params { domain, service, entity_id, data? }",
+        "- get_state: params { entity_id }",
+        "- camera_snapshot: params { entity_id }"
+      ];
+  return [
+    "---",
+    "name: homeassistant",
+    "description: Control and query Home Assistant devices (services, state, snapshots).",
+    "terminal: false",
+    "metadata:",
+    "  {",
+    "    \"tool\": \"homeassistant\"",
+    ...(keywordsLine ? [keywordsLine] : []),
+    "  }",
+    "---",
+    "",
+    "# Home Assistant Tool",
+    "",
+    "Use the `homeassistant` tool via tool.call to control devices and query state.",
+    "Refer to tools_context.homeassistant.entities for available entities.",
+    "",
+    ...operations
+  ].join("\n");
 }
 
 function buildToolsSchemaContext(registry: ToolRegistry): Record<string, Record<string, unknown>> {
@@ -778,6 +962,56 @@ function getToolSchemaFromContext(
 function getSkillNamesFromContext(context: Partial<LLMRuntimeContext> | null): string[] {
   const skillsContext = context?.skills_context as Record<string, unknown> | undefined;
   return skillsContext ? Object.keys(skillsContext) : [];
+}
+
+function enforcePlannedAction(
+  action: { type: ActionType; params: Record<string, unknown> },
+  context: LLMRuntimeContext
+): { type: ActionType; params: Record<string, unknown> } {
+  const stepKind = (context.next_step_context as Record<string, unknown> | null)?.kind;
+  const isInitial = !stepKind;
+
+  if (isInitial) {
+    if (action.type === ActionType.ToolCall) {
+      const toolName = action.params.tool as string | undefined;
+      const allowedSkills = getSkillNamesFromContext(context);
+      if (toolName && allowedSkills.includes(toolName)) {
+        return { type: ActionType.SkillCall, params: { name: toolName, input: "" } };
+      }
+      return { type: ActionType.Respond, params: { text: "Tool call is not allowed before skill selection." } };
+    }
+    if (action.type === ActionType.SkillCall) {
+      const name = action.params.name as string | undefined;
+      const allowedSkills = getSkillNamesFromContext(context);
+      if (!name || !allowedSkills.includes(name)) {
+        return { type: ActionType.Respond, params: { text: `Unknown skill: ${name ?? "undefined"}` } };
+      }
+      return { type: ActionType.SkillCall, params: { name, input: "" } };
+    }
+    if (action.type === ActionType.LlmCall) {
+      return { type: ActionType.Respond, params: { text: "Invalid action: llm.call is not allowed." } };
+    }
+    return action;
+  }
+
+  if (stepKind === "skill_detail") {
+    if (action.type !== ActionType.ToolCall) {
+      return { type: ActionType.Respond, params: { text: "Skill plan must return tool.call." } };
+    }
+    const toolsSchema = getToolSchemaFromContext(context);
+    const toolName = action.params.tool as string | undefined;
+    if (!toolName || !toolsSchema.find((tool) => tool.name === toolName)) {
+      return { type: ActionType.Respond, params: { text: `Unknown tool: ${toolName ?? "undefined"}` } };
+    }
+    const op = action.params.op as string | undefined;
+    const allowedOps = (toolsSchema.find((tool) => tool.name === toolName)?.operations ?? []).map((o) => o.op);
+    if (op && allowedOps.length > 0 && !allowedOps.includes(op)) {
+      return { type: ActionType.Respond, params: { text: `Unknown op '${op}' for tool '${toolName}'` } };
+    }
+    return action;
+  }
+
+  return action;
 }
 
 function buildPlannerErrorFollowup(
