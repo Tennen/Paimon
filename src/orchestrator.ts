@@ -44,8 +44,6 @@ export class Orchestrator {
     const text = await mockSTT(envelope.text, envelope.audioPath);
     const memory = this.memoryStore.read(envelope.sessionId);
 
-    let pendingImage: Image | null = null;
-
     try {
       // Step 1: LLM Call - Determine the skill to use
       const llmResult = await this.llmCallStep(text, memory, envelope, start);
@@ -73,8 +71,7 @@ export class Orchestrator {
         skillPlanResult.failureResponse || "Tool execution failed",
         text,
         envelope,
-        start,
-        pendingImage
+        start
       );
 
       return response;
@@ -244,8 +241,7 @@ export class Orchestrator {
     failureResponse: string,
     text: string,
     envelope: Envelope,
-    _start: number,
-    pendingImage: Image | null
+    _start: number
   ): Promise<Response> {
     let response: Response;
 
@@ -265,8 +261,9 @@ export class Orchestrator {
     }
 
     // Handle image if present
-    if (pendingImage) {
-      response.data = { ...(response.data as Record<string, unknown> | undefined), image: pendingImage };
+    const output = toolResult.output as { image?: Image };
+    if (output?.image) {
+      response.data = { ...(response.data as Record<string, unknown> | undefined), image: output.image };
     }
 
     // Cache and log
