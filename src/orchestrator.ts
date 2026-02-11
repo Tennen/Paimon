@@ -97,9 +97,10 @@ export class Orchestrator {
     const runtimeContext: LLMRuntimeContext = {
       now: new Date().toISOString(),
       timezone: "Asia/Shanghai",
-      memory,
+      // small model may confuse with memory, so we pass an empty string
+      // memory,
       skills_context: skillsContext,
-      tools_context: buildToolsSchemaContext(this.toolRegistry),
+      // tools_context: buildToolsSchemaContext(this.toolRegistry),
       next_step_context: {
         kind: "skill_selection"
       }
@@ -145,7 +146,7 @@ export class Orchestrator {
     successResponse?: string;
     failureResponse?: string;
   }> {
-    const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
+    // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
     const detail = getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry);
     const skillContext = buildSkillsContext(this.skillManager, [skillName], extraSkills);
@@ -164,9 +165,10 @@ export class Orchestrator {
     const runtimeContext: LLMRuntimeContext = {
       now: new Date().toISOString(),
       timezone: "Asia/Shanghai",
-      memory,
-      action_history: actionHistory,
-      skills_context: skillContext,
+      // small model may confuse with extra context
+      // memory,
+      // action_history: actionHistory,
+      // skills_context: skillContext,
       tools_context: toolContext,
       next_step_context: {
         kind: "skill_detail",
@@ -217,6 +219,8 @@ export class Orchestrator {
       return { result: { ok: false, error: "Policy rejected" } };
     }
 
+    console.log("tool execution", toolExecution);
+
     const { result } = await this.toolRouter.route(
       toolExecution.tool,
       {
@@ -228,6 +232,8 @@ export class Orchestrator {
         sessionId: envelope.sessionId
       }
     );
+
+    console.log("tool result", result);
 
     return { result };
   }
