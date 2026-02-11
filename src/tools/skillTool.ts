@@ -1,4 +1,4 @@
-import { Action, ActionType, ToolResult } from "../types";
+import { ToolResult } from "../types";
 import { SkillManager } from "../skills/skillManager";
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
 
@@ -9,13 +9,13 @@ export class SkillTool {
     this.manager = manager;
   }
 
-  async execute(action: Action, context: Record<string, unknown>): Promise<ToolResult> {
-    if (action.type !== ActionType.SkillCall) {
-      return { ok: false, error: `Unsupported action: ${action.type}` };
+  async execute(op: string, args: Record<string, unknown>, context: Record<string, unknown>): Promise<ToolResult> {
+    if (op !== "execute") {
+      return { ok: false, error: `Unsupported operation: ${op}` };
     }
 
-    const name = action.params.name as string | undefined;
-    const input = (action.params.input as string | undefined) ?? "";
+    const name = args.name as string | undefined;
+    const input = (args.input as string | undefined) ?? "";
 
     if (!name) {
       return { ok: false, error: "Missing skill name" };
@@ -36,6 +36,6 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
 
   registry.register({
     name: "skill",
-    execute: (action, context) => tool.execute(action, context),
+    execute: (op, args, context) => tool.execute(op, args, context),
   });
 }

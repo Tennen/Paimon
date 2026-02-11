@@ -1,4 +1,4 @@
-import { Action, ActionType, ToolResult } from "./types";
+import { ToolResult } from "./types";
 import { ToolRegistry } from "./tools/toolRegistry";
 
 export class ToolRouter {
@@ -8,33 +8,23 @@ export class ToolRouter {
     this.registry = registry;
   }
 
-  async route(action: Action, context: Record<string, unknown>): Promise<{ result: ToolResult; toolName: string }> {
-    if (action.type === ActionType.ToolCall) {
-      const name = action.params.tool as string | undefined;
-      if (name) {
-        const handler = this.registry.listHandlers().find((h) => h.name === name);
-        if (handler) {
-          const result = await handler.execute(action, context);
-          return { result, toolName: handler.name };
-        }
-      }
-    }
-
-    if (action.type === ActionType.SkillCall) {
-      const handler = this.registry.listHandlers().find((h) => h.name === "skill");
-      if (handler) {
-        const result = await handler.execute(action, context);
-        return { result, toolName: handler.name };
-      }
+  async route(
+    toolName: string,
+    execution: { op: string; args: Record<string, unknown> },
+    context: { memory: string; sessionId: string }
+  ): Promise<{ result: ToolResult }> {
+    const handler = this.registry.listHandlers().find((h) => h.name === toolName);
+    if (handler) {
+      const result = await handler.execute(execution.op, execution.args, context);
+      return { result };
     }
 
     const result: ToolResult = {
       ok: true,
       output: {
-        text: `No matching tool for action: ${action.type}`,
-        unmatched_action: action
+        text: `No matching tool for: ${toolName}`
       }
     };
-    return { result, toolName: "unmatched" };
+    return { result };
   }
 }

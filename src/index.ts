@@ -4,7 +4,6 @@ import { SessionManager } from "./sessionManager";
 import { Orchestrator } from "./orchestrator";
 import { ToolRouter } from "./toolRouter";
 import { OllamaLLMEngine } from "./engines/llm/ollama";
-import { buildActionSchema } from "./engines/llm/ollama/schema";
 import { HttpIngressAdapter } from "./ingress/http";
 import { HANotifyIngressAdapter } from "./ingress/haNotify";
 import { WeComIngressAdapter } from "./ingress/wecom";
@@ -24,11 +23,9 @@ const registry = new ToolRegistry();
 loadTools(registry, { skillManager });
 const toolRouter = new ToolRouter(registry);
 const llmEngine = new OllamaLLMEngine();
-const actionSchema = buildActionSchema();
 const orchestrator = new Orchestrator(
   toolRouter,
   llmEngine,
-  actionSchema,
   memoryStore,
   skillManager,
   registry

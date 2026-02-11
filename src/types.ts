@@ -9,17 +9,24 @@ export type Envelope = {
   receivedAt: string;
 };
 
-export enum ActionType {
-  Respond = "respond",
-  SkillCall = "skill.call",
-  ToolCall = "tool.call",
-  LlmCall = "llm.call"
-}
+export type SkillSelectionResult = {
+  decision: "respond" | "use_skill";
+  skill_name?: string;
+  response_text?: string;
+};
 
-export type Action = {
-  type: ActionType;
-  rawType?: string;
-  params: Record<string, unknown>;
+export type SkillPlanningResult = {
+  tool: string;
+  op: string;
+  args: Record<string, unknown>;
+  success_response: string;
+  failure_response: string;
+};
+
+export type ToolExecution = {
+  tool: string;
+  op: string;
+  args: Record<string, unknown>;
 };
 
 export type Image = {

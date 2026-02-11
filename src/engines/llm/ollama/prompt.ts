@@ -3,7 +3,6 @@ import { LLMRuntimeContext } from "../llm";
 export enum PromptMode {
   SkillSelection = "skill_selection",
   SkillPlanning = "skill_planning",
-  PlannerError = "planner_error",
 }
 
 function detectPromptMode(runtimeContext?: LLMRuntimeContext): PromptMode {
@@ -11,33 +10,25 @@ function detectPromptMode(runtimeContext?: LLMRuntimeContext): PromptMode {
     ? (runtimeContext.next_step_context as Record<string, unknown>).kind
     : null;
   if (kind === "skill_detail") return PromptMode.SkillPlanning;
-  if (kind === "planner_error") return PromptMode.PlannerError;
   if (kind === "skill_selection") return PromptMode.SkillSelection;
   return PromptMode.SkillSelection;
 }
 
 export function buildSystemPrompt(
-  actionSchema: string,
+  mode: PromptMode,
   strictJson: boolean,
-  extraHint?: string,
-  runtimeContext?: LLMRuntimeContext
+  extraHint?: string
 ): string {
   const strictRule = strictJson
     ? "You MUST output a single JSON object only. No markdown, no code fences, no explanations."
     : "Output a single JSON object only.";
 
   const hint = extraHint ? `\n${extraHint}` : "";
-  const mode = detectPromptMode(runtimeContext);
 
   const baseRules = [
     "You are a smart task assistant that helps users accomplish their goals.",
     strictRule,
     "Detect the user's language and respond in the same language.",
-    "",
-    "Output rules:",
-    "- Return exactly one action object with fields {\"type\",\"params\"}.",
-    "- Follow the Action schema constraints; do not invent actions, tools, or skills.",
-    "- Never output llm.call.",
   ];
 
   const modeSpecificInstructions =
@@ -45,64 +36,46 @@ export function buildSystemPrompt(
       ? getSkillSelectionInstructions()
     : mode === PromptMode.SkillPlanning
       ? getSkillPlanningInstructions()
-    : mode === PromptMode.PlannerError
-      ? getPlannerErrorInstructions()
       : getSkillSelectionInstructions();
 
-  return [...baseRules, ...modeSpecificInstructions, "", "Action schema:", actionSchema].join("\n") + hint;
+  return [...baseRules, ...modeSpecificInstructions].join("\n") + hint;
 }
 
 function getSkillSelectionInstructions(): string[] {
   return [
     "=== Step 1: Skill Selection ===",
-    "Your task is to analyze the user's request and decide which skill to use.",
-    "- Review skills_context: Each skill has a description, keywords, and capabilities.",
-    "- Review tools_context._tools.schema: Available tools for direct control.",
-    "- Decision making:",
-      "* Use 'respond' if the request is conversational or doesn't need any tool/skill.",
-      "* Use 'skill_call' with skill name if you need to use a specific skill's functionality.",
-      "* Use 'tool_call' ONLY if you need to control a device directly (e.g., lights, switches).",
-    "- Important: Do not use tool_call for skill operations. Skills handle the complexity.",
-    "- Match user intent using skill keywords and descriptions.",
+    "Your task is to analyze the user's request and decide how to respond.",
+    "",
+    "Review skills_context for available skills.",
+    "",
     "Output format:",
-      "* For skill: {\"type\":\"skill_call\",\"params\":{\"name\":\"skill_name\"}}",
-      "* For direct response: {\"type\":\"respond\",\"params\":{\"text\":\"message\"}}",
+    '  {"decision":"respond","response_text":"your response here"}',
+    '  OR',
+    '  {"decision":"use_skill","skill_name":"skill_name"}',
+    "",
+    "Decision logic:",
+    "- If request is conversational or doesn't need tools, use decision='respond'",
+    "- If request requires a skill, use decision='use_skill' with skill_name from skills_context",
   ];
 }
 
 function getSkillPlanningInstructions(): string[] {
   return [
     "=== Step 2: Skill Planning ===",
-    "You have selected a skill and now need to plan the specific tool execution.",
-    "- next_step_context.skill_detail contains the full skill documentation.",
-    "- next_step_context.tools_context contains only relevant tools for this skill.",
-    "- Your task:",
-      "* Analyze the skill detail and user request.",
-      "* Plan exactly ONE tool call that accomplishes the task.",
-      "* Include on_success and on_failure response templates.",
-    "- Tool call structure:",
-      "{\"type\":\"tool_call\",\"params\":{\"tool\":\"tool_name\",\"op\":\"operation\",params:{...},\"on_success\":{\"type\":\"respond\",\"params\":{\"text\":\"success message\"}},\"on_failure\":{\"type\":\"respond\",\"params\":{\"text\":\"error message\"}}}}",
-    "- Requirements:",
-      "* on_success/on_failure MUST be respond type with appropriate text.",
-      "* Text should be specific to the operation, not generic.",
-      "* Include relevant details from tool result in success message if helpful.",
-    "- Use only tools listed in next_step_context.tools_context.",
-  ];
-}
-
-function getPlannerErrorInstructions(): string[] {
-  return [
-    "=== Planner Error Recovery ===",
-    "A previous action was invalid. Review the error and choose a correct action.",
-    "- next_step_context.error: The error message describing what went wrong.",
-    "- next_step_context.allowed_tools: List of valid tool names.",
-    "- next_step_context.allowed_skills: List of valid skill names.",
-    "- next_step_context.allowed_ops (if present): Valid operations for the selected tool.",
-    "- Your task:",
-      "* Choose a valid tool/skill from the allowed lists.",
-      "* If choosing a tool, use an allowed operation.",
-      "* Provide a correct action that resolves the error.",
-    "- Output: Return a valid action object matching Action schema.",
+    "You have selected a skill. Plan the tool execution.",
+    "",
+    "Output format:",
+    '{',
+    '  "tool": "tool_name",',
+    '  "op": "operation",',
+    '  "args": {...},',
+    '  "success_response": "success message",',
+    '  "failure_response": "error message"',
+    '}',
+    "",
+    "Requirements:",
+    "- Use only tools in tools_context",
+    "- success_response/failure_response should be specific to the operation",
   ];
 }
 

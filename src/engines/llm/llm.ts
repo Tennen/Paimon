@@ -1,4 +1,4 @@
-import { Action } from "../../types";
+import { SkillSelectionResult, SkillPlanningResult } from "../../types";
 
 export type LLMRuntimeContext = {
   now: string;
@@ -23,10 +23,11 @@ export type LLMPlanMeta = {
 };
 
 export interface LLMEngine {
-  plan(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<Action>;
+  selectSkill(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult>;
+  planToolExecution(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillPlanningResult>;
 }
 
 export type LLMPlanResult = {
-  action: Action;
+  action: unknown;
   meta: LLMPlanMeta;
 };

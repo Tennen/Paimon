@@ -1,7 +1,7 @@
 import { jsonrepair } from "jsonrepair";
-import { Action, ActionType } from "../types";
+import { SkillSelectionResult, SkillPlanningResult } from "../types";
 
-export function parseActionFromLLM(rawText: string): Action {
+export function parseSkillSelectionResult(rawText: string): SkillSelectionResult {
   console.log("rawText", rawText);
   const trimmed = rawText.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
@@ -25,22 +25,59 @@ export function parseActionFromLLM(rawText: string): Action {
   }
 
   const obj = parsed as Record<string, unknown>;
-  if (typeof obj.type !== "string" || typeof obj.params !== "object" || obj.params === null) {
-    throw new Error("LLM output missing type/params");
+  const decision = obj.decision;
+
+  if (decision !== "respond" && decision !== "use_skill") {
+    throw new Error(`Invalid decision: ${decision}`);
   }
 
-  const type = assertActionType(obj.type);
-  const params = obj.params as Record<string, unknown>;
-
   return {
-    type,
-    params
+    decision: decision as "respond" | "use_skill",
+    skill_name: typeof obj.skill_name === "string" ? obj.skill_name : undefined,
+    response_text: typeof obj.response_text === "string" ? obj.response_text : undefined,
   };
 }
 
-function assertActionType(input: string): ActionType {
-  if (Object.values(ActionType).includes(input as ActionType)) {
-    return input as ActionType;
+export function parseSkillPlanningResult(rawText: string): SkillPlanningResult {
+  console.log("rawText", rawText);
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    throw new Error("LLM output is not a single JSON object");
   }
-  throw new Error(`Unsupported action type: ${input}`);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    try {
+      const repaired = jsonrepair(trimmed);
+      parsed = JSON.parse(repaired);
+    } catch {
+      throw new Error("LLM output JSON.parse failed");
+    }
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("LLM output is not a JSON object");
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  if (typeof obj.tool !== "string" || typeof obj.op !== "string") {
+    throw new Error("Missing tool/op in LLM output");
+  }
+  if (typeof obj.args !== "object" || obj.args === null) {
+    throw new Error("Missing args in LLM output");
+  }
+  if (typeof obj.success_response !== "string") {
+    throw new Error("Missing success_response in LLM output");
+  }
+
+  return {
+    tool: obj.tool,
+    op: obj.op,
+    args: obj.args as Record<string, unknown>,
+    success_response: obj.success_response,
+    failure_response: typeof obj.failure_response === "string" ? obj.failure_response : "Tool execution failed",
+  };
 }

@@ -1,4 +1,4 @@
-import { Action, ActionType, ToolResult } from "../types";
+import { ToolResult } from "../types";
 import { HAClient } from "../ha/client";
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
 import { HAEntityRegistry } from "../ha/entityRegistry";
@@ -14,19 +14,7 @@ export class HomeAssistantTool {
     this.isEntityAllowed = isEntityAllowed;
   }
 
-  async execute(action: Action): Promise<ToolResult> {
-    if (action.type !== ActionType.ToolCall) {
-      return { ok: false, error: `Unsupported action: ${action.type}` };
-    }
-
-    const toolName = action.params.tool as string | undefined;
-    if (toolName !== "homeassistant") {
-      return { ok: false, error: `Unsupported tool: ${toolName ?? "unknown"}` };
-    }
-
-    const op = action.params.op as string | undefined;
-    const args = (action.params.args as Record<string, unknown>) ?? {};
-
+  async execute(op: string, args: Record<string, unknown>): Promise<ToolResult> {
     if (op === "call_service") {
       const domain = args.domain as string;
       const service = args.service as string;
@@ -114,7 +102,7 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
   registry.register(
     {
       name: "homeassistant",
-      execute: (action) => tool.execute(action),
+      execute: (op, args, _context) => tool.execute(op, args),
       runtimeContext: () => ({ entities: haRegistry.getEntityInfo() })
     },
     {

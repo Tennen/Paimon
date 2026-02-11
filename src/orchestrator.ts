@@ -1,19 +1,18 @@
-import { Envelope, Image, Response } from "./types";
+import { Envelope, Image, Response, ToolExecution } from "./types";
 import { mockSTT } from "./mockSTT";
 import { policyCheck } from "./policy";
 import { ToolRouter } from "./toolRouter";
 import { writeAudit } from "./auditLogger";
-import { LLMEngine, LLMPlanMeta, LLMPlanResult, LLMRuntimeContext } from "./engines/llm/llm";
-import { ActionType } from "./types";
+import { LLMRuntimeContext, LLMPlanMeta } from "./engines/llm/llm";
 import { MemoryStore } from "./memory/memoryStore";
 import { SkillManager } from "./skills/skillManager";
 import { ToolRegistry, ToolSchemaItem } from "./tools/toolRegistry";
+import { LLMEngine } from "./engines/llm/llm";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
   private readonly toolRouter: ToolRouter;
   private readonly llmEngine: LLMEngine;
-  private readonly actionSchema: string;
   private readonly memoryStore: MemoryStore;
   private readonly skillManager: SkillManager;
   private readonly maxIterations: number;
@@ -22,14 +21,12 @@ export class Orchestrator {
   constructor(
     toolRouter: ToolRouter,
     llmEngine: LLMEngine,
-    actionSchema: string,
     memoryStore: MemoryStore,
     skillManager: SkillManager,
     toolRegistry: ToolRegistry
   ) {
     this.toolRouter = toolRouter;
     this.llmEngine = llmEngine;
-    this.actionSchema = actionSchema;
     this.memoryStore = memoryStore;
     this.skillManager = skillManager;
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
@@ -67,7 +64,7 @@ export class Orchestrator {
       }
 
       // Step 3: Tool Call - Execute the planned tool action
-      const toolResult = await this.toolCallStep(skillPlanResult.toolAction!, text, memory, envelope, start);
+      const toolResult = await this.toolCallStep(skillPlanResult.toolExecution!, text, memory, envelope, start);
 
       // Step 4: Respond - Generate final response based on tool result and prepared templates
       const response = await this.respondStep(
@@ -108,32 +105,30 @@ export class Orchestrator {
       }
     };
 
-    const planned = await this.planWithMeta(text, runtimeContext, this.actionSchema);
-    const llmMeta = planned.meta;
+    const result = await this.llmEngine.selectSkill(text, runtimeContext);
 
     // Write audit log
-    this.writeLlmAudit(envelope, llmMeta, ActionType.LlmCall, start);
+    const llmMeta: LLMPlanMeta = {
+      llm_provider: "ollama",
+      model: process.env.OLLAMA_MODEL ?? "unknown",
+      retries: 0,
+      parse_ok: true,
+      raw_output_length: 0,
+      fallback: false
+    };
+    this.writeLlmAudit(envelope, llmMeta, "llm_call", start);
 
-    // Check if LLM directly wants to respond
-    if (planned.action.type === ActionType.Respond) {
-      const response = { text: String((planned.action.params as Record<string, unknown>).text ?? "").trim() || "OK" };
+    if (result.decision === "respond") {
+      const response = { text: result.response_text || "OK" };
       this.appendMemory(envelope, text, response);
       return { response };
     }
 
-    // Check if LLM wants to use a skill
-    if (planned.action.type === ActionType.SkillCall) {
-      const skillName = (planned.action.params as Record<string, unknown>).name as string;
-      if (skillName && skillsContext?.[skillName]) {
-        return { skillName };
-      }
-      const response = { text: `Unknown skill: ${skillName ?? "undefined"}` };
-      this.appendMemory(envelope, text, response);
-      return { response };
+    if (result.decision === "use_skill" && result.skill_name) {
+      return { skillName: result.skill_name };
     }
 
-    // Fallback response
-    const response = { text: "I don't understand. Please try rephrasing your request." };
+    const response = { text: "I don't understand. Please try rephrasing." };
     this.appendMemory(envelope, text, response);
     return { response };
   }
@@ -146,7 +141,7 @@ export class Orchestrator {
     start: number
   ): Promise<{
     response?: Response;
-    toolAction?: { type: ActionType.ToolCall; params: Record<string, unknown> };
+    toolExecution?: ToolExecution;
     successResponse?: string;
     failureResponse?: string;
   }> {
@@ -177,85 +172,62 @@ export class Orchestrator {
         kind: "skill_detail",
         skill_name: skillName,
         skill_detail: detail,
-        instruction: "Plan the tool call execution with on_success and on_failure response templates."
+        instruction: "Plan the tool call execution with success and failure response templates."
       }
     };
 
-    const planned = await this.planWithMeta(text, runtimeContext, this.actionSchema);
-    const llmMeta = planned.meta;
+    const plan = await this.llmEngine.planToolExecution(text, runtimeContext);
 
     // Write audit log
-    this.writeLlmAudit(envelope, llmMeta, ActionType.SkillCall, start);
+    const llmMeta: LLMPlanMeta = {
+      llm_provider: "ollama",
+      model: process.env.OLLAMA_MODEL ?? "unknown",
+      retries: 0,
+      parse_ok: true,
+      raw_output_length: 0,
+      fallback: false
+    };
+    this.writeLlmAudit(envelope, llmMeta, "tool_call", start);
 
-    // Validate the planned action
-    const validation = validatePlannedAction(planned.action, runtimeContext);
-    if (validation.overrideAction) {
-      planned.action = validation.overrideAction;
-    }
-    if (validation.followupAction) {
-      // This shouldn't happen in our new flow, but handle it gracefully
-      const response = { text: "Invalid skill plan. Please try again." };
-      this.appendMemory(envelope, text, response);
-      return { response };
-    }
-
-    // For ToolCall, extract response templates
-    if (planned.action.type === ActionType.ToolCall) {
-      const toolParams = planned.action.params as Record<string, unknown>;
-      const successResponse = typeof toolParams.on_success === "object"
-        ? String((toolParams.on_success as Record<string, unknown>).text ?? "").trim()
-        : undefined;
-      const failureResponse = typeof toolParams.on_failure === "object"
-        ? String((toolParams.on_failure as Record<string, unknown>).text ?? "").trim()
-        : undefined;
-
-      return {
-        toolAction: { type: ActionType.ToolCall, params: planned.action.params },
-        successResponse,
-        failureResponse: failureResponse || "Tool execution failed"
-      };
-    }
-
-    // Convert other action types to ToolCall if possible
-    if (planned.action.type === ActionType.SkillCall) {
-      const skillName = (planned.action.params as Record<string, unknown>).name as string;
-      const toolParams = {
-        tool: skillName,
-        op: "execute",
-        params: { input: "" },
-        on_success: { type: ActionType.Respond as const, params: { text: "Skill executed successfully" } },
-        on_failure: { type: ActionType.Respond as const, params: { text: "Skill execution failed" } }
-      };
-
-      return {
-        toolAction: { type: ActionType.ToolCall, params: toolParams },
-        successResponse: "Skill executed successfully",
-        failureResponse: "Skill execution failed"
-      };
-    }
-
-    // Fallback for other action types
-    const response = { text: "Invalid skill plan. Please try again." };
-    this.appendMemory(envelope, text, response);
-    return { response };
+    return {
+      toolExecution: {
+        tool: plan.tool,
+        op: plan.op,
+        args: plan.args
+      },
+      successResponse: plan.success_response,
+      failureResponse: plan.failure_response
+    };
   }
 
   private async toolCallStep(
-    toolAction: { type: ActionType; params: Record<string, unknown> },
+    toolExecution: ToolExecution,
     _text: string,
     memory: string,
     envelope: Envelope,
     _start: number
   ): Promise<{ result: { ok: boolean; output?: unknown; error?: string } }> {
-    const policy = await policyCheck(toolAction as any);
+    // Policy check logic
+    const policy = await policyCheck({
+      type: "tool_call",
+      params: toolExecution
+    });
+
     if (!policy.allowed) {
       return { result: { ok: false, error: "Policy rejected" } };
     }
 
-    const { result } = await this.toolRouter.route(toolAction as any, {
-      memory,
-      sessionId: envelope.sessionId
-    });
+    const { result } = await this.toolRouter.route(
+      toolExecution.tool,
+      {
+        op: toolExecution.op,
+        args: toolExecution.args
+      },
+      {
+        memory,
+        sessionId: envelope.sessionId
+      }
+    );
 
     return { result };
   }
@@ -298,34 +270,7 @@ export class Orchestrator {
     return response;
   }
 
-  private async planWithMeta(
-    text: string,
-    runtimeContext: LLMRuntimeContext,
-    actionSchema: string,
-  ): Promise<LLMPlanResult> {
-    const engine = this.llmEngine as LLMEngine & {
-      planWithMeta?: (t: string, rc: LLMRuntimeContext, actionSchema: string, imgs?: string[]) => Promise<LLMPlanResult>;
-    };
-
-    if (engine.planWithMeta) {
-      return engine.planWithMeta(text, runtimeContext, actionSchema);
-    }
-
-    const action = await engine.plan(text, runtimeContext, actionSchema);
-    return {
-      action,
-      meta: {
-        llm_provider: "ollama",
-        model: process.env.OLLAMA_MODEL ?? "unknown",
-        retries: 0,
-        parse_ok: true,
-        raw_output_length: 0,
-        fallback: false
-      }
-    };
-  }
-
-  private writeLlmAudit(envelope: Envelope, llmMeta: LLMPlanMeta, actionType: ActionType, start: number): void {
+  private writeLlmAudit(envelope: Envelope, llmMeta: LLMPlanMeta, actionType: string, start: number): void {
     const latencyMs = Date.now() - start;
     const ingressMessageId = (envelope.meta as Record<string, unknown> | undefined)?.ingress_message_id;
     writeAudit({
@@ -333,7 +278,7 @@ export class Orchestrator {
       sessionId: envelope.sessionId,
       source: envelope.source,
       ingress_message_id: typeof ingressMessageId === "string" ? ingressMessageId : undefined,
-      actionType,
+      actionType: actionType as any,
       latencyMs,
       tool: "llm",
       llm_provider: llmMeta.llm_provider,
@@ -356,13 +301,6 @@ function formatMemoryEntry(userText: string, response: Response): string {
   const assistantText = response.text ?? "";
   return `- ${now}\\n  - user: ${userText}\\n  - assistant: ${assistantText}`;
 }
-
-type LlmCallParams = {
-  promptText?: string;
-  context?: Partial<LLMRuntimeContext> | null;
-  image?: Image | null;
-  _llm_meta?: LLMPlanMeta;
-};
 
 function sanitizeToolResult(input: unknown): unknown {
   if (!input || typeof input !== "object") return input;
@@ -491,39 +429,6 @@ function buildToolsSchemaContext(registry: ToolRegistry): Record<string, Record<
   return { _tools: { schema: registry.listSchema() } };
 }
 
-function buildLlmCallAction(params: {
-  promptText: string;
-  memory: string;
-  actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }>;
-  toolsContext?: Record<string, Record<string, unknown>> | null;
-  skillsContext?: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null;
-  nextStepContext?: Record<string, unknown> | null;
-  image?: Image | null;
-}): { type: ActionType.LlmCall; params: LlmCallParams } {
-  const history = params.actionHistory.map((entry) => ({
-    iteration: entry.iteration,
-    action: { type: entry.action.type }
-  })) as Array<{ iteration: number; action: { type: string } }>;
-  const context: Partial<LLMRuntimeContext> = {
-    now: new Date().toISOString(),
-    timezone: "Asia/Shanghai",
-    memory: params.memory.length > 0 ? params.memory : undefined,
-    action_history: history.length > 0 ? (history as any) : undefined,
-    ...(params.toolsContext ? { tools_context: params.toolsContext } : {}),
-    ...(params.skillsContext ? { skills_context: params.skillsContext } : {}),
-    ...(params.nextStepContext ? { next_step_context: params.nextStepContext } : {})
-  };
-
-  return {
-    type: ActionType.LlmCall,
-    params: {
-      promptText: params.promptText,
-      context,
-      ...(params.image ? { image: params.image } : {})
-    }
-  };
-}
-
 function filterToolContextForSkill(
   detail: string,
   toolContext: Record<string, Record<string, unknown>>,
@@ -548,124 +453,4 @@ function filterToolContextForSkill(
 
   if (Object.keys(result).length === 0) return null;
   return result;
-}
-
-function getLlmPrompt(action: { type: ActionType; params: Record<string, unknown> }): string | undefined {
-  const params = action.params as Record<string, unknown>;
-  if (action.type === ActionType.LlmCall) {
-    const llmParams = action.params as LlmCallParams;
-    return llmParams.promptText;
-  }
-  const prompt = params._llm_prompt;
-  return typeof prompt === "string" ? prompt : undefined;
-}
-
-function getToolSchemaFromContext(
-  context: Partial<LLMRuntimeContext> | null
-): Array<{ name: string; operations?: Array<{ op: string }> }> {
-  const toolsContext = context?.tools_context as Record<string, unknown> | undefined;
-  const schema = toolsContext?._tools as { schema?: Array<{ name: string; operations?: Array<{ op: string }> }> } | undefined;
-  return Array.isArray(schema?.schema) ? schema!.schema! : [];
-}
-
-function getSkillNamesFromContext(context: Partial<LLMRuntimeContext> | null): string[] {
-  const skillsContext = context?.skills_context as Record<string, unknown> | undefined;
-  return skillsContext ? Object.keys(skillsContext) : [];
-}
-
-function buildPlannerErrorFollowup(
-  context: Partial<LLMRuntimeContext> | null,
-  promptText: string | undefined,
-  error: string,
-  allowedTools: string[],
-  allowedSkills: string[],
-  allowedOps?: string[]
-): { type: ActionType.LlmCall; params: LlmCallParams } {
-  const memory = typeof context?.memory === "string" ? context.memory : "";
-  const actionHistory = Array.isArray(context?.action_history) ? (context!.action_history as any) : [];
-  return buildLlmCallAction({
-    promptText: promptText ?? "",
-    memory,
-    actionHistory,
-    toolsContext: context?.tools_context ?? undefined,
-    skillsContext: context?.skills_context ?? undefined,
-    nextStepContext: {
-      kind: "planner_error",
-      error,
-      allowed_tools: allowedTools,
-      allowed_skills: allowedSkills,
-      ...(allowedOps ? { allowed_ops: allowedOps } : {})
-    }
-  });
-}
-
-function validatePlannedAction(
-  action: { type: ActionType; params: Record<string, unknown> },
-  context: Partial<LLMRuntimeContext> | null
-): {
-  overrideAction?: { type: ActionType; params: Record<string, unknown> };
-  followupAction?: { type: ActionType; params: Record<string, unknown> };
-} {
-  if (!context) return {};
-  const stepKind = (context.next_step_context as Record<string, unknown> | null)?.kind;
-  const hasSkillDetail = stepKind === "skill_detail";
-
-  if (action.type === ActionType.ToolCall) {
-    const toolsSchema = getToolSchemaFromContext(context);
-    const toolName = action.params.tool as string | undefined;
-    const allowedTools = toolsSchema.map((t) => t.name);
-    const allowedSkills = getSkillNamesFromContext(context);
-    const toolSpec = toolsSchema.find((t) => t.name === toolName);
-    if (!toolSpec) {
-      if (toolName && allowedSkills.includes(toolName)) {
-        return { overrideAction: { type: ActionType.SkillCall, params: { name: toolName, input: "" } } };
-      }
-      return {
-        followupAction: buildPlannerErrorFollowup(
-          context,
-          getLlmPrompt(action),
-          `Unknown tool: ${toolName ?? "undefined"}`,
-          allowedTools,
-          allowedSkills
-        )
-      };
-    }
-    const op = action.params.op as string | undefined;
-    const allowedOps = (toolSpec.operations ?? []).map((o) => o.op);
-    if (op && allowedOps.length > 0 && !allowedOps.includes(op)) {
-      return {
-        followupAction: buildPlannerErrorFollowup(
-          context,
-          getLlmPrompt(action),
-          `Unknown op '${op}' for tool '${toolName}'`,
-          allowedTools,
-          allowedSkills,
-          allowedOps
-        )
-      };
-    }
-  }
-
-  if (action.type === ActionType.SkillCall) {
-    const allowedSkills = getSkillNamesFromContext(context);
-    const name = action.params.name as string | undefined;
-    const input = (action.params.input as string | undefined) ?? "";
-    if (name && !allowedSkills.includes(name)) {
-      const allowedTools = getToolSchemaFromContext(context).map((t) => t.name);
-      return {
-        followupAction: buildPlannerErrorFollowup(
-          context,
-          getLlmPrompt(action),
-          `Unknown skill: ${name}`,
-          allowedTools,
-          allowedSkills
-        )
-      };
-    }
-    if (!hasSkillDetail && name && input.trim().length > 0) {
-      return { overrideAction: { type: ActionType.SkillCall, params: { name, input: "" } } };
-    }
-  }
-
-  return {};
 }

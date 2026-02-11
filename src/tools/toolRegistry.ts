@@ -1,13 +1,13 @@
 import fs from "fs";
 import path from "path";
-import { Action, ToolResult } from "../types";
+import { ToolResult } from "../types";
 import { LLMRuntimeContext } from "../engines/llm/llm";
 
 export type ToolHandler = {
   name: string;
-  execute: (action: Action, context: Record<string, unknown>) => Promise<ToolResult>;
+  execute: (op: string, args: Record<string, unknown>, context: Record<string, unknown>) => Promise<ToolResult>;
   runtimeContext?: () => ToolRuntimeContext;
-  followupContext?: (action: Action) => Partial<LLMRuntimeContext> | null;
+  followupContext?: (op: string, args: Record<string, unknown>) => Partial<LLMRuntimeContext> | null;
 };
 
 export type ToolSchemaItem = {

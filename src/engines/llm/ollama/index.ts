@@ -1,9 +1,8 @@
-import { Action } from "../../../types";
-import { LLMEngine, LLMPlanMeta, LLMPlanResult, LLMRuntimeContext } from "../llm";
+import { LLMEngine, LLMRuntimeContext, LLMPlanMeta } from "../llm";
 import { mockLLM } from "../../../mockLLM";
 import { ollamaChat } from "./client";
-import { buildSystemPrompt, buildUserPrompt } from "./prompt";
-import { parseAction } from "./parser";
+import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
+import { parseSkillSelectionResult, parseSkillPlanningResult } from "../../../core/json_guard";
 
 export type OllamaLLMOptions = {
   baseUrl: string;
@@ -26,23 +25,20 @@ export class OllamaLLMEngine implements LLMEngine {
     };
   }
 
-  async plan(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<Action> {
-    const result = await this.planWithMeta(text, runtimeContext, actionSchema, images);
-    return result.action;
-  }
+  async selectSkill(
+    text: string,
+    runtimeContext: LLMRuntimeContext
+  ): Promise<{ decision: "respond" | "use_skill"; skill_name?: string; response_text?: string }> {
+    const mode = PromptMode.SkillSelection;
+    const userPrompt = buildUserPrompt(text, runtimeContext);
+    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
-  async planWithMeta(text: string, runtimeContext: LLMRuntimeContext, actionSchema: string, images?: string[]): Promise<LLMPlanResult> {
-    const basePrompt = buildSystemPrompt(actionSchema, this.options.strictJson, undefined, runtimeContext);
     let retries = 0;
     let lastRaw = "";
-    const userPrompt = buildUserPrompt(text, runtimeContext, !!(images && images.length));
-    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
       const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
-      const systemPrompt = attempt > 0
-        ? buildSystemPrompt(actionSchema, this.options.strictJson, extraHint, runtimeContext)
-        : basePrompt;
+      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
 
       try {
         if (logPrompts) {
@@ -55,25 +51,15 @@ export class OllamaLLMEngine implements LLMEngine {
           timeoutMs: this.options.timeoutMs,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt, images }
+            { role: "user", content: userPrompt }
           ]
         });
         if (logPrompts) {
           console.log(`[LLM][${this.options.model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
         }
 
-        const action = parseAction(lastRaw);
-        return {
-          action,
-          meta: {
-            llm_provider: "ollama",
-            model: this.options.model,
-            retries,
-            parse_ok: true,
-            raw_output_length: lastRaw.length,
-            fallback: false
-          }
-        };
+        const result = parseSkillSelectionResult(lastRaw);
+        return result;
       } catch (err) {
         console.error("ollamaChat failed", err);
         if (attempt < this.options.maxRetries) {
@@ -83,16 +69,78 @@ export class OllamaLLMEngine implements LLMEngine {
       }
     }
 
-    const fallbackAction = await mockLLM(text);
-    const meta: LLMPlanMeta = {
+    const fallbackResult = await mockLLM(text);
+    if (fallbackResult && "decision" in fallbackResult) {
+      return fallbackResult as { decision: "respond" | "use_skill"; skill_name?: string; response_text?: string };
+    }
+    return { decision: "respond", response_text: "OK" };
+  }
+
+  async planToolExecution(
+    text: string,
+    runtimeContext: LLMRuntimeContext
+  ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
+    const mode = PromptMode.SkillPlanning;
+    const userPrompt = buildUserPrompt(text, runtimeContext);
+    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
+
+    let retries = 0;
+    let lastRaw = "";
+
+    for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
+      const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
+      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
+
+      try {
+        if (logPrompts) {
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
+        }
+        lastRaw = await ollamaChat({
+          baseUrl: this.options.baseUrl,
+          model: this.options.model,
+          timeoutMs: this.options.timeoutMs,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ]
+        });
+        if (logPrompts) {
+          console.log(`[LLM][${this.options.model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
+        }
+
+        const result = parseSkillPlanningResult(lastRaw);
+        return result;
+      } catch (err) {
+        console.error("ollamaChat failed", err);
+        if (attempt < this.options.maxRetries) {
+          retries += 1;
+          continue;
+        }
+      }
+    }
+
+    const fallbackResult = await mockLLM(text);
+    if (fallbackResult && "tool" in fallbackResult) {
+      return fallbackResult as { tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string };
+    }
+    return {
+      tool: "unknown",
+      op: "unknown",
+      args: {},
+      success_response: "Tool execution succeeded",
+      failure_response: "Tool execution failed"
+    };
+  }
+
+  getMeta(retries: number, parseOk: boolean, rawOutputLength: number, fallback: boolean): LLMPlanMeta {
+    return {
       llm_provider: "ollama",
       model: this.options.model,
       retries,
-      parse_ok: false,
-      raw_output_length: lastRaw.length,
-      fallback: true
+      parse_ok: parseOk,
+      raw_output_length: rawOutputLength,
+      fallback
     };
-
-    return { action: fallbackAction, meta };
   }
 }

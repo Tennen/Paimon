@@ -1,21 +1,9 @@
-import { Action, ActionType, ToolResult } from "../types";
+import { ToolResult } from "../types";
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
 import { execFile } from "child_process";
 
 export class TerminalCommandTool {
-  async execute(action: Action): Promise<ToolResult> {
-    if (action.type !== ActionType.ToolCall) {
-      return { ok: false, error: `Unsupported action: ${action.type}` };
-    }
-
-    const toolName = action.params.tool as string | undefined;
-    if (toolName !== "terminal") {
-      return { ok: false, error: `Unsupported tool: ${toolName ?? "unknown"}` };
-    }
-
-    const op = action.params.op as string | undefined;
-    const args = (action.params.args as Record<string, unknown>) ?? {};
-
+  async execute(op: string, args: Record<string, unknown>): Promise<ToolResult> {
     if (op === "exec") {
       const command = args.command as string | undefined;
       const argsList = args.args as string[] | undefined;
@@ -42,7 +30,7 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
   registry.register(
     {
       name: "terminal",
-      execute: (action) => tool.execute(action),
+      execute: (op, args, _context) => tool.execute(op, args),
     },
     {
       name: "terminal",
