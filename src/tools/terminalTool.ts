@@ -6,14 +6,18 @@ export class TerminalCommandTool {
   async execute(op: string, args: Record<string, unknown>): Promise<ToolResult> {
     if (op === "exec") {
       const command = args.command as string | undefined;
-      const argsList = args.args as string[] | undefined;
-
       if (!command) {
         return { ok: false, error: "Missing command" };
       }
 
       try {
-        const output = await runCommand(command, argsList || []);
+        const rawArgs = args.args;
+        const argsList = Array.isArray(rawArgs)
+          ? rawArgs.map((value) => String(value))
+          : typeof rawArgs === "string"
+            ? parseArgs(rawArgs)
+            : [];
+        const output = await runCommand(command, argsList);
         return { ok: true, output: { text: output } };
       } catch (error) {
         return { ok: false, error: (error as Error).message };
@@ -51,37 +55,73 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
 function parseArgs(input: string): string[] {
   const args: string[] = [];
   let current = "";
-  let inQuotes = false;
-  let quoteChar = "";
+  let quoteChar: "'" | "\"" | null = null;
+  let escaped = false;
+  let tokenStarted = false;
 
   for (let i = 0; i < input.length; i += 1) {
     const ch = input[i];
-    if ((ch === "\"" || ch === "'") && !inQuotes) {
-      inQuotes = true;
+    if (escaped) {
+      current += ch;
+      tokenStarted = true;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && quoteChar !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quoteChar) {
+      if (ch === quoteChar) {
+        quoteChar = null;
+        tokenStarted = true;
+        continue;
+      }
+      current += ch;
+      tokenStarted = true;
+      continue;
+    }
+    if (ch === "\"" || ch === "'") {
       quoteChar = ch;
+      tokenStarted = true;
       continue;
     }
-    if (inQuotes && ch === quoteChar) {
-      inQuotes = false;
-      quoteChar = "";
-      continue;
-    }
-    if (!inQuotes && /\s/.test(ch)) {
-      if (current.length > 0) {
+    if (/\s/.test(ch)) {
+      if (tokenStarted) {
         args.push(current);
         current = "";
+        tokenStarted = false;
       }
       continue;
     }
     current += ch;
+    tokenStarted = true;
   }
-  if (current.length > 0) args.push(current);
+
+  if (escaped) {
+    current += "\\";
+    tokenStarted = true;
+  }
+  if (quoteChar) {
+    throw new Error(`Unterminated quote in command: ${quoteChar}`);
+  }
+  if (tokenStarted) {
+    args.push(current);
+  }
   return args;
 }
 
 function runCommand(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { timeout: 15000 }, (err, stdout, stderr) => {
+    const parsed = parseArgs(cmd.trim());
+    const baseCommand = parsed.shift();
+    if (!baseCommand) {
+      reject(new Error("Missing command"));
+      return;
+    }
+    const finalArgs = parsed.concat(args);
+
+    execFile(baseCommand, finalArgs, { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const msg = stderr && stderr.trim() ? stderr.trim() : err.message;
         reject(new Error(msg));
