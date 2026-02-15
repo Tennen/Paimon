@@ -9,6 +9,7 @@ export type OllamaChatRequest = {
   model: string;
   messages: OllamaMessage[];
   timeoutMs: number;
+  keepAlive?: number;
 };
 
 export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
@@ -27,6 +28,7 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
       body: JSON.stringify({
         model: request.model,
         messages: request.messages,
+        "keep_alive": request.keepAlive ?? 300,
         stream: false
       }),
       signal: controller.signal
