@@ -304,7 +304,7 @@ async function waitForGenerationComplete(page, previousAssistantCount) {
 
   while (Date.now() < doneDeadline) {
     const state = await readGenerationState(page);
-    const hasCompletionButton = state.sendVisible || state.regenerateVisible;
+    const hasCompletionButton = state.sendVisible || state.regenerateVisible || state.speechVisible;
     if (state.stopVisible) {
       sawStop = true;
     }
@@ -354,10 +354,28 @@ async function readGenerationState(page) {
         return regexp.test(text);
       });
 
+    const hasSpeechButton = () =>
+      buttons.some((button) => {
+        if (!isVisible(button)) return false;
+        const label = [
+          button.getAttribute("aria-label") || "",
+          button.getAttribute("data-testid") || "",
+          button.textContent || ""
+        ]
+          .join(" ")
+          .toLowerCase();
+        const styleText = String(button.getAttribute("style") || "").toLowerCase();
+        return (
+          /启动语音功能|语音功能|语音|start voice|voice mode|speech/.test(label) ||
+          styleText.includes("speech-button")
+        );
+      });
+
     return {
       stopVisible: hasButton(/stop generating|停止生成/, "stop-button"),
       sendVisible: hasButton(/(^|\s)(send|发送)($|\s)/, "send-button"),
       regenerateVisible: hasButton(/regenerate|重新生成|重新回答|再试一次|try again/, "regenerate-button"),
+      speechVisible: hasSpeechButton(),
       assistantCount: document.querySelectorAll("[data-message-author-role='assistant']").length
     };
   });
