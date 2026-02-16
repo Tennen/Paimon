@@ -45,5 +45,6 @@ export type Response = {
   text: string;
   data?: {
     image?: Image;
+    images?: Image[];
   };
 };

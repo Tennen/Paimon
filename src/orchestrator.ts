@@ -261,9 +261,17 @@ export class Orchestrator {
     }
 
     // Handle image if present
-    const output = toolResult.output as { image?: Image };
+    const output = toolResult.output as { image?: Image; images?: Image[] } | undefined;
+    const images = normalizeImages(output?.images);
     if (output?.image) {
-      response.data = { ...(response.data as Record<string, unknown> | undefined), image: output.image };
+      images.unshift(output.image);
+    }
+    if (images.length > 0) {
+      response.data = {
+        ...(response.data as Record<string, unknown> | undefined),
+        image: images[0],
+        ...(images.length > 1 ? { images } : {})
+      };
     }
 
     // Cache and log
@@ -311,6 +319,13 @@ function sanitizeToolResult(input: unknown): unknown {
     return input.map((item) => sanitizeToolResult(item));
   }
   const obj = input as Record<string, unknown>;
+  if (typeof obj.data === "string" && (typeof obj.contentType === "string" || typeof obj.filename === "string")) {
+    return {
+      ...(typeof obj.contentType === "string" ? { contentType: obj.contentType } : {}),
+      ...(typeof obj.filename === "string" ? { filename: obj.filename } : {}),
+      size: obj.data.length
+    };
+  }
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (key === "image" && value && typeof value === "object") {
@@ -320,6 +335,10 @@ function sanitizeToolResult(input: unknown): unknown {
         ...(typeof image.filename === "string" ? { filename: image.filename } : {}),
         ...(typeof image.size === "number" ? { size: image.size } : {})
       };
+      continue;
+    }
+    if (key === "images" && Array.isArray(value)) {
+      out[key] = value.map((item) => sanitizeToolResult(item));
       continue;
     }
     out[key] = sanitizeToolResult(value);
@@ -456,4 +475,9 @@ function filterToolContextForSkill(
 
   if (Object.keys(result).length === 0) return null;
   return result;
+}
+
+function normalizeImages(images: Image[] | undefined): Image[] {
+  if (!Array.isArray(images)) return [];
+  return images.filter((image) => Boolean(image && typeof image.data === "string" && image.data.length > 0));
 }

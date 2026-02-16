@@ -190,9 +190,13 @@ export class SkillManager {
         await execAsync(`brew list --versions ${packageName}`);
         return { installed: true, message: `${packageName} is installed` };
       } else if (command.startsWith("npm install")) {
-        // For npm, we assume it's installed if we can run it
-        await execAsync("npm --version");
-        return { installed: true, message: "npm is available" };
+        const packageName = extractNpmInstallPackage(command);
+        if (!packageName) {
+          await execAsync("npm --version");
+          return { installed: true, message: "npm is available" };
+        }
+        await execAsync(`npm list --depth=0 ${packageName}`);
+        return { installed: true, message: `${packageName} is installed` };
       } else {
         // For custom commands, try to run a dry run version if possible
         // This is a simple check - you might want more sophisticated checks
@@ -298,4 +302,37 @@ function parseFrontmatterList(raw: string): string[] {
     .split(",")
     .map((item) => item.trim().replace(/^["']|["']$/g, ""))
     .filter(Boolean);
+}
+
+function extractNpmInstallPackage(command: string): string | undefined {
+  const tokens = command.split(/\s+/).map((token) => token.trim()).filter(Boolean);
+  const installIndex = tokens.indexOf("install");
+  if (installIndex < 0) return undefined;
+
+  for (let i = installIndex + 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token || token.startsWith("-")) continue;
+    const normalized = normalizeNpmPackageSpecifier(token);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeNpmPackageSpecifier(specifier: string): string | undefined {
+  const raw = specifier.replace(/^["']|["']$/g, "");
+  if (!raw) return undefined;
+  if (/^(file:|git\+|https?:)/i.test(raw)) return undefined;
+
+  let name = raw;
+  if (raw.startsWith("@")) {
+    const secondAt = raw.indexOf("@", 1);
+    name = secondAt === -1 ? raw : raw.slice(0, secondAt);
+  } else {
+    const versionIndex = raw.indexOf("@");
+    name = versionIndex === -1 ? raw : raw.slice(0, versionIndex);
+  }
+  return /^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(name) ? name : undefined;
 }

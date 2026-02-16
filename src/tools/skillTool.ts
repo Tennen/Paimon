@@ -34,8 +34,22 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
   const manager = deps.skillManager as SkillManager;
   const tool = new SkillTool(manager);
 
-  registry.register({
-    name: "skill",
-    execute: (op, args, context) => tool.execute(op, args, context),
-  });
+  registry.register(
+    {
+      name: "skill",
+      execute: (op, args, context) => tool.execute(op, args, context),
+    },
+    {
+      name: "skill",
+      operations: [
+        {
+          op: "execute",
+          params: {
+            name: "string",
+            input: "string"
+          }
+        }
+      ]
+    }
+  );
 }
