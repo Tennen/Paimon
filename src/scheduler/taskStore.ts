@@ -7,6 +7,7 @@ export type ScheduledTask = {
   enabled: boolean;
   type: "daily";
   time: string;
+  userId?: string;
   toUser: string;
   message: string;
   createdAt: string;
@@ -85,6 +86,7 @@ function isScheduledTask(value: unknown): value is ScheduledTask {
     typeof task.enabled === "boolean" &&
     task.type === "daily" &&
     typeof task.time === "string" &&
+    (task.userId === undefined || typeof task.userId === "string") &&
     typeof task.toUser === "string" &&
     typeof task.message === "string" &&
     typeof task.createdAt === "string" &&
