@@ -9,6 +9,9 @@ export default defineConfig({
   root: currentDir,
   base: "/admin/",
   plugins: [react()],
+  css: {
+    postcss: path.resolve(currentDir, "postcss.config.cjs")
+  },
   resolve: {
     alias: {
       "@": path.resolve(currentDir, "./src")

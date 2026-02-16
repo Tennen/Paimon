@@ -1,11 +1,10 @@
-import type { Config } from "tailwindcss";
-import tailwindcssAnimate from "tailwindcss-animate";
-import path from "path";
-import { fileURLToPath } from "url";
+const path = require("path");
+const tailwindcssAnimate = require("tailwindcss-animate");
 
-const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const currentDir = __dirname;
 
-const config: Config = {
+/** @type {import('tailwindcss').Config} */
+module.exports = {
   darkMode: ["class"],
   content: [
     path.join(currentDir, "index.html"),
@@ -43,5 +42,3 @@ const config: Config = {
   },
   plugins: [tailwindcssAnimate]
 };
-
-export default config;
