@@ -6,6 +6,7 @@ import { writeAudit } from "./auditLogger";
 import { LLMRuntimeContext, LLMPlanMeta } from "./engines/llm/llm";
 import { MemoryStore } from "./memory/memoryStore";
 import { SkillManager } from "./skills/skillManager";
+import { getSkillHandlerToolName } from "./skills/toolNaming";
 import { ToolRegistry, ToolSchemaItem } from "./tools/toolRegistry";
 import { LLMEngine } from "./engines/llm/llm";
 
@@ -143,6 +144,9 @@ export class Orchestrator {
     successResponse?: string;
     failureResponse?: string;
   }> {
+    const selectedSkill = this.skillManager.get(skillName);
+    const handlerToolName = selectedSkill?.hasHandler ? getSkillHandlerToolName(skillName) : undefined;
+
     // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
     const detail = getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry);
@@ -154,6 +158,9 @@ export class Orchestrator {
     }
     if (skillName && skillContext?.[skillName]?.terminal) {
       forceTools.push("terminal");
+    }
+    if (handlerToolName) {
+      forceTools.push(handlerToolName);
     }
 
     const fullToolContext = this.toolRegistry.buildRuntimeContext();
