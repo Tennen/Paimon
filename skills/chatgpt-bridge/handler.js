@@ -247,10 +247,14 @@ async function fillComposerAndSend(page, message) {
   await page.keyboard.up(modifier);
   await page.keyboard.press("Backspace");
   await page.keyboard.type(message, { delay: 0 });
-
+  await sleep(120);
+  console.log("message typed");
   const clicked = await clickSendButton(page);
+  console.log("clicked", clicked);
   if (!clicked) {
+    console.log("pressing Enter");
     await page.keyboard.press("Enter");
+    console.log("Enter pressed");
   }
   await sleep(120);
 }
