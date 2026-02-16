@@ -29,8 +29,7 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
         model: request.model,
         messages: request.messages,
         "keep_alive": request.keepAlive ?? 300,
-        stream: false,
-        format: "json"
+        stream: false
       }),
       signal: controller.signal
     });
