@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 33% 96%;
+    --foreground: 30 35% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 30 35% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 35% 10%;
+    --primary: 17 80% 45%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 35 35% 92%;
+    --secondary-foreground: 30 25% 20%;
+    --muted: 35 26% 90%;
+    --muted-foreground: 30 10% 40%;
+    --accent: 43 90% 91%;
+    --accent-foreground: 30 30% 15%;
+    --destructive: 0 75% 52%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 22% 83%;
+    --input: 30 22% 83%;
+    --ring: 17 80% 45%;
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 10% -10%, rgba(255, 183, 112, 0.3) 0, transparent 42%),
+      radial-gradient(circle at 90% 0%, rgba(130, 170, 255, 0.24) 0, transparent 36%),
+      hsl(var(--background));
+  }
+}
+
+@layer components {
+  .mono {
+    font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+}
