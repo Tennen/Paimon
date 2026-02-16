@@ -27,11 +27,14 @@
   }
 
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
   }
 
   body {
-    @apply bg-background text-foreground antialiased;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     font-family: "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
     min-height: 100vh;
     background:
