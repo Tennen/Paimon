@@ -93,7 +93,8 @@ export class WeComIngressAdapter implements IngressAdapter {
         kind: "text",
         text: content,
         meta: {
-          ingress_message_id: msgId || undefined
+          ingress_message_id: msgId || undefined,
+          callback_to_user: fromUser
         },
         receivedAt: new Date().toISOString()
       };

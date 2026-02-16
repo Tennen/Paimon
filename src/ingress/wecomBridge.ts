@@ -39,6 +39,7 @@ export class WeComBridgeIngressAdapter implements IngressAdapter {
         text: isImage ? undefined : payload.text,
         meta: {
           ingress_message_id: payload.messageId,
+          callback_to_user: payload.fromUser,
           wecom_media_id: payload.mediaId,
           wecom_pic_url: payload.picUrl
         },
@@ -47,30 +48,7 @@ export class WeComBridgeIngressAdapter implements IngressAdapter {
 
       try {
         const response = await sessionManager.enqueue(envelope);
-        if (response.text) {
-          await this.sender.sendText(payload.fromUser, response.text);
-        }
-
-        const images: Array<{ data: string; filename?: string; contentType?: string }> = [];
-        const imageSet = new Set<string>();
-        const pushImage = (image: { data: string; filename?: string; contentType?: string } | undefined) => {
-          if (!image?.data) return;
-          if (imageSet.has(image.data)) return;
-          imageSet.add(image.data);
-          images.push(image);
-        };
-        if (response.data?.image?.data) {
-          pushImage(response.data.image);
-        }
-        if (Array.isArray(response.data?.images)) {
-          for (const image of response.data.images) {
-            pushImage(image);
-          }
-        }
-
-        for (const image of images) {
-          await this.sender.sendImage(payload.fromUser, image.data, image.filename, image.contentType);
-        }
+        await this.sender.sendResponse(payload.fromUser, response);
       } catch (err: any) {
         log(`send reply failed: ${(err as Error).message} ${err && err.stack ? err.stack : ""}`);
       }

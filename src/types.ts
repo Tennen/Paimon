@@ -46,5 +46,9 @@ export type Response = {
   data?: {
     image?: Image;
     images?: Image[];
+    asyncTask?: {
+      id: string;
+      status: "accepted";
+    };
   };
 };

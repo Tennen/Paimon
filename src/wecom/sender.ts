@@ -1,5 +1,6 @@
 import { URLSearchParams } from "url";
 import { fetch } from "undici";
+import { Response } from "../types";
 
 export type WeComSenderConfig = {
   corpId: string;
@@ -137,6 +138,17 @@ export class WeComSender {
     }
   }
 
+  async sendResponse(toUser: string, response: Response): Promise<void> {
+    if (response.text) {
+      await this.sendText(toUser, response.text);
+    }
+
+    const images = collectResponseImages(response);
+    for (const image of images) {
+      await this.sendImage(toUser, image.data, image.filename, image.contentType);
+    }
+  }
+
   private async getTokenViaBridge(): Promise<string> {
     const now = Date.now();
     if (this.tokenCache && this.tokenCache.expiresAt > now + 5000) {
@@ -169,4 +181,25 @@ export class WeComSender {
     this.tokenCache = { value: data.access_token, expiresAt: now + ttlMs };
     return data.access_token;
   }
+}
+
+function collectResponseImages(response: Response): Array<{ data: string; filename?: string; contentType?: string }> {
+  const out: Array<{ data: string; filename?: string; contentType?: string }> = [];
+  const dedup = new Set<string>();
+
+  const push = (image: { data: string; filename?: string; contentType?: string } | undefined) => {
+    if (!image?.data) return;
+    if (dedup.has(image.data)) return;
+    dedup.add(image.data);
+    out.push(image);
+  };
+
+  push(response.data?.image);
+  if (Array.isArray(response.data?.images)) {
+    for (const image of response.data.images) {
+      push(image);
+    }
+  }
+
+  return out;
 }

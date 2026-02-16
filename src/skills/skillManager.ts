@@ -12,6 +12,8 @@ export type SkillInfo = {
   command?: string;
   keywords?: string[];
   directCommands?: string[];
+  directAsync?: boolean;
+  directAcceptedText?: string;
   hasHandler?: boolean;
   preferToolResult?: boolean;
   detail?: string;
@@ -21,6 +23,8 @@ export type SkillInfo = {
     install?: string;
     keywords?: string[];
     directCommands?: string[];
+    directAsync?: boolean;
+    directAcceptedText?: string;
     preferToolResult?: boolean;
     [key: string]: any;
   };
@@ -91,7 +95,12 @@ export class SkillManager {
 
         if (handlerDeclared && !this.handlers.has(name)) {
           try {
-            const mod = require(handlerPath) as { execute?: SkillHandler; directCommands?: unknown };
+            const mod = require(handlerPath) as {
+              execute?: SkillHandler;
+              directCommands?: unknown;
+              directAsync?: unknown;
+              directAcceptedText?: unknown;
+            };
             if (mod.execute) {
               this.handlers.set(name, mod.execute);
               const existing = this.skillMap.get(name);
@@ -102,6 +111,20 @@ export class SkillManager {
                   existing.directCommands = directCommands;
                   if (existing.metadata) {
                     existing.metadata.directCommands = directCommands;
+                  }
+                }
+                const directAsync = parseMaybeBoolean(mod.directAsync);
+                if (directAsync !== undefined) {
+                  existing.directAsync = directAsync;
+                  if (existing.metadata) {
+                    existing.metadata.directAsync = directAsync;
+                  }
+                }
+                const directAcceptedText = parseMaybeString(mod.directAcceptedText);
+                if (directAcceptedText) {
+                  existing.directAcceptedText = directAcceptedText;
+                  if (existing.metadata) {
+                    existing.metadata.directAcceptedText = directAcceptedText;
                   }
                 }
               }
@@ -351,6 +374,22 @@ function parseDirectCommands(input: unknown): string[] {
     }
   }
   return out;
+}
+
+function parseMaybeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const text = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(text)) return true;
+    if (["false", "0", "no", "off"].includes(text)) return false;
+  }
+  return undefined;
+}
+
+function parseMaybeString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.trim();
+  return text.length > 0 ? text : undefined;
 }
 
 function extractNpmInstallPackage(command: string): string | undefined {

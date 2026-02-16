@@ -7,8 +7,9 @@ import { LLMRuntimeContext, LLMPlanMeta } from "./engines/llm/llm";
 import { MemoryStore } from "./memory/memoryStore";
 import { SkillManager } from "./skills/skillManager";
 import { getSkillHandlerToolName } from "./skills/toolNaming";
-import { ToolRegistry, ToolSchemaItem } from "./tools/toolRegistry";
+import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "./tools/toolRegistry";
 import { LLMEngine } from "./engines/llm/llm";
+import { CallbackDispatcher } from "./callback/callbackDispatcher";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -18,13 +19,16 @@ export class Orchestrator {
   private readonly skillManager: SkillManager;
   private readonly maxIterations: number;
   private readonly toolRegistry: ToolRegistry;
+  private readonly callbackDispatcher: CallbackDispatcher;
+  private readonly asyncDirectQueues = new Map<string, Promise<void>>();
 
   constructor(
     toolRouter: ToolRouter,
     llmEngine: LLMEngine,
     memoryStore: MemoryStore,
     skillManager: SkillManager,
-    toolRegistry: ToolRegistry
+    toolRegistry: ToolRegistry,
+    callbackDispatcher: CallbackDispatcher
   ) {
     this.toolRouter = toolRouter;
     this.llmEngine = llmEngine;
@@ -32,6 +36,7 @@ export class Orchestrator {
     this.skillManager = skillManager;
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
+    this.callbackDispatcher = callbackDispatcher;
   }
 
   async handle(envelope: Envelope): Promise<Response> {
@@ -100,6 +105,26 @@ export class Orchestrator {
       return null;
     }
 
+    if (matched.async) {
+      const taskId = createAsyncTaskId(matched.command);
+      this.enqueueAsyncDirectTask(envelope.sessionId, async () => {
+        await this.runAsyncDirectToolCall(taskId, matched, text, envelope, Date.now());
+      });
+      const acceptedText = matched.acceptedText || "任务已受理，正在处理中，稍后回调结果。";
+      const acceptedResponse: Response = {
+        text: acceptedText,
+        data: {
+          asyncTask: {
+            id: taskId,
+            status: "accepted"
+          }
+        }
+      };
+      this.processed.set(envelope.requestId, acceptedResponse);
+      this.appendMemory(envelope, text, acceptedResponse);
+      return acceptedResponse;
+    }
+
     const toolExecution: ToolExecution = {
       tool: matched.tool,
       op: matched.op,
@@ -116,6 +141,59 @@ export class Orchestrator {
       start
     );
     return response;
+  }
+
+  private enqueueAsyncDirectTask(sessionId: string, task: () => Promise<void>): void {
+    const prior = this.asyncDirectQueues.get(sessionId) ?? Promise.resolve();
+    const next = prior
+      .catch(() => undefined)
+      .then(task)
+      .catch((error) => {
+        console.error("async direct task failed:", error);
+      });
+    this.asyncDirectQueues.set(sessionId, next);
+    void next.finally(() => {
+      if (this.asyncDirectQueues.get(sessionId) === next) {
+        this.asyncDirectQueues.delete(sessionId);
+      }
+    });
+  }
+
+  private async runAsyncDirectToolCall(
+    taskId: string,
+    matched: DirectToolCallMatch,
+    text: string,
+    envelope: Envelope,
+    start: number
+  ): Promise<void> {
+    const taskEnvelope: Envelope = {
+      ...envelope,
+      requestId: `${envelope.requestId}:async:${taskId}`
+    };
+    try {
+      const latestMemory = this.memoryStore.read(envelope.sessionId);
+      const toolExecution: ToolExecution = {
+        tool: matched.tool,
+        op: matched.op,
+        args: matched.args
+      };
+      const toolResult = await this.toolCallStep(toolExecution, text, latestMemory, taskEnvelope, start);
+      const response = await this.respondStep(
+        toolResult.result,
+        "",
+        "",
+        matched.preferToolResult,
+        text,
+        taskEnvelope,
+        start
+      );
+      await this.callbackDispatcher.send(taskEnvelope, response);
+    } catch (error) {
+      const fallback: Response = {
+        text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
+      };
+      await this.callbackDispatcher.send(taskEnvelope, fallback);
+    }
   }
 
   private async llmCallStep(
@@ -539,4 +617,9 @@ function normalizeImages(images: Image[] | undefined): Image[] {
 function isGenericResponseText(text: string | undefined): boolean {
   const normalized = String(text ?? "").trim().toLowerCase();
   return normalized.length === 0 || normalized === "ok" || normalized === "tool failed";
+}
+
+function createAsyncTaskId(command: string): string {
+  const normalized = String(command ?? "").trim().replace(/[^a-z0-9]+/gi, "").toLowerCase() || "task";
+  return `${normalized}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }

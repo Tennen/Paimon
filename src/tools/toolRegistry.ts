@@ -32,6 +32,8 @@ export type DirectToolCallRoute = {
   tool: string;
   op: string;
   preferToolResult?: boolean;
+  async?: boolean;
+  acceptedText?: string;
   argName?: string;
   argMode?: "full_input" | "rest";
 };
@@ -42,6 +44,8 @@ export type DirectToolCallMatch = {
   op: string;
   args: Record<string, unknown>;
   preferToolResult: boolean;
+  async: boolean;
+  acceptedText: string;
 };
 
 export class ToolRegistry {
@@ -116,7 +120,9 @@ export class ToolRegistry {
       args: {
         [argName]: argValue
       },
-      preferToolResult: route.preferToolResult ?? true
+      preferToolResult: route.preferToolResult ?? true,
+      async: route.async ?? false,
+      acceptedText: route.acceptedText ?? "任务已受理，正在处理中，稍后回调结果。"
     };
   }
 }

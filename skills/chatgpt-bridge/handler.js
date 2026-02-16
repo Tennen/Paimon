@@ -22,6 +22,8 @@ let pagePromise = null;
 let serialQueue = Promise.resolve();
 
 module.exports.directCommands = ["/gpt"];
+module.exports.directAsync = true;
+module.exports.directAcceptedText = "收到，已交给 ChatGPT 处理中，完成后会回传结果。";
 
 module.exports.execute = async function execute(input) {
   const message = String(input || "").trim();

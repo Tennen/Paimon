@@ -109,7 +109,9 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
           op: "execute",
           argName: "input",
           argMode: "full_input",
-          preferToolResult: skill.preferToolResult ?? true
+          preferToolResult: skill.preferToolResult ?? true,
+          async: skill.directAsync ?? false,
+          acceptedText: skill.directAcceptedText
         });
       }
     }
