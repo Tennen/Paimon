@@ -70,6 +70,7 @@ export class Orchestrator {
         toolResult.result,
         skillPlanResult.successResponse || "Task completed successfully",
         skillPlanResult.failureResponse || "Tool execution failed",
+        skillPlanResult.preferToolResult ?? false,
         text,
         envelope,
         start
@@ -143,6 +144,7 @@ export class Orchestrator {
     toolExecution?: ToolExecution;
     successResponse?: string;
     failureResponse?: string;
+    preferToolResult?: boolean;
   }> {
     const selectedSkill = this.skillManager.get(skillName);
     const handlerToolName = selectedSkill?.hasHandler ? getSkillHandlerToolName(skillName) : undefined;
@@ -202,7 +204,8 @@ export class Orchestrator {
         args: plan.args
       },
       successResponse: plan.success_response,
-      failureResponse: plan.failure_response
+      failureResponse: plan.failure_response,
+      preferToolResult: selectedSkill?.preferToolResult ?? false
     };
   }
 
@@ -246,24 +249,34 @@ export class Orchestrator {
     toolResult: { ok: boolean; output?: unknown; error?: string },
     successResponse: string,
     failureResponse: string,
+    preferToolResult: boolean,
     text: string,
     envelope: Envelope,
     _start: number
   ): Promise<Response> {
     let response: Response;
 
-    if (toolResult.ok) {
-      if (successResponse) {
+    if (preferToolResult) {
+      response = buildToolResultResponse(toolResult);
+      if (toolResult.ok && isGenericResponseText(response.text) && successResponse) {
         response = { text: successResponse };
-      } else {
-        // Fallback to building response from tool result
-        response = buildToolResultResponse(toolResult);
+      } else if (!toolResult.ok && isGenericResponseText(response.text) && failureResponse) {
+        response = { text: failureResponse };
       }
     } else {
-      if (failureResponse) {
-        response = { text: failureResponse };
+      if (toolResult.ok) {
+        if (successResponse) {
+          response = { text: successResponse };
+        } else {
+          // Fallback to building response from tool result
+          response = buildToolResultResponse(toolResult);
+        }
       } else {
-        response = { text: toolResult.error ? `Tool error: ${toolResult.error}` : "Tool failed" };
+        if (failureResponse) {
+          response = { text: failureResponse };
+        } else {
+          response = { text: toolResult.error ? `Tool error: ${toolResult.error}` : "Tool failed" };
+        }
       }
     }
 
@@ -487,4 +500,9 @@ function filterToolContextForSkill(
 function normalizeImages(images: Image[] | undefined): Image[] {
   if (!Array.isArray(images)) return [];
   return images.filter((image) => Boolean(image && typeof image.data === "string" && image.data.length > 0));
+}
+
+function isGenericResponseText(text: string | undefined): boolean {
+  const normalized = String(text ?? "").trim().toLowerCase();
+  return normalized.length === 0 || normalized === "ok" || normalized === "tool failed";
 }

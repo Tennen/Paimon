@@ -73,15 +73,12 @@ export function parseSkillPlanningResult(rawText: string): SkillPlanningResult {
   if (typeof obj.args !== "object" || obj.args === null) {
     throw new Error("Missing args in LLM output");
   }
-  if (typeof obj.success_response !== "string") {
-    throw new Error("Missing success_response in LLM output");
-  }
 
   return {
     tool: obj.tool,
     op: obj.op,
     args: obj.args as Record<string, unknown>,
-    success_response: obj.success_response,
+    success_response: typeof obj.success_response === "string" ? obj.success_response : "Task completed successfully",
     failure_response: typeof obj.failure_response === "string" ? obj.failure_response : "Tool execution failed",
   };
 }

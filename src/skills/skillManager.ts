@@ -12,12 +12,14 @@ export type SkillInfo = {
   command?: string;
   keywords?: string[];
   hasHandler?: boolean;
+  preferToolResult?: boolean;
   detail?: string;
   install?: string;
   metadata?: {
     command?: string;
     install?: string;
     keywords?: string[];
+    preferToolResult?: boolean;
     [key: string]: any;
   };
 };
@@ -75,6 +77,7 @@ export class SkillManager {
           command: frontmetadata.command,
           keywords: frontmetadata.keywords,
           hasHandler: false,
+          preferToolResult: frontmetadata.preferToolResult,
           install: frontmetadata.install,
           metadata: frontmetadata,
           detail: content
@@ -251,6 +254,7 @@ function extractFrontmatter(content: string): {
   command?: string;
   install?: string;
   keywords?: string[];
+  preferToolResult?: boolean;
 } {
   const lines = content.split("\n");
   if (lines[0]?.trim() !== "---") return {};
@@ -263,6 +267,7 @@ function extractFrontmatter(content: string): {
   let command: string | undefined;
   let install: string | undefined;
   let keywords: string[] | undefined;
+  let preferToolResult: boolean | undefined;
 
   for (const line of fmLines) {
     const trimmed = line.trim();
@@ -276,6 +281,15 @@ function extractFrontmatter(content: string): {
       command = trimmed.slice("command:".length).trim();
     } else if (trimmed.startsWith("install:")) {
       install = trimmed.slice("install:".length).trim();
+    } else if (trimmed.startsWith("prefer_tool_result:") || trimmed.startsWith("preferToolResult:")) {
+      const raw = trimmed
+        .replace(/^prefer_tool_result:/i, "")
+        .replace(/^preferToolResult:/i, "")
+        .trim();
+      const parsed = parseFrontmatterBoolean(raw);
+      if (parsed !== undefined) {
+        preferToolResult = parsed;
+      }
     } else if (trimmed.startsWith("keywords:") || trimmed.startsWith("aliases:")) {
       const raw = trimmed.replace(/^(keywords|aliases):/i, "").trim();
       const list = parseFrontmatterList(raw);
@@ -285,7 +299,7 @@ function extractFrontmatter(content: string): {
     }
   }
 
-  return { name, description, terminal, command, install, keywords };
+  return { name, description, terminal, command, install, keywords, preferToolResult };
 }
 
 function parseFrontmatterList(raw: string): string[] {
@@ -302,6 +316,14 @@ function parseFrontmatterList(raw: string): string[] {
     .split(",")
     .map((item) => item.trim().replace(/^["']|["']$/g, ""))
     .filter(Boolean);
+}
+
+function parseFrontmatterBoolean(raw: string): boolean | undefined {
+  const text = raw.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  if (!text) return undefined;
+  if (["true", "1", "yes", "on"].includes(text)) return true;
+  if (["false", "0", "no", "off"].includes(text)) return false;
+  return undefined;
 }
 
 function extractNpmInstallPackage(command: string): string | undefined {
