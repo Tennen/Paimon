@@ -11,6 +11,7 @@ export type SkillInfo = {
   terminal?: boolean;
   command?: string;
   keywords?: string[];
+  directCommands?: string[];
   hasHandler?: boolean;
   preferToolResult?: boolean;
   detail?: string;
@@ -19,6 +20,7 @@ export type SkillInfo = {
     command?: string;
     install?: string;
     keywords?: string[];
+    directCommands?: string[];
     preferToolResult?: boolean;
     [key: string]: any;
   };
@@ -89,12 +91,19 @@ export class SkillManager {
 
         if (handlerDeclared && !this.handlers.has(name)) {
           try {
-            const mod = require(handlerPath) as { execute?: SkillHandler };
+            const mod = require(handlerPath) as { execute?: SkillHandler; directCommands?: unknown };
             if (mod.execute) {
               this.handlers.set(name, mod.execute);
               const existing = this.skillMap.get(name);
               if (existing) {
                 existing.hasHandler = true;
+                const directCommands = parseDirectCommands(mod.directCommands);
+                if (directCommands.length > 0) {
+                  existing.directCommands = directCommands;
+                  if (existing.metadata) {
+                    existing.metadata.directCommands = directCommands;
+                  }
+                }
               }
             }
           } catch {
@@ -324,6 +333,24 @@ function parseFrontmatterBoolean(raw: string): boolean | undefined {
   if (["true", "1", "yes", "on"].includes(text)) return true;
   if (["false", "0", "no", "off"].includes(text)) return false;
   return undefined;
+}
+
+function parseDirectCommands(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const out: string[] = [];
+  for (const item of input) {
+    const text = String(item ?? "").trim().toLowerCase();
+    if (!text || !text.startsWith("/")) {
+      continue;
+    }
+    const command = text.split(/\s+/, 1)[0];
+    if (!out.includes(command)) {
+      out.push(command);
+    }
+  }
+  return out;
 }
 
 function extractNpmInstallPackage(command: string): string | undefined {

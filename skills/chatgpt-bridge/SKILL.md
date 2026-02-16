@@ -14,7 +14,7 @@ Handler input contract
 
 - Tool: `skill.chatgpt-bridge`
 - Op: `execute`
-- Args: `{"input":"<user original question>"}` (required)
+- Args: `{"input":"<user message>"}` (required)
 - Do not synthesize extra arguments. Keep `input` as user intent.
 
 Output shape

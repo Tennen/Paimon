@@ -99,5 +99,19 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
         ...(keywords ? { keywords } : {})
       }
     );
+
+    const directCommands = skill.directCommands ?? skill.metadata?.directCommands;
+    if (Array.isArray(directCommands)) {
+      for (const command of directCommands) {
+        registry.registerDirectToolCall({
+          command,
+          tool: toolName,
+          op: "execute",
+          argName: "input",
+          argMode: "full_input",
+          preferToolResult: skill.preferToolResult ?? true
+        });
+      }
+    }
   }
 }

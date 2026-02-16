@@ -46,6 +46,11 @@ export class Orchestrator {
     const memory = this.memoryStore.read(envelope.sessionId);
 
     try {
+      const directRouteResponse = await this.handleDirectCommandRoute(text, memory, envelope, start);
+      if (directRouteResponse) {
+        return directRouteResponse;
+      }
+
       // Step 1: LLM Call - Determine the skill to use
       const llmResult = await this.llmCallStep(text, memory, envelope, start);
       if (llmResult.response) {
@@ -84,6 +89,35 @@ export class Orchestrator {
   }
 
   // New step-based processing methods
+  private async handleDirectCommandRoute(
+    text: string,
+    memory: string,
+    envelope: Envelope,
+    start: number
+  ): Promise<Response | null> {
+    const matched = this.toolRegistry.matchDirectToolCall(text);
+    if (!matched) {
+      return null;
+    }
+
+    const toolExecution: ToolExecution = {
+      tool: matched.tool,
+      op: matched.op,
+      args: matched.args
+    };
+    const toolResult = await this.toolCallStep(toolExecution, text, memory, envelope, start);
+    const response = await this.respondStep(
+      toolResult.result,
+      "",
+      "",
+      matched.preferToolResult,
+      text,
+      envelope,
+      start
+    );
+    return response;
+  }
+
   private async llmCallStep(
     text: string,
     memory: string,

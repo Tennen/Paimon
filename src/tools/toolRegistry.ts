@@ -27,9 +27,27 @@ export type ToolModule = {
 
 export type ToolRuntimeContext = Record<string, unknown>;
 
+export type DirectToolCallRoute = {
+  command: string;
+  tool: string;
+  op: string;
+  preferToolResult?: boolean;
+  argName?: string;
+  argMode?: "full_input" | "rest";
+};
+
+export type DirectToolCallMatch = {
+  command: string;
+  tool: string;
+  op: string;
+  args: Record<string, unknown>;
+  preferToolResult: boolean;
+};
+
 export class ToolRegistry {
   private handlers: ToolHandler[] = [];
   private schema: ToolSchemaItem[] = [];
+  private directToolCalls: DirectToolCallRoute[] = [];
 
   register(handler: ToolHandler, schema?: ToolSchemaItem | ToolSchemaItem[]): void {
     this.handlers.push(handler);
@@ -59,6 +77,48 @@ export class ToolRegistry {
     return merged;
   }
 
+  registerDirectToolCall(route: DirectToolCallRoute): void {
+    const command = normalizeDirectCommand(route.command);
+    if (!command) return;
+    const normalized: DirectToolCallRoute = {
+      ...route,
+      command,
+      argName: route.argName ?? "input",
+      argMode: route.argMode ?? "full_input"
+    };
+    this.directToolCalls = this.directToolCalls.filter((item) => item.command !== command);
+    this.directToolCalls.push(normalized);
+  }
+
+  listDirectToolCalls(): DirectToolCallRoute[] {
+    return this.directToolCalls.slice();
+  }
+
+  matchDirectToolCall(input: string): DirectToolCallMatch | null {
+    const raw = String(input ?? "").trim();
+    if (!raw.startsWith("/")) {
+      return null;
+    }
+
+    const commandToken = raw.split(/\s+/, 1)[0].toLowerCase();
+    const route = this.directToolCalls.find((item) => item.command === commandToken);
+    if (!route) {
+      return null;
+    }
+
+    const rest = raw.slice(commandToken.length).trim();
+    const argName = route.argName ?? "input";
+    const argValue = route.argMode === "rest" ? rest : raw;
+    return {
+      command: commandToken,
+      tool: route.tool,
+      op: route.op,
+      args: {
+        [argName]: argValue
+      },
+      preferToolResult: route.preferToolResult ?? true
+    };
+  }
 }
 
 export function loadTools(registry: ToolRegistry, deps: ToolDependencies): void {
@@ -83,4 +143,11 @@ export function loadTools(registry: ToolRegistry, deps: ToolDependencies): void 
       // ignore load errors
     }
   }
+}
+
+function normalizeDirectCommand(raw: string): string {
+  const text = String(raw ?? "").trim().toLowerCase();
+  if (!text) return "";
+  if (!text.startsWith("/")) return "";
+  return text.split(/\s+/, 1)[0];
 }

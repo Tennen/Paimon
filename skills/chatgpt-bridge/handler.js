@@ -21,15 +21,22 @@ let browserPromise = null;
 let pagePromise = null;
 let serialQueue = Promise.resolve();
 
+module.exports.directCommands = ["/gpt"];
+
 module.exports.execute = async function execute(input) {
   const message = String(input || "").trim();
   if (!message) {
     return { text: "请输入要询问 ChatGPT 的内容。" };
   }
 
+  const command = parseGptCommand(message);
+  if (command.kind === "help") {
+    return { text: buildGptCommandHelpText() };
+  }
+
   const task = serialQueue.then(
-    () => runChatgptRequest(message),
-    () => runChatgptRequest(message)
+    () => runChatgptRequest(command),
+    () => runChatgptRequest(command)
   );
   serialQueue = task.then(
     () => undefined,
@@ -38,14 +45,25 @@ module.exports.execute = async function execute(input) {
   return task;
 };
 
-async function runChatgptRequest(message) {
+async function runChatgptRequest(command) {
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const page = await getChatPage();
       await ensureChatReady(page);
+
+      if (command.kind === "new") {
+        const session = await startNewChat(page);
+        if (!command.prompt) {
+          return {
+            text: `已新建对话${session.label ? `（${session.label}）` : ""}，请发送问题。`
+          };
+        }
+      }
+
+      const prompt = command.prompt;
       const assistantCountBefore = await getAssistantCount(page);
-      await fillComposerAndSend(page, message);
+      await fillComposerAndSend(page, prompt);
       await waitForGenerationComplete(page, assistantCountBefore);
 
       const reply = await readLastAssistantReply(page);
@@ -75,6 +93,121 @@ async function runChatgptRequest(message) {
 
   const detail = lastError instanceof Error ? lastError.message : String(lastError || "unknown");
   throw new Error(`chatgpt-bridge failed: ${detail}`);
+}
+
+function parseGptCommand(message) {
+  const trimmed = String(message || "").trim();
+  if (!trimmed) {
+    return { kind: "help", prompt: "" };
+  }
+
+  if (!/^\/gpt(?:\s|$)/i.test(trimmed)) {
+    return { kind: "ask", prompt: trimmed };
+  }
+
+  const rest = trimmed.replace(/^\/gpt\b/i, "").trim();
+  if (!rest) {
+    return { kind: "help", prompt: "" };
+  }
+
+  if (/^(help|h|\?)$/i.test(rest)) {
+    return { kind: "help", prompt: "" };
+  }
+
+  const newMatch = rest.match(/^(new|reset)\b\s*(.*)$/i);
+  if (newMatch) {
+    return { kind: "new", prompt: String(newMatch[2] || "").trim() };
+  }
+
+  return { kind: "ask", prompt: rest };
+}
+
+function buildGptCommandHelpText() {
+  return [
+    "ChatGPT 指令：",
+    "/gpt <问题>：在当前对话提问",
+    "/gpt new：新建对话（清空上下文）",
+    "/gpt new <问题>：新建对话后立即提问"
+  ].join("\n");
+}
+
+async function startNewChat(page) {
+  const beforeId = getConversationIdFromUrl(page.url());
+  let started = false;
+
+  const clicked = await clickNewChatButton(page);
+  if (clicked) {
+    await sleep(350);
+    await ensureChatReady(page);
+    const afterClickId = getConversationIdFromUrl(page.url());
+    started = hasConversationReset(beforeId, afterClickId);
+  }
+
+  if (!started) {
+    const baseUrl = CHATGPT_URL.replace(/\/$/, "");
+    await page.goto(`${baseUrl}/?new_chat=1&t=${Date.now()}`, {
+      waitUntil: "domcontentloaded",
+      timeout: PAGE_TIMEOUT_MS
+    });
+    await ensureChatReady(page);
+  }
+
+  const finalId = getConversationIdFromUrl(page.url());
+  return {
+    label: finalId ? `chat#${finalId.slice(0, 8)}` : ""
+  };
+}
+
+async function clickNewChatButton(page) {
+  const clicked = await page.evaluate(() => {
+    const isVisible = (el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+    };
+
+    const direct = document.querySelector("button[data-testid='new-chat-button'],a[data-testid='new-chat-button']");
+    if (direct instanceof HTMLElement && isVisible(direct)) {
+      direct.click();
+      return true;
+    }
+
+    const candidates = Array.from(document.querySelectorAll("button,a"));
+    const target = candidates.find((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      if (!isVisible(node)) return false;
+      const text = [
+        node.getAttribute("aria-label") || "",
+        node.getAttribute("title") || "",
+        node.textContent || ""
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!text) return false;
+      return /new chat|new conversation|新建聊天|新聊天|新对话|重置对话/.test(text);
+    });
+
+    if (target instanceof HTMLElement) {
+      target.click();
+      return true;
+    }
+
+    return false;
+  });
+
+  return Boolean(clicked);
+}
+
+function getConversationIdFromUrl(url) {
+  const value = String(url || "");
+  const matched = value.match(/\/c\/([a-z0-9-]+)/i);
+  return matched ? matched[1] : "";
+}
+
+function hasConversationReset(previousId, currentId) {
+  if (!previousId) return true;
+  return !currentId || currentId !== previousId;
 }
 
 function loadPuppeteer() {
@@ -248,13 +381,9 @@ async function fillComposerAndSend(page, message) {
   await page.keyboard.press("Backspace");
   await page.keyboard.type(message, { delay: 0 });
   await sleep(120);
-  console.log("message typed");
   const clicked = await clickSendButton(page);
-  console.log("clicked", clicked);
   if (!clicked) {
-    console.log("pressing Enter");
     await page.keyboard.press("Enter");
-    console.log("Enter pressed");
   }
   await sleep(120);
 }
