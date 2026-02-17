@@ -34,6 +34,7 @@ export type DirectToolCallRoute = {
   preferToolResult?: boolean;
   async?: boolean;
   acceptedText?: string;
+  acceptedDelayMs?: number;
   argName?: string;
   argMode?: "full_input" | "rest";
 };
@@ -46,6 +47,7 @@ export type DirectToolCallMatch = {
   preferToolResult: boolean;
   async: boolean;
   acceptedText: string;
+  acceptedDelayMs: number;
 };
 
 export class ToolRegistry {
@@ -122,7 +124,8 @@ export class ToolRegistry {
       },
       preferToolResult: route.preferToolResult ?? true,
       async: route.async ?? false,
-      acceptedText: route.acceptedText ?? "任务已受理，正在处理中，稍后回调结果。"
+      acceptedText: route.acceptedText ?? "任务已受理，正在处理中，稍后回调结果。",
+      acceptedDelayMs: normalizeAcceptedDelayMs(route.acceptedDelayMs, route.async ?? false)
     };
   }
 }
@@ -156,4 +159,15 @@ function normalizeDirectCommand(raw: string): string {
   if (!text) return "";
   if (!text.startsWith("/")) return "";
   return text.split(/\s+/, 1)[0];
+}
+
+function normalizeAcceptedDelayMs(raw: number | undefined, isAsync: boolean): number {
+  if (!isAsync) return 0;
+  const fallback = 20000;
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return fallback;
+  }
+  const value = Math.floor(raw);
+  if (value < 0) return 0;
+  return value;
 }

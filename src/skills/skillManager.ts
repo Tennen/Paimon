@@ -14,6 +14,7 @@ export type SkillInfo = {
   directCommands?: string[];
   directAsync?: boolean;
   directAcceptedText?: string;
+  directAcceptedDelayMs?: number;
   hasHandler?: boolean;
   preferToolResult?: boolean;
   detail?: string;
@@ -25,6 +26,7 @@ export type SkillInfo = {
     directCommands?: string[];
     directAsync?: boolean;
     directAcceptedText?: string;
+    directAcceptedDelayMs?: number;
     preferToolResult?: boolean;
     [key: string]: any;
   };
@@ -100,6 +102,7 @@ export class SkillManager {
               directCommands?: unknown;
               directAsync?: unknown;
               directAcceptedText?: unknown;
+              directAcceptedDelayMs?: unknown;
             };
             if (mod.execute) {
               this.handlers.set(name, mod.execute);
@@ -125,6 +128,13 @@ export class SkillManager {
                   existing.directAcceptedText = directAcceptedText;
                   if (existing.metadata) {
                     existing.metadata.directAcceptedText = directAcceptedText;
+                  }
+                }
+                const directAcceptedDelayMs = parseMaybeNumber(mod.directAcceptedDelayMs);
+                if (directAcceptedDelayMs !== undefined) {
+                  existing.directAcceptedDelayMs = directAcceptedDelayMs;
+                  if (existing.metadata) {
+                    existing.metadata.directAcceptedDelayMs = directAcceptedDelayMs;
                   }
                 }
               }
@@ -390,6 +400,19 @@ function parseMaybeString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const text = value.trim();
   return text.length > 0 ? text : undefined;
+}
+
+function parseMaybeNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.floor(value);
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isFinite(parsed)) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
 }
 
 function extractNpmInstallPackage(command: string): string | undefined {

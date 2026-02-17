@@ -107,9 +107,39 @@ export class Orchestrator {
 
     if (matched.async) {
       const taskId = createAsyncTaskId(matched.command);
-      this.enqueueAsyncDirectTask(envelope.sessionId, async () => {
-        await this.runAsyncDirectToolCall(taskId, matched, text, envelope, Date.now());
-      });
+      const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
+      const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
+        this.executeAsyncDirectToolCall(matched, text, envelope, taskEnvelope, Date.now())
+      );
+
+      try {
+        const settled = await waitForPromiseWithTimeout(executionPromise, matched.acceptedDelayMs);
+        if (settled.completed) {
+          this.processed.set(envelope.requestId, settled.value.response);
+          return settled.value.response;
+        }
+      } catch (error) {
+        const fallback: Response = {
+          text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
+        };
+        this.processed.set(envelope.requestId, fallback);
+        this.appendMemory(envelope, text, fallback);
+        return fallback;
+      }
+
+      void executionPromise
+        .then(async ({ taskEnvelope: doneEnvelope, response }) => {
+          await this.callbackDispatcher.send(doneEnvelope, response);
+        })
+        .catch(async (error) => {
+          const fallback: Response = {
+            text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
+          };
+          this.processed.set(taskEnvelope.requestId, fallback);
+          this.appendMemory(taskEnvelope, text, fallback);
+          await this.callbackDispatcher.send(taskEnvelope, fallback);
+        });
+
       const acceptedText = matched.acceptedText || "任务已受理，正在处理中，稍后回调结果。";
       const acceptedResponse: Response = {
         text: acceptedText,
@@ -143,11 +173,13 @@ export class Orchestrator {
     return response;
   }
 
-  private enqueueAsyncDirectTask(sessionId: string, task: () => Promise<void>): void {
+  private enqueueAsyncDirectTask<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
     const prior = this.asyncDirectQueues.get(sessionId) ?? Promise.resolve();
-    const next = prior
+    const running = prior
       .catch(() => undefined)
-      .then(task)
+      .then(task);
+    const next = running
+      .then(() => undefined)
       .catch((error) => {
         console.error("async direct task failed:", error);
       });
@@ -157,43 +189,33 @@ export class Orchestrator {
         this.asyncDirectQueues.delete(sessionId);
       }
     });
+    return running;
   }
 
-  private async runAsyncDirectToolCall(
-    taskId: string,
+  private async executeAsyncDirectToolCall(
     matched: DirectToolCallMatch,
     text: string,
     envelope: Envelope,
+    taskEnvelope: Envelope,
     start: number
-  ): Promise<void> {
-    const taskEnvelope: Envelope = {
-      ...envelope,
-      requestId: `${envelope.requestId}:async:${taskId}`
+  ): Promise<{ taskEnvelope: Envelope; response: Response }> {
+    const latestMemory = this.memoryStore.read(envelope.sessionId);
+    const toolExecution: ToolExecution = {
+      tool: matched.tool,
+      op: matched.op,
+      args: matched.args
     };
-    try {
-      const latestMemory = this.memoryStore.read(envelope.sessionId);
-      const toolExecution: ToolExecution = {
-        tool: matched.tool,
-        op: matched.op,
-        args: matched.args
-      };
-      const toolResult = await this.toolCallStep(toolExecution, text, latestMemory, taskEnvelope, start);
-      const response = await this.respondStep(
-        toolResult.result,
-        "",
-        "",
-        matched.preferToolResult,
-        text,
-        taskEnvelope,
-        start
-      );
-      await this.callbackDispatcher.send(taskEnvelope, response);
-    } catch (error) {
-      const fallback: Response = {
-        text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
-      };
-      await this.callbackDispatcher.send(taskEnvelope, fallback);
-    }
+    const toolResult = await this.toolCallStep(toolExecution, text, latestMemory, taskEnvelope, start);
+    const response = await this.respondStep(
+      toolResult.result,
+      "",
+      "",
+      matched.preferToolResult,
+      text,
+      taskEnvelope,
+      start
+    );
+    return { taskEnvelope, response };
   }
 
   private async llmCallStep(
@@ -622,4 +644,36 @@ function isGenericResponseText(text: string | undefined): boolean {
 function createAsyncTaskId(command: string): string {
   const normalized = String(command ?? "").trim().replace(/[^a-z0-9]+/gi, "").toLowerCase() || "task";
   return `${normalized}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createAsyncTaskEnvelope(envelope: Envelope, taskId: string): Envelope {
+  return {
+    ...envelope,
+    requestId: `${envelope.requestId}:async:${taskId}`
+  };
+}
+
+async function waitForPromiseWithTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number
+): Promise<{ completed: true; value: T } | { completed: false }> {
+  if (timeoutMs <= 0) {
+    return { completed: false };
+  }
+
+  let timer: NodeJS.Timeout | null = null;
+  const timeout = new Promise<{ completed: false }>((resolve) => {
+    timer = setTimeout(() => resolve({ completed: false }), timeoutMs);
+  });
+
+  const settled = await Promise.race([
+    promise.then((value) => ({ completed: true as const, value })),
+    timeout
+  ]);
+
+  if (timer) {
+    clearTimeout(timer);
+  }
+
+  return settled;
 }

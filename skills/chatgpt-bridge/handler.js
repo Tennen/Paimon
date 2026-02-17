@@ -3,6 +3,7 @@ const { setTimeout: sleep } = require("timers/promises");
 const CHATGPT_URL = process.env.CHATGPT_URL || "https://chatgpt.com/";
 const PAGE_TIMEOUT_MS = toInt(process.env.CHATGPT_PAGE_TIMEOUT_MS, 120000);
 const GENERATION_TIMEOUT_MS = toInt(process.env.CHATGPT_GENERATION_TIMEOUT_MS, 300000);
+const PROTOCOL_TIMEOUT_MS = toInt(process.env.CHATGPT_PROTOCOL_TIMEOUT_MS, 600000);
 const STOP_APPEAR_TIMEOUT_MS = toInt(process.env.CHATGPT_STOP_APPEAR_TIMEOUT_MS, 25000);
 const POLL_INTERVAL_MS = toInt(process.env.CHATGPT_POLL_INTERVAL_MS, 500);
 const MIN_IMAGE_WIDTH = toInt(process.env.CHATGPT_IMAGE_MIN_WIDTH, 80);
@@ -24,6 +25,7 @@ let serialQueue = Promise.resolve();
 module.exports.directCommands = ["/gpt"];
 module.exports.directAsync = true;
 module.exports.directAcceptedText = "收到，已交给 ChatGPT 处理中，完成后会回传结果。";
+module.exports.directAcceptedDelayMs = toInt(process.env.CHATGPT_ACCEPTED_DELAY_MS, 20000);
 
 module.exports.execute = async function execute(input) {
   const message = String(input || "").trim();
@@ -239,7 +241,8 @@ async function connectBrowser() {
   const browserWSEndpoint = await resolveBrowserWSEndpoint();
   const browser = await puppeteer.connect({
     browserWSEndpoint,
-    defaultViewport: null
+    defaultViewport: null,
+    protocolTimeout: PROTOCOL_TIMEOUT_MS
   });
   browser.on("disconnected", () => {
     browserPromise = null;
@@ -434,7 +437,16 @@ async function waitForGenerationComplete(page, previousAssistantCount) {
   let sawStop = false;
 
   while (Date.now() < doneDeadline) {
-    const state = await readGenerationState(page);
+    let state;
+    try {
+      state = await readGenerationState(page);
+    } catch (error) {
+      if (isEvaluateTimeoutError(error)) {
+        await sleep(POLL_INTERVAL_MS);
+        continue;
+      }
+      throw error;
+    }
     const hasCompletionButton = state.sendVisible || state.regenerateVisible || state.speechVisible;
     if (state.stopVisible) {
       sawStop = true;
@@ -694,8 +706,17 @@ function isRecoverableError(error) {
     message.includes("target closed") ||
     message.includes("session closed") ||
     message.includes("connection closed") ||
+    message.includes("callfunctionon timed out") ||
     message.includes("protocol error") ||
     message.includes("browser has disconnected")
+  );
+}
+
+function isEvaluateTimeoutError(error) {
+  const message = String(error instanceof Error ? error.message : error || "").toLowerCase();
+  return (
+    message.includes("callfunctionon timed out") ||
+    message.includes("protocol timeout")
   );
 }
 
