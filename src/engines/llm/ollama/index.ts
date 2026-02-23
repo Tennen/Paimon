@@ -60,7 +60,7 @@ export class OllamaLLMEngine implements LLMEngine {
         lastRaw = await ollamaChat({
           baseUrl: this.options.baseUrl,
           model,
-          keepAlive: -1,
+          // keepAlive: -1,
           timeoutMs: this.options.timeoutMs,
           messages: [
             { role: "system", content: systemPrompt },
