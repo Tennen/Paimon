@@ -3,6 +3,7 @@ import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 import express, { Express, Request, Response as ExResponse } from "express";
+import dotenv from "dotenv";
 import { IngressAdapter } from "./types";
 import { SessionManager } from "../sessionManager";
 import { EnvConfigStore } from "../config/envConfigStore";
@@ -41,9 +42,12 @@ export class AdminIngressAdapter implements IngressAdapter {
 
   private registerApiRoutes(app: Express): void {
     app.get("/admin/api/config", (_req, res) => {
+      const envPath = this.envStore.getPath();
       res.json({
         model: this.envStore.getModel(),
-        envPath: this.envStore.getPath(),
+        planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
+        planningTimeoutMs: getEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS"),
+        envPath,
         taskStorePath: this.scheduler.getStorePath(),
         userStorePath: this.scheduler.getUserStorePath(),
         timezone: this.scheduler.getTimezone(),
@@ -63,33 +67,76 @@ export class AdminIngressAdapter implements IngressAdapter {
     });
 
     app.post("/admin/api/config/model", async (req: Request, res: ExResponse) => {
-      const body = (req.body ?? {}) as { model?: unknown; restart?: unknown };
+      const body = (req.body ?? {}) as {
+        model?: unknown;
+        planningModel?: unknown;
+        planningTimeoutMs?: unknown;
+        restart?: unknown;
+      };
       const model = typeof body.model === "string" ? body.model.trim() : "";
       if (!model) {
         res.status(400).json({ error: "model is required" });
         return;
       }
 
+      const planningModel = typeof body.planningModel === "string"
+        ? body.planningModel.trim()
+        : "";
+      const planningTimeoutRaw = normalizeOptionalIntegerString(body.planningTimeoutMs);
+      if (planningTimeoutRaw === null) {
+        res.status(400).json({ error: "planningTimeoutMs must be a positive integer or empty" });
+        return;
+      }
+
+      const envPath = this.envStore.getPath();
+
       try {
         this.envStore.setModel(model);
+        if (planningModel) {
+          setEnvValue(envPath, "OLLAMA_PLANNING_MODEL", planningModel);
+        } else {
+          unsetEnvValue(envPath, "OLLAMA_PLANNING_MODEL");
+        }
+        if (planningTimeoutRaw) {
+          setEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS", planningTimeoutRaw);
+        } else {
+          unsetEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS");
+        }
       } catch (error) {
-        res.status(500).json({ error: (error as Error).message ?? "failed to save model" });
+        res.status(500).json({ error: (error as Error).message ?? "failed to save model config" });
         return;
       }
 
       const restart = parseOptionalBoolean(body.restart) ?? false;
+      const effectivePlanningModel = planningModel || model;
+      const effectivePlanningTimeoutMs = planningTimeoutRaw || "";
       if (!restart) {
-        res.json({ ok: true, model, restarted: false });
+        res.json({
+          ok: true,
+          model,
+          planningModel: effectivePlanningModel,
+          planningTimeoutMs: effectivePlanningTimeoutMs,
+          restarted: false
+        });
         return;
       }
 
       try {
         const output = await restartPm2();
-        res.json({ ok: true, model, restarted: true, output });
+        res.json({
+          ok: true,
+          model,
+          planningModel: effectivePlanningModel,
+          planningTimeoutMs: effectivePlanningTimeoutMs,
+          restarted: true,
+          output
+        });
       } catch (error) {
         res.status(500).json({
           ok: false,
           model,
+          planningModel: effectivePlanningModel,
+          planningTimeoutMs: effectivePlanningTimeoutMs,
           restarted: false,
           error: (error as Error).message ?? "pm2 restart failed"
         });
@@ -388,6 +435,110 @@ function parseOptionalBoolean(value: unknown): boolean | undefined {
     if (["false", "0", "no", "off"].includes(normalized)) return false;
   }
   return undefined;
+}
+
+function readEnvValues(envPath: string): Record<string, string> {
+  if (!fs.existsSync(envPath)) {
+    return {};
+  }
+  const content = fs.readFileSync(envPath, "utf-8");
+  return dotenv.parse(content);
+}
+
+function getEnvValue(envPath: string, key: string): string {
+  const values = readEnvValues(envPath);
+  return values[key] ?? process.env[key] ?? "";
+}
+
+function setEnvValue(envPath: string, key: string, value: string): void {
+  const text = value.trim();
+  if (!text) {
+    throw new Error(`${key} cannot be empty`);
+  }
+
+  const dir = path.dirname(envPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const lines = fs.existsSync(envPath)
+    ? fs.readFileSync(envPath, "utf-8").split(/\r?\n/)
+    : [];
+
+  const escapedValue = formatEnvValue(text);
+  const targetPrefix = `${key}=`;
+  let replaced = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line || /^\s*#/.test(line)) {
+      continue;
+    }
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    if (match?.[1] === key) {
+      lines[i] = `${targetPrefix}${escapedValue}`;
+      replaced = true;
+      break;
+    }
+  }
+
+  if (!replaced) {
+    if (lines.length > 0 && lines[lines.length - 1] !== "") {
+      lines.push("");
+    }
+    lines.push(`${targetPrefix}${escapedValue}`);
+  }
+
+  fs.writeFileSync(envPath, `${lines.join("\n").replace(/\n+$/, "\n")}`, "utf-8");
+  process.env[key] = text;
+}
+
+function unsetEnvValue(envPath: string, key: string): void {
+  if (!fs.existsSync(envPath)) {
+    delete process.env[key];
+    return;
+  }
+
+  const lines = fs.readFileSync(envPath, "utf-8").split(/\r?\n/);
+  const nextLines = lines.filter((line) => {
+    if (!line || /^\s*#/.test(line)) {
+      return true;
+    }
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    return match?.[1] !== key;
+  });
+  fs.writeFileSync(envPath, `${nextLines.join("\n").replace(/\n+$/, "\n")}`, "utf-8");
+  delete process.env[key];
+}
+
+function formatEnvValue(value: string): string {
+  if (/[\s#"'`]/.test(value)) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+function normalizeOptionalIntegerString(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  const raw = typeof value === "number"
+    ? String(Math.floor(value))
+    : typeof value === "string"
+      ? value.trim()
+      : "";
+
+  if (!raw) {
+    return "";
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return String(Math.floor(parsed));
 }
 
 async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] }> {

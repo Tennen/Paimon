@@ -1,4 +1,4 @@
-import { LLMEngine, LLMRuntimeContext, LLMPlanMeta } from "../llm";
+import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep } from "../llm";
 import { mockLLM } from "../../../mockLLM";
 import { ollamaChat } from "./client";
 import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
@@ -7,7 +7,9 @@ import { parseSkillSelectionResult, parseSkillPlanningResult } from "../../../co
 export type OllamaLLMOptions = {
   baseUrl: string;
   model: string;
+  planningModel: string;
   timeoutMs: number;
+  planningTimeoutMs: number;
   maxRetries: number;
   strictJson: boolean;
 };
@@ -16,13 +18,22 @@ export class OllamaLLMEngine implements LLMEngine {
   private readonly options: OllamaLLMOptions;
 
   constructor(options?: Partial<OllamaLLMOptions>) {
+    const defaultModel = options?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:4b";
+    const defaultTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS ?? "30000", 10);
+
     this.options = {
       baseUrl: options?.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
-      model: options?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:4b",
-      timeoutMs: options?.timeoutMs ?? parseInt(process.env.LLM_TIMEOUT_MS ?? "30000", 10),
+      model: defaultModel,
+      planningModel: options?.planningModel ?? process.env.OLLAMA_PLANNING_MODEL ?? defaultModel,
+      timeoutMs: options?.timeoutMs ?? defaultTimeoutMs,
+      planningTimeoutMs: options?.planningTimeoutMs ?? parseInt(process.env.LLM_PLANNING_TIMEOUT_MS ?? String(defaultTimeoutMs), 10),
       maxRetries: options?.maxRetries ?? parseInt(process.env.LLM_MAX_RETRIES ?? "2", 10),
       strictJson: options?.strictJson ?? (process.env.LLM_STRICT_JSON ?? "true") === "true"
     };
+  }
+
+  getModelForStep(step: LLMExecutionStep): string {
+    return step === "skill_planning" ? this.options.planningModel : this.options.model;
   }
 
   async selectSkill(
@@ -30,6 +41,7 @@ export class OllamaLLMEngine implements LLMEngine {
     runtimeContext: LLMRuntimeContext
   ): Promise<{ decision: "respond" | "use_skill"; skill_name?: string; response_text?: string }> {
     const mode = PromptMode.SkillSelection;
+    const model = this.options.model;
     const userPrompt = buildUserPrompt(text, runtimeContext);
     const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
@@ -42,12 +54,12 @@ export class OllamaLLMEngine implements LLMEngine {
 
       try {
         if (logPrompts) {
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
         }
         lastRaw = await ollamaChat({
           baseUrl: this.options.baseUrl,
-          model: this.options.model,
+          model,
           keepAlive: -1,
           timeoutMs: this.options.timeoutMs,
           messages: [
@@ -56,7 +68,7 @@ export class OllamaLLMEngine implements LLMEngine {
           ]
         });
         if (logPrompts) {
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
         }
 
         const result = parseSkillSelectionResult(lastRaw);
@@ -82,6 +94,7 @@ export class OllamaLLMEngine implements LLMEngine {
     runtimeContext: LLMRuntimeContext
   ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
     const mode = PromptMode.SkillPlanning;
+    const model = this.options.planningModel;
     const userPrompt = buildUserPrompt(text, runtimeContext);
     const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
@@ -94,20 +107,20 @@ export class OllamaLLMEngine implements LLMEngine {
 
       try {
         if (logPrompts) {
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
         }
         lastRaw = await ollamaChat({
           baseUrl: this.options.baseUrl,
-          model: this.options.model,
-          timeoutMs: this.options.timeoutMs,
+          model,
+          timeoutMs: this.options.planningTimeoutMs,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
           ]
         });
         if (logPrompts) {
-          console.log(`[LLM][${this.options.model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
+          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
         }
 
         const result = parseSkillPlanningResult(lastRaw);

@@ -32,6 +32,8 @@ import { Textarea } from "@/components/ui/textarea";
 
 type AdminConfig = {
   model: string;
+  planningModel: string;
+  planningTimeoutMs: string;
   envPath: string;
   taskStorePath: string;
   userStorePath: string;
@@ -103,6 +105,8 @@ export default function App() {
   const [users, setUsers] = useState<PushUser[]>([]);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [modelDraft, setModelDraft] = useState("");
+  const [planningModelDraft, setPlanningModelDraft] = useState("");
+  const [planningTimeoutDraft, setPlanningTimeoutDraft] = useState("");
 
   const [notice, setNotice] = useState<Notice>(null);
 
@@ -128,6 +132,11 @@ export default function App() {
     return models.includes(modelDraft) ? modelDraft : undefined;
   }, [modelDraft, models]);
 
+  const planningModelFromList = useMemo(() => {
+    const draft = planningModelDraft.trim();
+    return draft && models.includes(draft) ? draft : undefined;
+  }, [planningModelDraft, models]);
+
   useEffect(() => {
     void bootstrap();
   }, []);
@@ -145,6 +154,8 @@ export default function App() {
     const payload = await request<AdminConfig>("/admin/api/config");
     setConfig(payload);
     setModelDraft(payload.model || "");
+    setPlanningModelDraft(payload.planningModel || "");
+    setPlanningTimeoutDraft(payload.planningTimeoutMs || "");
   }
 
   async function loadModels(): Promise<void> {
@@ -170,20 +181,35 @@ export default function App() {
       return;
     }
 
+    const planningModel = planningModelDraft.trim();
+    const planningTimeoutMs = planningTimeoutDraft.trim();
+    if (planningTimeoutMs) {
+      const parsed = Number(planningTimeoutMs);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "Planning 超时必须是正整数（毫秒）" });
+        return;
+      }
+    }
+
     setSavingModel(true);
     try {
       const payload = await request<{ output?: string }>("/admin/api/config/model", {
         method: "POST",
-        body: JSON.stringify({ model, restart: restartAfterSave })
+        body: JSON.stringify({
+          model,
+          planningModel,
+          planningTimeoutMs,
+          restart: restartAfterSave
+        })
       });
       await loadConfig();
       setNotice({
         type: "success",
-        title: restartAfterSave ? "模型已保存并触发重启" : "模型已保存",
+        title: restartAfterSave ? "模型配置已保存并触发重启" : "模型配置已保存",
         text: payload.output
       });
     } catch (error) {
-      notifyError("保存模型失败", error);
+      notifyError("保存模型配置失败", error);
     } finally {
       setSavingModel(false);
     }
@@ -391,12 +417,12 @@ export default function App() {
       <Card>
         <CardHeader>
           <CardTitle>模型与服务控制</CardTitle>
-          <CardDescription>模型列表来自本机 Ollama `/api/tags`，保存后写入 `.env` 的 `OLLAMA_MODEL`</CardDescription>
+          <CardDescription>模型列表来自本机 Ollama `/api/tags`，保存后写入 `.env`（`OLLAMA_MODEL` / `OLLAMA_PLANNING_MODEL` / `LLM_PLANNING_TIMEOUT_MS`）</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
             <div className="space-y-2">
-              <Label>模型列表（Ollama）</Label>
+              <Label>主模型列表（Ollama）</Label>
               <Select value={modelFromList} onValueChange={(value) => setModelDraft(value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="从本地模型中选择" />
@@ -418,11 +444,53 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label>目标模型（可手动输入）</Label>
+              <Label>主模型（`OLLAMA_MODEL`）</Label>
               <Input
                 value={modelDraft}
                 onChange={(event) => setModelDraft(event.target.value)}
                 placeholder="例如：qwen3:8b"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Planning 模型列表（可选）</Label>
+              <Select value={planningModelFromList} onValueChange={(value) => setPlanningModelDraft(value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="可选：单独选择 Planning 模型" />
+                </SelectTrigger>
+                <SelectContent>
+                  {models.length === 0 ? (
+                    <SelectItem value="__empty__" disabled>
+                      未读取到模型
+                    </SelectItem>
+                  ) : (
+                    models.map((model) => (
+                      <SelectItem key={`planning-${model}`} value={model}>
+                        {model}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Planning 模型（`OLLAMA_PLANNING_MODEL`）</Label>
+              <Input
+                value={planningModelDraft}
+                onChange={(event) => setPlanningModelDraft(event.target.value)}
+                placeholder="留空则跟随主模型"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Planning 超时（`LLM_PLANNING_TIMEOUT_MS`）</Label>
+              <Input
+                type="number"
+                min={1}
+                value={planningTimeoutDraft}
+                onChange={(event) => setPlanningTimeoutDraft(event.target.value)}
+                placeholder="留空则沿用 LLM_TIMEOUT_MS"
               />
             </div>
           </div>
@@ -446,7 +514,9 @@ export default function App() {
 
           <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
             <div className="mono">env: {config?.envPath ?? "-"}</div>
+            <div className="mono">planningModel: {config?.planningModel || "(follow OLLAMA_MODEL)"}</div>
             <div className="mono">timezone: {config?.timezone ?? "-"}</div>
+            <div className="mono">planningTimeoutMs: {config?.planningTimeoutMs || "(follow LLM_TIMEOUT_MS)"}</div>
             <div className="mono">taskStore: {config?.taskStorePath ?? "-"}</div>
             <div className="mono">tickMs: {config?.tickMs ?? "-"}</div>
             <div className="mono md:col-span-2">userStore: {config?.userStorePath ?? "-"}</div>

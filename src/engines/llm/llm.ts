@@ -22,9 +22,12 @@ export type LLMPlanMeta = {
   fallback: boolean;
 };
 
+export type LLMExecutionStep = "skill_selection" | "skill_planning";
+
 export interface LLMEngine {
   selectSkill(text: string, runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult>;
   planToolExecution(text: string, runtimeContext: Record<string, unknown>): Promise<SkillPlanningResult>;
+  getModelForStep(step: LLMExecutionStep): string;
 }
 
 export type LLMPlanResult = {

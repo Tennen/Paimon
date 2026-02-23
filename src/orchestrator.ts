@@ -244,7 +244,7 @@ export class Orchestrator {
     // Write audit log
     const llmMeta: LLMPlanMeta = {
       llm_provider: "ollama",
-      model: process.env.OLLAMA_MODEL ?? "unknown",
+      model: this.llmEngine.getModelForStep("skill_selection"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,
@@ -318,7 +318,7 @@ export class Orchestrator {
     // Write audit log
     const llmMeta: LLMPlanMeta = {
       llm_provider: "ollama",
-      model: process.env.OLLAMA_MODEL ?? "unknown",
+      model: this.llmEngine.getModelForStep("skill_planning"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,
