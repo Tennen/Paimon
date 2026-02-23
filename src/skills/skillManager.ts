@@ -88,7 +88,7 @@ export class SkillManager {
           preferToolResult: frontmetadata.preferToolResult,
           install: frontmetadata.install,
           metadata: frontmetadata,
-          detail: content
+          detail: extractSkillDetail(content)
         };
         if (!this.skillMap.has(name)) {
           this.skills.push(info);
@@ -287,6 +287,21 @@ function extractDescription(content: string): string {
   if (lines.length === 0) return "";
   const first = lines.find((l) => !l.startsWith("#")) ?? lines[0];
   return first.replace(/^#+\s*/, "");
+}
+
+function extractSkillDetail(content: string): string {
+  const lines = content.split("\n");
+  if (lines[0]?.trim() !== "---") {
+    return content;
+  }
+
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === "---") {
+      return lines.slice(i + 1).join("\n").trimStart();
+    }
+  }
+
+  return content;
 }
 
 function extractFrontmatter(content: string): {

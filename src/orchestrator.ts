@@ -302,7 +302,7 @@ export class Orchestrator {
     const fullToolContext = this.toolRegistry.buildRuntimeContext();
     const toolContext = filterToolContextForSkill(detail, fullToolContext, forceTools);
 
-    const runtimeContext: LLMRuntimeContext = {
+    const runtimeContext: Record<string, unknown> = {
       now: new Date().toISOString(),
       timezone: "Asia/Shanghai",
       // small model may confuse with extra context
@@ -310,12 +310,7 @@ export class Orchestrator {
       // action_history: actionHistory,
       // skills_context: skillContext,
       tools_context: toolContext,
-      next_step_context: {
-        kind: "skill_detail",
-        skill_name: skillName,
-        skill_detail: detail,
-        instruction: "Plan the tool call execution with success and failure response templates."
-      }
+      skill_detail: detail,
     };
 
     const plan = await this.llmEngine.planToolExecution(text, runtimeContext);

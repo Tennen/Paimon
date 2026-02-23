@@ -23,8 +23,8 @@ export type LLMPlanMeta = {
 };
 
 export interface LLMEngine {
-  selectSkill(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult>;
-  planToolExecution(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillPlanningResult>;
+  selectSkill(text: string, runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult>;
+  planToolExecution(text: string, runtimeContext: Record<string, unknown>): Promise<SkillPlanningResult>;
 }
 
 export type LLMPlanResult = {
