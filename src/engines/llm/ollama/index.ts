@@ -2,7 +2,7 @@ import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep } from "../
 import { mockLLM } from "../../../mockLLM";
 import { ollamaChat } from "./client";
 import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
-import { parseSkillSelectionResult, parseSkillPlanningResult } from "../../../core/json_guard";
+import { parseSkillSelectionResult, parseSkillPlanningResult } from "../json_guard";
 
 export type OllamaLLMOptions = {
   baseUrl: string;
@@ -16,6 +16,12 @@ export type OllamaLLMOptions = {
 
 export class OllamaLLMEngine implements LLMEngine {
   private readonly options: OllamaLLMOptions;
+  private static readonly THINKING_MODE_OPTIONS = {
+    temperature: 0.6,
+    top_p: 0.95,
+    top_k: 20,
+    min_p: 0
+  } as const;
 
   constructor(options?: Partial<OllamaLLMOptions>) {
     const defaultModel = options?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:4b";
@@ -114,6 +120,7 @@ export class OllamaLLMEngine implements LLMEngine {
           baseUrl: this.options.baseUrl,
           model,
           timeoutMs: this.options.planningTimeoutMs,
+          options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
