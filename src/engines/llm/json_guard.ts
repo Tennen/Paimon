@@ -1,5 +1,5 @@
 import { jsonrepair } from "jsonrepair";
-import { SkillSelectionResult, SkillPlanningResult } from "../types";
+import { SkillSelectionResult, SkillPlanningResult } from "../../types";
 
 function normalizeRawJson(rawText: string): string {
   const trimmed = rawText.trim();
