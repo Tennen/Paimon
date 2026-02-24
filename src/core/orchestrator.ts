@@ -234,9 +234,6 @@ export class Orchestrator {
       // memory,
       skills_context: skillsContext,
       // tools_context: buildToolsSchemaContext(this.toolRegistry),
-      next_step_context: {
-        kind: "skill_selection"
-      }
     };
 
     const result = await this.llmEngine.selectSkill(text, runtimeContext);
@@ -309,10 +306,6 @@ export class Orchestrator {
       // memory,
       // action_history: actionHistory,
       // skills_context: skillContext,
-      next_step_context: {
-        kind: "skill_planning",
-        skill_name: skillName
-      },
       tools_context: toolContext,
       skill_detail: detail,
     };

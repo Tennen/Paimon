@@ -210,21 +210,12 @@ export function buildUserPrompt(
   options: UserPromptOptions = {}
 ): string {
   const mode = options.mode ?? detectPromptMode(runtimeContext);
-  const stepGoal = mode === PromptMode.SkillPlanning
-    ? "Generate one valid tool execution plan JSON using CONTEXT_JSON.tools_schema and CONTEXT_JSON.tools_context."
-    : "Decide whether to respond directly or choose one skill from CONTEXT_JSON.skills_context.";
   const context = JSON.stringify(buildReadableRuntimeContext(mode, runtimeContext), null, 2);
 
   return [
-    "=== CURRENT_STEP ===",
-    mode,
-    "",
     "=== USER_REQUEST ===",
     text,
     ...(options.hasImages ? ["", "=== IMAGE_NOTE ===", "An image is attached to this user request."] : []),
-    "",
-    "=== STEP_GOAL ===",
-    stepGoal,
     "",
     "=== CONTEXT_JSON ===",
     context
