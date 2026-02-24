@@ -309,6 +309,10 @@ export class Orchestrator {
       // memory,
       // action_history: actionHistory,
       // skills_context: skillContext,
+      next_step_context: {
+        kind: "skill_planning",
+        skill_name: skillName
+      },
       tools_context: toolContext,
       skill_detail: detail,
     };

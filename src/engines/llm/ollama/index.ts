@@ -47,7 +47,7 @@ export class OllamaLLMEngine implements LLMEngine {
   ): Promise<{ decision: "respond" | "use_skill"; skill_name?: string; response_text?: string }> {
     const mode = PromptMode.SkillSelection;
     const model = this.options.model;
-    const userPrompt = buildUserPrompt(text, runtimeContext);
+    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
     const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
     let retries = 0;
@@ -96,7 +96,7 @@ export class OllamaLLMEngine implements LLMEngine {
   ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
     const mode = PromptMode.SkillPlanning;
     const model = this.options.planningModel;
-    const userPrompt = buildUserPrompt(text, runtimeContext);
+    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
     const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
 
     let retries = 0;
