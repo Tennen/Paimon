@@ -115,6 +115,8 @@ type TaskFormState = {
   enabled: boolean;
 };
 
+type MenuKey = "system" | "messages" | "market";
+
 const EMPTY_USER_FORM: UserFormState = {
   name: "",
   wecomUserId: "",
@@ -156,6 +158,7 @@ export default function App() {
   const [savingTask, setSavingTask] = useState(false);
   const [runningTaskId, setRunningTaskId] = useState("");
   const [taskForm, setTaskForm] = useState<TaskFormState>(EMPTY_TASK_FORM);
+  const [activeMenu, setActiveMenu] = useState<MenuKey>("system");
   const [marketConfig, setMarketConfig] = useState<MarketConfig | null>(null);
   const [marketPortfolio, setMarketPortfolio] = useState<MarketPortfolio>(DEFAULT_MARKET_PORTFOLIO);
   const [marketRuns, setMarketRuns] = useState<MarketRunSummary[]>([]);
@@ -581,7 +584,7 @@ export default function App() {
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 md:px-6">
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Paimon Admin</h1>
-        <p className="text-sm text-muted-foreground">模型配置、推送用户与定时任务管理（React + shadcn）</p>
+        <p className="text-sm text-muted-foreground">在一个页面中管理模型、消息接收人和自动任务</p>
       </header>
 
       {notice ? (
@@ -592,9 +595,42 @@ export default function App() {
       ) : null}
 
       <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>功能菜单</CardTitle>
+          <CardDescription>按功能切换，避免一次展示全部设置</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant={activeMenu === "system" ? "default" : "outline"}
+              onClick={() => setActiveMenu("system")}
+            >
+              系统设置
+            </Button>
+            <Button
+              type="button"
+              variant={activeMenu === "messages" ? "default" : "outline"}
+              onClick={() => setActiveMenu("messages")}
+            >
+              消息任务
+            </Button>
+            <Button
+              type="button"
+              variant={activeMenu === "market" ? "default" : "outline"}
+              onClick={() => setActiveMenu("market")}
+            >
+              Market Analysis
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {activeMenu === "system" ? (
+      <Card>
         <CardHeader>
           <CardTitle>模型与服务控制</CardTitle>
-          <CardDescription>模型列表来自本机 Ollama `/api/tags`，保存后写入 `.env`（`OLLAMA_MODEL` / `OLLAMA_PLANNING_MODEL` / `LLM_PLANNING_TIMEOUT_MS`）</CardDescription>
+          <CardDescription>选择模型并保存，必要时可一键重启服务</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
@@ -621,7 +657,7 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label>主模型（`OLLAMA_MODEL`）</Label>
+              <Label>主模型</Label>
               <Input
                 value={modelDraft}
                 onChange={(event) => setModelDraft(event.target.value)}
@@ -652,7 +688,7 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label>Planning 模型（`OLLAMA_PLANNING_MODEL`）</Label>
+              <Label>Planning 模型（可选）</Label>
               <Input
                 value={planningModelDraft}
                 onChange={(event) => setPlanningModelDraft(event.target.value)}
@@ -661,7 +697,7 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <Label>Planning 超时（`LLM_PLANNING_TIMEOUT_MS`）</Label>
+              <Label>Planning 超时（毫秒，可选）</Label>
               <Input
                 type="number"
                 min={1}
@@ -700,11 +736,13 @@ export default function App() {
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
+      {activeMenu === "market" ? (
       <Card>
         <CardHeader>
           <CardTitle>Market Analysis</CardTitle>
-          <CardDescription>管理持仓配置、查看最近分析结果，并一键生成 13:30 / 15:15 定时任务</CardDescription>
+          <CardDescription>管理持仓、查看最近分析结果，并快速生成盘中/收盘任务</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-[220px_1fr]">
@@ -906,12 +944,14 @@ export default function App() {
           </Table>
         </CardContent>
       </Card>
+      ) : null}
 
+      {activeMenu === "messages" ? (
       <div className="grid gap-4 xl:grid-cols-[1fr_1.25fr]">
         <Card>
           <CardHeader>
             <CardTitle>推送用户</CardTitle>
-            <CardDescription>创建后可在任务中直接选择，不再手动输入 `toUser`</CardDescription>
+            <CardDescription>先创建消息接收人，后续任务可直接选择</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form className="space-y-3" onSubmit={(event) => void handleSubmitUser(event)}>
@@ -926,13 +966,13 @@ export default function App() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="user-wecom-id">WeCom UserId</Label>
+                <Label htmlFor="user-wecom-id">企业微信账号（UserId）</Label>
                 <Input
                   id="user-wecom-id"
                   className="mono"
                   value={userForm.wecomUserId}
                   onChange={(event) => setUserForm((prev) => ({ ...prev, wecomUserId: event.target.value }))}
-                  placeholder="例如：zhangsan"
+                  placeholder="例如：zhangsan（与通讯录一致）"
                 />
               </div>
 
@@ -963,7 +1003,7 @@ export default function App() {
               <TableHeader>
                 <TableRow>
                   <TableHead>名称</TableHead>
-                  <TableHead>WeCom UserId</TableHead>
+                  <TableHead>企业微信账号</TableHead>
                   <TableHead>状态</TableHead>
                   <TableHead className="w-[180px]">操作</TableHead>
                 </TableRow>
@@ -1010,8 +1050,8 @@ export default function App() {
 
         <Card>
           <CardHeader>
-            <CardTitle>定时任务（每天）</CardTitle>
-            <CardDescription>任务必须绑定推送用户，定时触发后会走完整 orchestrator</CardDescription>
+            <CardTitle>定时任务（每日）</CardTitle>
+            <CardDescription>设置每天自动发送的内容和时间，到点后会自动推送给所选用户</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form className="space-y-3" onSubmit={(event) => void handleSubmitTask(event)}>
@@ -1063,7 +1103,7 @@ export default function App() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="task-message">提问内容</Label>
+                <Label htmlFor="task-message">消息内容</Label>
                 <Textarea
                   id="task-message"
                   value={taskForm.message}
@@ -1172,6 +1212,7 @@ export default function App() {
           </CardContent>
         </Card>
       </div>
+      ) : null}
     </main>
   );
 }
