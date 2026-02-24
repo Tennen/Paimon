@@ -14,6 +14,7 @@ import {
   UpdatePushUserInput,
   UpdateScheduledTaskInput
 } from "../scheduler/schedulerService";
+import { ScheduledTask } from "../scheduler/taskStore";
 
 const execAsync = promisify(exec);
 
@@ -21,6 +22,59 @@ const DEFAULT_ADMIN_DIST_CANDIDATES = [
   path.resolve(process.cwd(), "dist/admin-web"),
   path.resolve(process.cwd(), "admin-web/dist")
 ];
+
+type MarketPhase = "midday" | "close";
+
+type MarketPortfolioFund = {
+  code: string;
+  quantity: number;
+  avgCost: number;
+};
+
+type MarketPortfolio = {
+  funds: MarketPortfolioFund[];
+  cash: number;
+};
+
+type MarketRunSummary = {
+  id: string;
+  createdAt: string;
+  phase: MarketPhase;
+  marketState: string;
+  benchmark?: string;
+  assetSignalCount: number;
+  signals: Array<{ code: string; signal: string }>;
+  explanationSummary?: string;
+  file?: string;
+};
+
+type MarketStateFile = {
+  version: 1;
+  latestRunId: string;
+  latestByPhase: {
+    midday: { id: string; createdAt: string; file?: string } | null;
+    close: { id: string; createdAt: string; file?: string } | null;
+  };
+  recentRuns: MarketRunSummary[];
+  updatedAt: string;
+};
+
+type BootstrapMarketTasksPayload = {
+  userId: string;
+  middayTime?: string;
+  closeTime?: string;
+  enabled?: boolean;
+};
+
+const MARKET_DATA_DIR = path.resolve(process.cwd(), "data/market-analysis");
+const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
+const MARKET_PORTFOLIO_FILE = path.join(MARKET_DATA_DIR, "portfolio.json");
+const MARKET_STATE_FILE = path.join(MARKET_DATA_DIR, "state.json");
+
+const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
+  funds: [],
+  cash: 0
+};
 
 export class AdminIngressAdapter implements IngressAdapter {
   private readonly envStore: EnvConfigStore;
@@ -293,6 +347,86 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({ ok: false, error: (error as Error).message ?? "run failed" });
       }
     });
+
+    app.get("/admin/api/market/config", (_req: Request, res: ExResponse) => {
+      const portfolio = readMarketPortfolio();
+      res.json({
+        portfolio,
+        portfolioPath: MARKET_PORTFOLIO_FILE,
+        statePath: MARKET_STATE_FILE,
+        runsDir: MARKET_RUNS_DIR
+      });
+    });
+
+    app.put("/admin/api/market/config", (req: Request, res: ExResponse) => {
+      const portfolio = parseMarketPortfolioInput(req.body);
+      if (!portfolio) {
+        res.status(400).json({ error: "invalid market portfolio payload" });
+        return;
+      }
+
+      writeMarketPortfolio(portfolio);
+      res.json({
+        ok: true,
+        portfolio
+      });
+    });
+
+    app.get("/admin/api/market/runs", (req: Request, res: ExResponse) => {
+      const limit = normalizeLimit(req.query.limit, 10, 1, 80);
+      const phaseRaw = req.query.phase;
+      const phaseInput = typeof phaseRaw === "string" ? phaseRaw.trim() : "";
+      let phase: MarketPhase | undefined;
+      if (phaseInput) {
+        const parsed = parseMarketPhase(phaseInput);
+        if (!parsed) {
+          res.status(400).json({ error: "phase must be midday or close" });
+          return;
+        }
+        phase = parsed;
+      }
+
+      const summaries = listMarketRunSummaries(limit, phase);
+      res.json({ runs: summaries });
+    });
+
+    app.get("/admin/api/market/runs/latest", (req: Request, res: ExResponse) => {
+      const phaseRaw = req.query.phase;
+      const phaseInput = typeof phaseRaw === "string" ? phaseRaw.trim() : "";
+      let phase: MarketPhase | undefined;
+      if (phaseInput) {
+        const parsed = parseMarketPhase(phaseInput);
+        if (!parsed) {
+          res.status(400).json({ error: "phase must be midday or close" });
+          return;
+        }
+        phase = parsed;
+      }
+
+      const latest = listMarketRunSummaries(1, phase)[0] ?? null;
+      res.json({ latest });
+    });
+
+    app.post("/admin/api/market/tasks/bootstrap", (req: Request, res: ExResponse) => {
+      const payload = parseBootstrapMarketTasksPayload(req.body);
+      if (!payload) {
+        res.status(400).json({ error: "invalid bootstrap payload" });
+        return;
+      }
+
+      try {
+        const tasks = upsertMarketTasks(this.scheduler, payload);
+        res.json({
+          ok: true,
+          tasks
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to bootstrap market tasks"
+        });
+      }
+    });
   }
 
   private registerAdminWebRoutes(app: Express): void {
@@ -423,6 +557,456 @@ function parseUpdateTaskInput(rawBody: unknown): UpdateScheduledTaskInput | null
   }
 
   return payload;
+}
+
+function parseMarketPortfolioInput(rawBody: unknown): MarketPortfolio | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const payload = "portfolio" in body ? body.portfolio : rawBody;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  return normalizeMarketPortfolio(payload);
+}
+
+function parseBootstrapMarketTasksPayload(rawBody: unknown): BootstrapMarketTasksPayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+  if (!userId) {
+    return null;
+  }
+
+  const middayTime = normalizeDailyTime(typeof body.middayTime === "string" ? body.middayTime : "13:30");
+  const closeTime = normalizeDailyTime(typeof body.closeTime === "string" ? body.closeTime : "15:15");
+  if (!middayTime || !closeTime) {
+    return null;
+  }
+
+  const enabled = parseOptionalBoolean(body.enabled);
+  return {
+    userId,
+    middayTime,
+    closeTime,
+    ...(enabled === undefined ? {} : { enabled })
+  };
+}
+
+function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarketTasksPayload): ScheduledTask[] {
+  const specs: Array<{ name: string; time: string; message: string; enabled: boolean }> = [
+    {
+      name: "Market Analysis 盘中",
+      time: payload.middayTime ?? "13:30",
+      message: "/market midday",
+      enabled: payload.enabled ?? true
+    },
+    {
+      name: "Market Analysis 收盘",
+      time: payload.closeTime ?? "15:15",
+      message: "/market close",
+      enabled: payload.enabled ?? true
+    }
+  ];
+
+  const existing = scheduler.listTasks();
+  const upserted: ScheduledTask[] = [];
+
+  for (const spec of specs) {
+    const match = existing.find((task) =>
+      task.userId === payload.userId &&
+      task.message.trim().toLowerCase() === spec.message
+    );
+
+    if (match) {
+      const updated = scheduler.updateTask(match.id, {
+        name: spec.name,
+        enabled: spec.enabled,
+        time: spec.time,
+        userId: payload.userId,
+        message: spec.message
+      });
+      if (!updated) {
+        throw new Error(`failed to update market task: ${match.id}`);
+      }
+      upserted.push(updated);
+      continue;
+    }
+
+    const created = scheduler.createTask({
+      name: spec.name,
+      enabled: spec.enabled,
+      time: spec.time,
+      userId: payload.userId,
+      message: spec.message
+    });
+    upserted.push(created);
+  }
+
+  return upserted;
+}
+
+function readMarketPortfolio(): MarketPortfolio {
+  ensureMarketStorage();
+
+  if (!fs.existsSync(MARKET_PORTFOLIO_FILE)) {
+    writeJsonFileAtomic(MARKET_PORTFOLIO_FILE, DEFAULT_MARKET_PORTFOLIO);
+    return { ...DEFAULT_MARKET_PORTFOLIO, funds: [] };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(MARKET_PORTFOLIO_FILE, "utf-8"));
+    return normalizeMarketPortfolio(parsed);
+  } catch {
+    return { ...DEFAULT_MARKET_PORTFOLIO, funds: [] };
+  }
+}
+
+function writeMarketPortfolio(portfolio: MarketPortfolio): void {
+  ensureMarketStorage();
+  writeJsonFileAtomic(MARKET_PORTFOLIO_FILE, normalizeMarketPortfolio(portfolio));
+}
+
+function listMarketRunSummaries(limit: number, phase?: MarketPhase): MarketRunSummary[] {
+  const state = readMarketStateFile();
+  let summaries = state.recentRuns;
+
+  if (summaries.length === 0) {
+    summaries = loadMarketRunSummariesFromFiles(Math.max(limit * 3, 24));
+  }
+
+  const filtered = phase ? summaries.filter((item) => item.phase === phase) : summaries.slice();
+
+  filtered.sort((a, b) => {
+    const left = Date.parse(a.createdAt);
+    const right = Date.parse(b.createdAt);
+    return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+  });
+
+  return filtered.slice(0, limit);
+}
+
+function readMarketStateFile(): MarketStateFile {
+  ensureMarketStorage();
+
+  if (!fs.existsSync(MARKET_STATE_FILE)) {
+    return buildDefaultMarketState();
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(MARKET_STATE_FILE, "utf-8"));
+    return normalizeMarketState(parsed);
+  } catch {
+    return buildDefaultMarketState();
+  }
+}
+
+function loadMarketRunSummariesFromFiles(limit: number): MarketRunSummary[] {
+  if (!fs.existsSync(MARKET_RUNS_DIR)) {
+    return [];
+  }
+
+  const files = fs.readdirSync(MARKET_RUNS_DIR)
+    .filter((file) => file.endsWith(".json"))
+    .sort((a, b) => b.localeCompare(a))
+    .slice(0, limit);
+
+  const summaries: MarketRunSummary[] = [];
+  for (const file of files) {
+    const summary = readMarketRunSummaryFromFile(file);
+    if (summary) {
+      summaries.push(summary);
+    }
+  }
+  return summaries;
+}
+
+function readMarketRunSummaryFromFile(fileName: string): MarketRunSummary | null {
+  const fullPath = path.join(MARKET_RUNS_DIR, fileName);
+  if (!fs.existsSync(fullPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<string, unknown>;
+    const phase = parseMarketPhase(parsed.phase);
+    if (!phase) {
+      return null;
+    }
+
+    const signalResult = parsed.signalResult && typeof parsed.signalResult === "object"
+      ? parsed.signalResult as Record<string, unknown>
+      : {};
+
+    const assetSignals = Array.isArray(signalResult.assetSignals)
+      ? signalResult.assetSignals
+      : [];
+
+    const compactSignals = assetSignals
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        const value = item as Record<string, unknown>;
+        const code = typeof value.code === "string" ? value.code : "";
+        const signal = typeof value.signal === "string" ? value.signal : "";
+        if (!code || !signal) {
+          return null;
+        }
+        return { code, signal };
+      })
+      .filter((item): item is { code: string; signal: string } => Boolean(item));
+
+    const explanation = parsed.explanation && typeof parsed.explanation === "object"
+      ? parsed.explanation as Record<string, unknown>
+      : {};
+
+    return {
+      id: typeof parsed.id === "string" ? parsed.id : fileName.replace(/\.json$/i, ""),
+      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+      phase,
+      marketState: typeof signalResult.marketState === "string" ? signalResult.marketState : "",
+      benchmark: typeof signalResult.benchmark === "string" ? signalResult.benchmark : "",
+      assetSignalCount: compactSignals.length,
+      signals: compactSignals.slice(0, 8),
+      explanationSummary: typeof explanation.summary === "string" ? explanation.summary : "",
+      file: fileName
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildDefaultMarketState(): MarketStateFile {
+  return {
+    version: 1,
+    latestRunId: "",
+    latestByPhase: {
+      midday: null,
+      close: null
+    },
+    recentRuns: [],
+    updatedAt: ""
+  };
+}
+
+function normalizeMarketState(input: unknown): MarketStateFile {
+  const fallback = buildDefaultMarketState();
+  if (!input || typeof input !== "object") {
+    return fallback;
+  }
+
+  const source = input as Record<string, unknown>;
+  const recent = Array.isArray(source.recentRuns) ? source.recentRuns : [];
+  const normalizedRuns = recent
+    .map((item) => normalizeMarketRunSummary(item))
+    .filter((item): item is MarketRunSummary => Boolean(item));
+
+  return {
+    version: 1,
+    latestRunId: typeof source.latestRunId === "string" ? source.latestRunId : "",
+    latestByPhase: {
+      midday: normalizeMarketPhasePointer(source.latestByPhase, "midday"),
+      close: normalizeMarketPhasePointer(source.latestByPhase, "close")
+    },
+    recentRuns: normalizedRuns,
+    updatedAt: typeof source.updatedAt === "string" ? source.updatedAt : ""
+  };
+}
+
+function normalizeMarketPhasePointer(
+  input: unknown,
+  phase: MarketPhase
+): { id: string; createdAt: string; file?: string } | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+
+  const source = input as Record<string, unknown>;
+  const raw = source[phase];
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const value = raw as Record<string, unknown>;
+  const id = typeof value.id === "string" ? value.id : "";
+  const createdAt = typeof value.createdAt === "string" ? value.createdAt : "";
+  if (!id || !createdAt) {
+    return null;
+  }
+
+  const file = typeof value.file === "string" ? value.file : undefined;
+  return file ? { id, createdAt, file } : { id, createdAt };
+}
+
+function normalizeMarketRunSummary(input: unknown): MarketRunSummary | null {
+  if (!input || typeof input !== "object") {
+    return null;
+  }
+  const source = input as Record<string, unknown>;
+  const phase = parseMarketPhase(source.phase);
+  if (!phase) {
+    return null;
+  }
+
+  const id = typeof source.id === "string" ? source.id.trim() : "";
+  if (!id) {
+    return null;
+  }
+
+  const signals = Array.isArray(source.signals)
+    ? source.signals
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const value = item as Record<string, unknown>;
+          const code = typeof value.code === "string" ? value.code : "";
+          const signal = typeof value.signal === "string" ? value.signal : "";
+          if (!code || !signal) return null;
+          return { code, signal };
+        })
+        .filter((item): item is { code: string; signal: string } => Boolean(item))
+    : [];
+
+  return {
+    id,
+    createdAt: typeof source.createdAt === "string" ? source.createdAt : "",
+    phase,
+    marketState: typeof source.marketState === "string" ? source.marketState : "",
+    benchmark: typeof source.benchmark === "string" ? source.benchmark : "",
+    assetSignalCount: Number.isFinite(Number(source.assetSignalCount))
+      ? Math.max(0, Math.floor(Number(source.assetSignalCount)))
+      : signals.length,
+    signals,
+    explanationSummary: typeof source.explanationSummary === "string" ? source.explanationSummary : "",
+    file: typeof source.file === "string" ? source.file : undefined
+  };
+}
+
+function normalizeMarketPortfolio(input: unknown): MarketPortfolio {
+  if (!input || typeof input !== "object") {
+    return {
+      funds: [],
+      cash: 0
+    };
+  }
+
+  const source = input as Record<string, unknown>;
+  const funds: MarketPortfolioFund[] = [];
+  const rawFunds = Array.isArray(source.funds) ? source.funds : [];
+
+  for (const item of rawFunds) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const value = item as Record<string, unknown>;
+    const code = normalizeMarketCode(value.code);
+    const quantity = Number(value.quantity);
+    const avgCost = Number(value.avgCost);
+    if (!code || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(avgCost) || avgCost < 0) {
+      continue;
+    }
+    funds.push({
+      code,
+      quantity: roundTo(quantity, 4),
+      avgCost: roundTo(avgCost, 4)
+    });
+  }
+
+  const dedupMap = new Map<string, MarketPortfolioFund>();
+  for (const item of funds) {
+    dedupMap.set(item.code, item);
+  }
+
+  const cash = Number(source.cash);
+  return {
+    funds: Array.from(dedupMap.values()),
+    cash: Number.isFinite(cash) && cash > 0 ? roundTo(cash, 4) : 0
+  };
+}
+
+function normalizeMarketCode(raw: unknown): string {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) {
+    return "";
+  }
+  if (digits.length >= 6) {
+    return digits.slice(-6);
+  }
+  return digits.padStart(6, "0");
+}
+
+function normalizeDailyTime(raw: string): string | null {
+  const text = String(raw ?? "").trim();
+  if (!/^\d{2}:\d{2}$/.test(text)) {
+    return null;
+  }
+
+  const [hourRaw, minuteRaw] = text.split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeLimit(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const rounded = Math.floor(value);
+  if (rounded < min) {
+    return min;
+  }
+  if (rounded > max) {
+    return max;
+  }
+  return rounded;
+}
+
+function parseMarketPhase(raw: unknown): MarketPhase | null {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!value) {
+    return null;
+  }
+  if (value === "midday") {
+    return "midday";
+  }
+  if (value === "close") {
+    return "close";
+  }
+  return null;
+}
+
+function ensureMarketStorage(): void {
+  if (!fs.existsSync(MARKET_DATA_DIR)) {
+    fs.mkdirSync(MARKET_DATA_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(MARKET_RUNS_DIR)) {
+    fs.mkdirSync(MARKET_RUNS_DIR, { recursive: true });
+  }
+}
+
+function writeJsonFileAtomic(filePath: string, payload: unknown): void {
+  const tempPath = `${filePath}.tmp`;
+  fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+  fs.renameSync(tempPath, filePath);
+}
+
+function roundTo(value: number, digits: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  const scale = 10 ** digits;
+  return Math.round(value * scale) / scale;
 }
 
 function parseOptionalBoolean(value: unknown): boolean | undefined {

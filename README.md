@@ -239,3 +239,35 @@ skills/my-skill/handler.js
 ```
 
 LLM can call `skill.invoke` with `{ name, input }`.
+
+## Market Analysis Capability
+
+`market-analysis` skill is built in and supports deterministic A-share/ETF/fund analysis.
+
+Direct commands:
+
+```bash
+/market midday
+/market close
+/market status
+/market portfolio
+```
+
+Data files:
+
+- Portfolio: `data/market-analysis/portfolio.json`
+- Run snapshots: `data/market-analysis/runs/*.json`
+- Run index: `data/market-analysis/state.json`
+
+Recommended scheduler setup (daily):
+
+- `13:30` with message `/market midday`
+- `15:15` with message `/market close`
+
+Admin API:
+
+- `GET /admin/api/market/config`
+- `PUT /admin/api/market/config`
+- `GET /admin/api/market/runs?limit=12`
+- `GET /admin/api/market/runs/latest`
+- `POST /admin/api/market/tasks/bootstrap` (upsert two daily market tasks for a user)

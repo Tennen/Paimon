@@ -65,6 +65,36 @@ type ScheduledTask = {
   lastRunKey?: string;
 };
 
+type MarketFundHolding = {
+  code: string;
+  quantity: number;
+  avgCost: number;
+};
+
+type MarketPortfolio = {
+  funds: MarketFundHolding[];
+  cash: number;
+};
+
+type MarketConfig = {
+  portfolio: MarketPortfolio;
+  portfolioPath: string;
+  statePath: string;
+  runsDir: string;
+};
+
+type MarketRunSummary = {
+  id: string;
+  createdAt: string;
+  phase: "midday" | "close";
+  marketState: string;
+  benchmark?: string;
+  assetSignalCount: number;
+  signals: Array<{ code: string; signal: string }>;
+  explanationSummary?: string;
+  file?: string;
+};
+
 type Notice = {
   type: "success" | "error" | "info";
   title: string;
@@ -99,6 +129,11 @@ const EMPTY_TASK_FORM: TaskFormState = {
   enabled: true
 };
 
+const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
+  funds: [],
+  cash: 0
+};
+
 export default function App() {
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [models, setModels] = useState<string[]>([]);
@@ -121,6 +156,14 @@ export default function App() {
   const [savingTask, setSavingTask] = useState(false);
   const [runningTaskId, setRunningTaskId] = useState("");
   const [taskForm, setTaskForm] = useState<TaskFormState>(EMPTY_TASK_FORM);
+  const [marketConfig, setMarketConfig] = useState<MarketConfig | null>(null);
+  const [marketPortfolio, setMarketPortfolio] = useState<MarketPortfolio>(DEFAULT_MARKET_PORTFOLIO);
+  const [marketRuns, setMarketRuns] = useState<MarketRunSummary[]>([]);
+  const [savingMarketPortfolio, setSavingMarketPortfolio] = useState(false);
+  const [bootstrappingMarketTasks, setBootstrappingMarketTasks] = useState(false);
+  const [marketTaskUserId, setMarketTaskUserId] = useState("");
+  const [marketMiddayTime, setMarketMiddayTime] = useState("13:30");
+  const [marketCloseTime, setMarketCloseTime] = useState("15:15");
 
   const enabledUsers = useMemo(() => users.filter((user) => user.enabled), [users]);
 
@@ -143,7 +186,7 @@ export default function App() {
 
   async function bootstrap(): Promise<void> {
     try {
-      await Promise.all([loadConfig(), loadModels(), loadUsers(), loadTasks()]);
+      await Promise.all([loadConfig(), loadModels(), loadUsers(), loadTasks(), loadMarketConfig(), loadMarketRuns()]);
       setNotice(null);
     } catch (error) {
       notifyError("初始化失败", error);
@@ -166,12 +209,37 @@ export default function App() {
 
   async function loadUsers(): Promise<void> {
     const payload = await request<{ users: PushUser[] }>("/admin/api/users");
-    setUsers(Array.isArray(payload.users) ? payload.users : []);
+    const nextUsers = Array.isArray(payload.users) ? payload.users : [];
+    setUsers(nextUsers);
+
+    if (!marketTaskUserId) {
+      const preferred = nextUsers.find((user) => user.enabled);
+      if (preferred) {
+        setMarketTaskUserId(preferred.id);
+      }
+    } else {
+      const exists = nextUsers.some((user) => user.id === marketTaskUserId);
+      if (!exists) {
+        const preferred = nextUsers.find((user) => user.enabled);
+        setMarketTaskUserId(preferred?.id ?? "");
+      }
+    }
   }
 
   async function loadTasks(): Promise<void> {
     const payload = await request<{ tasks: ScheduledTask[] }>("/admin/api/tasks");
     setTasks(Array.isArray(payload.tasks) ? payload.tasks : []);
+  }
+
+  async function loadMarketConfig(): Promise<void> {
+    const payload = await request<MarketConfig>("/admin/api/market/config");
+    setMarketConfig(payload);
+    setMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
+  }
+
+  async function loadMarketRuns(): Promise<void> {
+    const payload = await request<{ runs: MarketRunSummary[] }>("/admin/api/market/runs?limit=12");
+    setMarketRuns(Array.isArray(payload.runs) ? payload.runs : []);
   }
 
   async function handleSaveModel(restartAfterSave: boolean): Promise<void> {
@@ -395,6 +463,115 @@ export default function App() {
     }
   }
 
+  function handleAddMarketFund(): void {
+    setMarketPortfolio((prev) => ({
+      ...prev,
+      funds: prev.funds.concat([{ code: "", quantity: 0, avgCost: 0 }])
+    }));
+  }
+
+  function handleRemoveMarketFund(index: number): void {
+    setMarketPortfolio((prev) => ({
+      ...prev,
+      funds: prev.funds.filter((_, idx) => idx !== index)
+    }));
+  }
+
+  function handleMarketFundChange(index: number, key: keyof MarketFundHolding, value: string): void {
+    setMarketPortfolio((prev) => ({
+      ...prev,
+      funds: prev.funds.map((fund, idx) => {
+        if (idx !== index) {
+          return fund;
+        }
+
+        if (key === "code") {
+          return { ...fund, code: value };
+        }
+
+        const numeric = Number(value);
+        if (key === "quantity") {
+          return {
+            ...fund,
+            quantity: Number.isFinite(numeric) ? numeric : 0
+          };
+        }
+
+        return {
+          ...fund,
+          avgCost: Number.isFinite(numeric) ? numeric : 0
+        };
+      })
+    }));
+  }
+
+  async function handleSaveMarketPortfolio(): Promise<void> {
+    const normalizedFunds = marketPortfolio.funds
+      .map((fund) => {
+        const digits = fund.code.replace(/\D/g, "");
+        const code = digits ? digits.slice(-6).padStart(6, "0") : "";
+        return {
+          code,
+          quantity: Number(fund.quantity),
+          avgCost: Number(fund.avgCost)
+        };
+      })
+      .filter((fund) => fund.code && Number.isFinite(fund.quantity) && fund.quantity > 0 && Number.isFinite(fund.avgCost) && fund.avgCost >= 0);
+
+    const payload: MarketPortfolio = {
+      funds: normalizedFunds,
+      cash: Number.isFinite(Number(marketPortfolio.cash)) && Number(marketPortfolio.cash) > 0
+        ? Number(marketPortfolio.cash)
+        : 0
+    };
+
+    setSavingMarketPortfolio(true);
+    try {
+      const response = await request<{ ok: boolean; portfolio: MarketPortfolio }>("/admin/api/market/config", {
+        method: "PUT",
+        body: JSON.stringify({ portfolio: payload })
+      });
+      setMarketPortfolio(response.portfolio);
+      await loadMarketConfig();
+      setNotice({ type: "success", title: "Market 持仓配置已保存" });
+    } catch (error) {
+      notifyError("保存 Market 配置失败", error);
+    } finally {
+      setSavingMarketPortfolio(false);
+    }
+  }
+
+  async function handleBootstrapMarketTasks(): Promise<void> {
+    if (!marketTaskUserId) {
+      setNotice({ type: "error", title: "请先选择推送用户" });
+      return;
+    }
+
+    setBootstrappingMarketTasks(true);
+    try {
+      await request<{ ok: boolean; tasks: ScheduledTask[] }>("/admin/api/market/tasks/bootstrap", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: marketTaskUserId,
+          middayTime: marketMiddayTime,
+          closeTime: marketCloseTime,
+          enabled: true
+        })
+      });
+
+      await loadTasks();
+      setNotice({
+        type: "success",
+        title: "Market 定时任务已创建/更新",
+        text: "已生成 /market midday 和 /market close 两条每日任务"
+      });
+    } catch (error) {
+      notifyError("创建 Market 定时任务失败", error);
+    } finally {
+      setBootstrappingMarketTasks(false);
+    }
+  }
+
   function notifyError(title: string, error: unknown): void {
     const text = error instanceof Error ? error.message : String(error ?? "unknown error");
     setNotice({ type: "error", title, text });
@@ -521,6 +698,212 @@ export default function App() {
             <div className="mono">tickMs: {config?.tickMs ?? "-"}</div>
             <div className="mono md:col-span-2">userStore: {config?.userStorePath ?? "-"}</div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Market Analysis</CardTitle>
+          <CardDescription>管理持仓配置、查看最近分析结果，并一键生成 13:30 / 15:15 定时任务</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-[220px_1fr]">
+            <div className="space-y-1.5">
+              <Label htmlFor="market-cash">现金</Label>
+              <Input
+                id="market-cash"
+                type="number"
+                min={0}
+                step="0.01"
+                value={marketPortfolio.cash}
+                onChange={(event) => {
+                  const value = Number(event.target.value);
+                  setMarketPortfolio((prev) => ({
+                    ...prev,
+                    cash: Number.isFinite(value) ? value : 0
+                  }));
+                }}
+                placeholder="可选现金余额"
+              />
+            </div>
+            <div className="flex items-end justify-start gap-2">
+              <Button type="button" variant="outline" onClick={handleAddMarketFund}>
+                添加持仓
+              </Button>
+              <Button type="button" disabled={savingMarketPortfolio} onClick={() => void handleSaveMarketPortfolio()}>
+                {savingMarketPortfolio ? "保存中..." : "保存 Market 配置"}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}>
+                刷新
+              </Button>
+            </div>
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[180px]">代码</TableHead>
+                <TableHead className="w-[160px]">持仓数量</TableHead>
+                <TableHead className="w-[160px]">平均成本</TableHead>
+                <TableHead className="w-[120px]">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {marketPortfolio.funds.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-muted-foreground">
+                    暂无持仓，点击“添加持仓”开始配置
+                  </TableCell>
+                </TableRow>
+              ) : (
+                marketPortfolio.funds.map((fund, index) => (
+                  <TableRow key={`market-fund-${index}`}>
+                    <TableCell>
+                      <Input
+                        className="mono"
+                        value={fund.code}
+                        onChange={(event) => handleMarketFundChange(index, "code", event.target.value)}
+                        placeholder="例如 510300"
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        value={fund.quantity}
+                        onChange={(event) => handleMarketFundChange(index, "quantity", event.target.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        value={fund.avgCost}
+                        onChange={(event) => handleMarketFundChange(index, "avgCost", event.target.value)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Button type="button" size="sm" variant="destructive" onClick={() => handleRemoveMarketFund(index)}>
+                        删除
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+
+          <Separator />
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-medium">快速创建每日两次任务</h3>
+            <div className="grid gap-3 md:grid-cols-4">
+              <div className="space-y-1.5 md:col-span-2">
+                <Label>推送用户</Label>
+                <Select
+                  value={marketTaskUserId || undefined}
+                  onValueChange={(value) => setMarketTaskUserId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={enabledUsers.length > 0 ? "选择用户" : "请先创建启用用户"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {enabledUsers.length === 0 ? (
+                      <SelectItem value="__empty__" disabled>
+                        暂无启用用户
+                      </SelectItem>
+                    ) : (
+                      enabledUsers.map((user) => (
+                        <SelectItem key={`market-user-${user.id}`} value={user.id}>
+                          {user.name} ({user.wecomUserId})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="market-midday-time">盘中时间</Label>
+                <Input
+                  id="market-midday-time"
+                  type="time"
+                  value={marketMiddayTime}
+                  onChange={(event) => setMarketMiddayTime(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="market-close-time">收盘时间</Label>
+                <Input
+                  id="market-close-time"
+                  type="time"
+                  value={marketCloseTime}
+                  onChange={(event) => setMarketCloseTime(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                disabled={bootstrappingMarketTasks || enabledUsers.length === 0}
+                onClick={() => void handleBootstrapMarketTasks()}
+              >
+                {bootstrappingMarketTasks ? "处理中..." : "生成 / 更新 Market 定时任务"}
+              </Button>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
+            <div className="mono">portfolio: {marketConfig?.portfolioPath ?? "-"}</div>
+            <div className="mono">state: {marketConfig?.statePath ?? "-"}</div>
+            <div className="mono">runs: {marketConfig?.runsDir ?? "-"}</div>
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>时间</TableHead>
+                <TableHead>阶段</TableHead>
+                <TableHead>市场状态</TableHead>
+                <TableHead>资产信号</TableHead>
+                <TableHead>说明</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {marketRuns.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-muted-foreground">
+                    暂无运行记录
+                  </TableCell>
+                </TableRow>
+              ) : (
+                marketRuns.map((run) => (
+                  <TableRow key={run.id}>
+                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(run.createdAt)}</TableCell>
+                    <TableCell>{run.phase === "close" ? "收盘" : "盘中"}</TableCell>
+                    <TableCell>
+                      <div>{run.marketState || "-"}</div>
+                      <div className="mono text-xs text-muted-foreground">{run.benchmark || "-"}</div>
+                    </TableCell>
+                    <TableCell className="text-xs">
+                      {run.signals.length > 0
+                        ? run.signals.map((signal) => `${signal.code}:${signal.signal}`).join(", ")
+                        : "-"}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {run.explanationSummary || "-"}
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 

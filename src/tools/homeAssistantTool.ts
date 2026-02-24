@@ -1,7 +1,7 @@
 import { ToolResult } from "../types";
-import { HAClient } from "../ha/client";
+import { HAClient } from "../endpoints/ha/client";
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
-import { HAEntityRegistry } from "../ha/entityRegistry";
+import { HAEntityRegistry } from "../endpoints/ha/entityRegistry";
 
 export type HaEntityChecker = (entityId: string) => boolean;
 
