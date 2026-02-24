@@ -1,9 +1,9 @@
 import { Express } from "express";
 import { fetch } from "undici";
 import { IngressAdapter } from "./types";
-import { SessionManager } from "../sessionManager";
+import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
-import { WeComSender } from "../wecom/sender";
+import { WeComSender } from "../endpoints/wecom/sender";
 
 export class WeComBridgeIngressAdapter implements IngressAdapter {
   private readonly streamUrl: string;

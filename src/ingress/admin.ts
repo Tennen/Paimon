@@ -5,7 +5,7 @@ import { promisify } from "util";
 import express, { Express, Request, Response as ExResponse } from "express";
 import dotenv from "dotenv";
 import { IngressAdapter } from "./types";
-import { SessionManager } from "../sessionManager";
+import { SessionManager } from "../core/sessionManager";
 import { EnvConfigStore } from "../config/envConfigStore";
 import {
   CreatePushUserInput,

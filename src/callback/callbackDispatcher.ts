@@ -1,5 +1,5 @@
 import { Envelope, Response } from "../types";
-import { WeComSender } from "../wecom/sender";
+import { WeComSender } from "../endpoints/wecom/sender";
 
 export class CallbackDispatcher {
   private readonly wecomSender: WeComSender;

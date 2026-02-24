@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { Express, Request, Response as ExResponse } from "express";
 import { XMLParser } from "fast-xml-parser";
 import { IngressAdapter } from "./types";
-import { SessionManager } from "../sessionManager";
+import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 
 const xmlParser = new XMLParser({

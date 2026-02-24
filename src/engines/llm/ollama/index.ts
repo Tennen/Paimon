@@ -1,5 +1,4 @@
 import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep } from "../llm";
-import { mockLLM } from "../../../mockLLM";
 import { ollamaChat } from "./client";
 import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
 import { parseSkillSelectionResult, parseSkillPlanningResult } from "../json_guard";
@@ -88,10 +87,6 @@ export class OllamaLLMEngine implements LLMEngine {
       }
     }
 
-    const fallbackResult = await mockLLM(text);
-    if (fallbackResult && "decision" in fallbackResult) {
-      return fallbackResult as { decision: "respond" | "use_skill"; skill_name?: string; response_text?: string };
-    }
     return { decision: "respond", response_text: "OK" };
   }
 
@@ -141,10 +136,6 @@ export class OllamaLLMEngine implements LLMEngine {
       }
     }
 
-    const fallbackResult = await mockLLM(text);
-    if (fallbackResult && "tool" in fallbackResult) {
-      return fallbackResult as { tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string };
-    }
     return {
       tool: "unknown",
       op: "unknown",

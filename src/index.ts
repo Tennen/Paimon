@@ -1,8 +1,8 @@
 import "dotenv/config";
 import express from "express";
-import { SessionManager } from "./sessionManager";
-import { Orchestrator } from "./orchestrator";
-import { ToolRouter } from "./toolRouter";
+import { SessionManager } from "./core/sessionManager";
+import { Orchestrator } from "./core/orchestrator";
+import { ToolRouter } from "./core/toolRouter";
 import { OllamaLLMEngine } from "./engines/llm/ollama";
 import { HttpIngressAdapter } from "./ingress/http";
 import { HANotifyIngressAdapter } from "./ingress/haNotify";

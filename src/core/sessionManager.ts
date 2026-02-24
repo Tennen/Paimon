@@ -1,4 +1,4 @@
-import { Envelope, Response } from "./types";
+import { Envelope, Response } from "../types";
 import { Orchestrator } from "./orchestrator";
 
 export class SessionManager {

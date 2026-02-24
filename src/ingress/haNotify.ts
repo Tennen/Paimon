@@ -1,7 +1,7 @@
 import { Express, Request, Response as ExResponse } from "express";
 import { IngressAdapter } from "./types";
-import { SessionManager } from "../sessionManager";
-import { WeComSender } from "../wecom/sender";
+import { SessionManager } from "../core/sessionManager";
+import { WeComSender } from "../endpoints/wecom/sender";
 
 type HANotifyPayload = {
   message?: string;

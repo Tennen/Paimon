@@ -1,6 +1,6 @@
 import { URLSearchParams } from "url";
 import { fetch } from "undici";
-import { Response } from "../types";
+import { Response } from "../../types";
 
 export type WeComSenderConfig = {
   corpId: string;

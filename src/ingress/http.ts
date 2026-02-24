@@ -1,6 +1,6 @@
 import { Express, Request, Response as ExResponse } from "express";
 import { IngressAdapter } from "./types";
-import { SessionManager } from "../sessionManager";
+import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 
 export class HttpIngressAdapter implements IngressAdapter {
