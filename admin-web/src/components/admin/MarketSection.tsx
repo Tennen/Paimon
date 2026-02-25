@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,6 +34,54 @@ import {
 
 export function MarketSection(props: MarketSectionProps) {
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
+  const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const searchSelectorButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+
+  const updateSelectorPosition = useCallback(() => {
+    if (openSearchSelectorIndex === null) {
+      setSelectorPosition(null);
+      return;
+    }
+    const button = searchSelectorButtonRefs.current[openSearchSelectorIndex];
+    if (!button) {
+      setSelectorPosition(null);
+      return;
+    }
+    const rect = button.getBoundingClientRect();
+    const width = Math.max(rect.width, 280);
+    const viewportPadding = 12;
+    const maxLeft = window.innerWidth - width - viewportPadding;
+    const left = Math.min(Math.max(rect.left, viewportPadding), Math.max(viewportPadding, maxLeft));
+    setSelectorPosition({
+      top: rect.bottom + 6,
+      left,
+      width
+    });
+  }, [openSearchSelectorIndex]);
+
+  useEffect(() => {
+    if (openSearchSelectorIndex === null) {
+      setSelectorPosition(null);
+      return;
+    }
+    updateSelectorPosition();
+    const handlePositionUpdate = () => updateSelectorPosition();
+    window.addEventListener("resize", handlePositionUpdate);
+    window.addEventListener("scroll", handlePositionUpdate, true);
+    return () => {
+      window.removeEventListener("resize", handlePositionUpdate);
+      window.removeEventListener("scroll", handlePositionUpdate, true);
+    };
+  }, [openSearchSelectorIndex, props.marketSearchResults, updateSelectorPosition]);
+
+  useEffect(() => {
+    if (openSearchSelectorIndex === null) {
+      return;
+    }
+    if (!props.marketSearchResults[openSearchSelectorIndex]?.length) {
+      setOpenSearchSelectorIndex(null);
+    }
+  }, [openSearchSelectorIndex, props.marketSearchResults]);
 
   return (
     <Card>
@@ -133,35 +182,19 @@ export function MarketSection(props: MarketSectionProps) {
                       </Button>
                     </div>
                     {props.marketSearchResults[index] && props.marketSearchResults[index].length > 0 ? (
-                      <div className="relative">
+                      <div>
                         <Button
                           type="button"
                           size="sm"
                           variant="secondary"
                           className="h-7 px-2 text-xs"
+                          ref={(element) => {
+                            searchSelectorButtonRefs.current[index] = element;
+                          }}
                           onClick={() => setOpenSearchSelectorIndex((current) => (current === index ? null : index))}
                         >
                           {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${props.marketSearchResults[index].length})`}
                         </Button>
-                        {openSearchSelectorIndex === index ? (
-                          <div className="absolute left-0 top-9 z-30 max-h-56 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
-                            {props.marketSearchResults[index].map((item, suggestionIndex) => (
-                              <Button
-                                key={`market-suggest-${index}-${item.code}-${suggestionIndex}`}
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                className="mb-1 h-auto w-full justify-start px-2 py-1 text-left text-xs last:mb-0"
-                                onClick={() => {
-                                  props.onApplyMarketSearchResult(index, item);
-                                  setOpenSearchSelectorIndex((current) => (current === index ? null : current));
-                                }}
-                              >
-                                {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
-                              </Button>
-                            ))}
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
                   </TableCell>
@@ -211,6 +244,38 @@ export function MarketSection(props: MarketSectionProps) {
             )}
           </TableBody>
         </Table>
+        {typeof document !== "undefined" &&
+        openSearchSelectorIndex !== null &&
+        selectorPosition &&
+        props.marketSearchResults[openSearchSelectorIndex]?.length
+          ? createPortal(
+              <div
+                className="fixed z-50 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+                style={{
+                  top: selectorPosition.top,
+                  left: selectorPosition.left,
+                  width: selectorPosition.width
+                }}
+              >
+                {props.marketSearchResults[openSearchSelectorIndex].map((item, suggestionIndex) => (
+                  <Button
+                    key={`market-suggest-${openSearchSelectorIndex}-${item.code}-${suggestionIndex}`}
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="mb-1 h-auto w-full justify-start px-2 py-1 text-left text-xs last:mb-0"
+                    onClick={() => {
+                      props.onApplyMarketSearchResult(openSearchSelectorIndex, item);
+                      setOpenSearchSelectorIndex((current) => (current === openSearchSelectorIndex ? null : current));
+                    }}
+                  >
+                    {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
+                  </Button>
+                ))}
+              </div>,
+              document.body
+            )
+          : null}
 
         <Separator />
 
