@@ -609,10 +609,10 @@ export default function App() {
 
     setSearchingMarketFundIndex(index);
     try {
-      const payload = await request<{ keyword: string; items: MarketSecuritySearchItem[] }>(
+      const payload = await request<unknown>(
         `/admin/api/market/securities/search?keyword=${encodeURIComponent(keyword)}&limit=8`
       );
-      const items = Array.isArray(payload.items) ? payload.items : [];
+      const items = normalizeMarketSearchResponse(payload);
       setMarketSearchResults((prev) => {
         const next = resizeSearchResultsArray(prev, marketPortfolio.funds.length).slice();
         if (index >= 0 && index < next.length) {
@@ -1059,6 +1059,85 @@ function isSameMarketFund(left: MarketFundHolding, right: MarketFundHolding): bo
     && left.name === right.name
     && left.quantity === right.quantity
     && left.avgCost === right.avgCost;
+}
+
+function normalizeMarketSearchResponse(payload: unknown): MarketSecuritySearchItem[] {
+  const source = pickMarketSearchItemsSource(payload);
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  return source
+    .map((item) => normalizeMarketSearchItem(item))
+    .filter((item): item is MarketSecuritySearchItem => item !== null);
+}
+
+function pickMarketSearchItemsSource(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  if (!isRecord(payload)) {
+    return [];
+  }
+
+  const direct = pickFirstArray(payload, ["items", "data", "result", "results", "list"]);
+  if (direct) {
+    return direct;
+  }
+
+  const nested = pickNestedArray(payload, ["items", "data", "result", "results", "list"]);
+  return nested ?? [];
+}
+
+function pickFirstArray(source: Record<string, unknown>, keys: string[]): unknown[] | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function pickNestedArray(source: Record<string, unknown>, keys: string[]): unknown[] | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (!isRecord(value)) {
+      continue;
+    }
+    const nested = pickFirstArray(value, keys);
+    if (nested) {
+      return nested;
+    }
+  }
+  return null;
+}
+
+function normalizeMarketSearchItem(item: unknown): MarketSecuritySearchItem | null {
+  if (!isRecord(item)) {
+    return null;
+  }
+
+  const code = String(item.code ?? "").trim();
+  const name = String(item.name ?? "").trim();
+  if (!code || !name) {
+    return null;
+  }
+
+  const market = String(item.market ?? "").trim();
+  const securityType = String(item.securityType ?? "").trim();
+  const secid = String(item.secid ?? "").trim();
+
+  return {
+    code,
+    name,
+    market,
+    securityType,
+    ...(secid ? { secid } : {})
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

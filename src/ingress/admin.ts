@@ -556,14 +556,23 @@ export class AdminIngressAdapter implements IngressAdapter {
       const limit = normalizeLimit(req.query.limit, 10, 1, 20);
 
       try {
-        const items = await searchMarketSecurities(keyword, limit);
+        const items = normalizeMarketSecuritySearchItems(await searchMarketSecurities(keyword, limit), {
+          keyword,
+          limit
+        });
         res.json({
           keyword,
           items
         });
       } catch (error) {
-        res.status(502).json({
-          error: (error as Error).message ?? "failed to search market securities"
+        console.warn("[admin.market.search] provider failed, fallback to empty items", {
+          keyword,
+          limit,
+          error: (error as Error).message ?? String(error)
+        });
+        res.json({
+          keyword,
+          items: []
         });
       }
     });
@@ -1515,6 +1524,63 @@ function normalizeEastmoneySearchRow(row: Record<string, unknown>): MarketSecuri
     securityType,
     ...(secid ? { secid } : {})
   };
+}
+
+function normalizeMarketSecuritySearchItems(
+  payload: unknown,
+  context: { keyword: string; limit: number }
+): MarketSecuritySearchItem[] {
+  if (!Array.isArray(payload)) {
+    console.warn("[admin.market.search] unexpected payload type, fallback to empty array", {
+      keyword: context.keyword,
+      limit: context.limit,
+      payloadType: payload === null ? "null" : typeof payload
+    });
+    return [];
+  }
+
+  const normalized: MarketSecuritySearchItem[] = [];
+  let invalidRowCount = 0;
+  let missingKeyFieldCount = 0;
+
+  for (const row of payload) {
+    if (!row || typeof row !== "object") {
+      invalidRowCount += 1;
+      continue;
+    }
+
+    const source = row as Record<string, unknown>;
+    const item: MarketSecuritySearchItem = {
+      code: toTrimmedString(source.code),
+      name: toTrimmedString(source.name),
+      market: toTrimmedString(source.market),
+      securityType: toTrimmedString(source.securityType)
+    };
+    const secid = toTrimmedString(source.secid);
+    if (secid) {
+      item.secid = secid;
+    }
+    if (!item.code || !item.name) {
+      missingKeyFieldCount += 1;
+    }
+    normalized.push(item);
+  }
+
+  if (invalidRowCount > 0 || missingKeyFieldCount > 0) {
+    console.warn("[admin.market.search] normalized suspicious search rows", {
+      keyword: context.keyword,
+      limit: context.limit,
+      total: payload.length,
+      invalidRowCount,
+      missingKeyFieldCount
+    });
+  }
+
+  return normalized;
+}
+
+function toTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function inferSearchCode(row: Record<string, unknown>): string {
