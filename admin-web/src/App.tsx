@@ -190,7 +190,18 @@ export default function App() {
   async function loadMarketConfig(): Promise<void> {
     const payload = await request<MarketConfig>("/admin/api/market/config");
     setMarketConfig(payload);
-    setMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
+    const portfolio = payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO;
+    setMarketPortfolio({
+      cash: Number.isFinite(Number(portfolio.cash)) ? Number(portfolio.cash) : 0,
+      funds: Array.isArray(portfolio.funds)
+        ? portfolio.funds.map((fund) => ({
+            code: String(fund?.code ?? ""),
+            name: String(fund?.name ?? ""),
+            quantity: Number.isFinite(Number(fund?.quantity)) ? Number(fund.quantity) : 0,
+            avgCost: Number.isFinite(Number(fund?.avgCost)) ? Number(fund.avgCost) : 0
+          }))
+        : []
+    });
   }
 
   async function loadMarketRuns(): Promise<void> {
@@ -497,7 +508,7 @@ export default function App() {
   function handleAddMarketFund(): void {
     setMarketPortfolio((prev) => ({
       ...prev,
-      funds: prev.funds.concat([{ code: "", quantity: 0, avgCost: 0 }])
+      funds: prev.funds.concat([{ code: "", name: "", quantity: 0, avgCost: 0 }])
     }));
     setMarketSearchInputs((prev) => prev.concat(""));
     setMarketSearchResults((prev) => prev.concat([[]]));
@@ -538,6 +549,9 @@ export default function App() {
 
         if (key === "code") {
           return { ...fund, code: value };
+        }
+        if (key === "name") {
+          return { ...fund, name: value };
         }
 
         const numeric = Number(value);
@@ -606,7 +620,8 @@ export default function App() {
         }
         return {
           ...fund,
-          code: item.code
+          code: item.code,
+          name: item.name
         };
       })
     }));
@@ -626,6 +641,7 @@ export default function App() {
         const code = digits ? digits.slice(-6).padStart(6, "0") : "";
         return {
           code,
+          name: String(fund.name ?? "").trim(),
           quantity: Number(fund.quantity),
           avgCost: Number(fund.avgCost)
         };

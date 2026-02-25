@@ -70,8 +70,9 @@ export function MarketSection(props: MarketSectionProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-[180px]">代码</TableHead>
-              <TableHead className="w-[340px]">名称查 code</TableHead>
+              <TableHead className="w-[140px]">代码</TableHead>
+              <TableHead className="w-[180px]">名称</TableHead>
+              <TableHead className="w-[320px]">名称查 code</TableHead>
               <TableHead className="w-[160px]">持仓数量</TableHead>
               <TableHead className="w-[160px]">平均成本</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
@@ -80,7 +81,7 @@ export function MarketSection(props: MarketSectionProps) {
           <TableBody>
             {props.marketPortfolio.funds.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-muted-foreground">
+                <TableCell colSpan={6} className="text-muted-foreground">
                   暂无持仓，点击“添加持仓”开始配置
                 </TableCell>
               </TableRow>
@@ -93,6 +94,13 @@ export function MarketSection(props: MarketSectionProps) {
                       value={fund.code}
                       onChange={(event) => props.onMarketFundChange(index, "code", event.target.value)}
                       placeholder="例如 510300"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      value={fund.name}
+                      onChange={(event) => props.onMarketFundChange(index, "name", event.target.value)}
+                      placeholder="例如 沪深300ETF"
                     />
                   </TableCell>
                   <TableCell className="space-y-2">

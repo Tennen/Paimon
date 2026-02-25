@@ -35,6 +35,7 @@ export type ScheduledTask = {
 
 export type MarketFundHolding = {
   code: string;
+  name: string;
   quantity: number;
   avgCost: number;
 };

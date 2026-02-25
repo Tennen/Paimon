@@ -310,8 +310,55 @@ Direct commands:
 Data files:
 
 - Portfolio: `data/market-analysis/portfolio.json`
+- Analysis config: `data/market-analysis/config.json`
 - Run snapshots: `data/market-analysis/runs/*.json`
 - Run index: `data/market-analysis/state.json`
+
+Portfolio schema:
+
+```json
+{
+  "funds": [
+    {
+      "code": "510300",
+      "name": "沪深300ETF",
+      "quantity": 1000,
+      "avgCost": 3.85
+    }
+  ],
+  "cash": 12000
+}
+```
+
+Analysis engine config schema:
+
+```json
+{
+  "version": 1,
+  "analysisEngine": "local",
+  "gptPlugin": {
+    "timeoutMs": 20000,
+    "fallbackToLocal": true
+  }
+}
+```
+
+Switch example (`local` -> `gpt_plugin`):
+
+```bash
+curl -s http://localhost:3000/admin/api/market/config \
+  -H "Content-Type: application/json" \
+  -X PUT \
+  -d '{
+    "analysisConfig": {
+      "analysisEngine": "gpt_plugin",
+      "gptPlugin": {
+        "timeoutMs": 20000,
+        "fallbackToLocal": true
+      }
+    }
+  }'
+```
 
 Recommended scheduler setup (daily):
 

@@ -5,6 +5,7 @@ const ROOT_DIR = path.resolve(__dirname, "..", "..");
 const DATA_DIR = path.join(ROOT_DIR, "data", "market-analysis");
 const RUNS_DIR = path.join(DATA_DIR, "runs");
 const PORTFOLIO_FILE = path.join(DATA_DIR, "portfolio.json");
+const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const STATE_FILE = path.join(DATA_DIR, "state.json");
 
 const DEFAULT_INDEX_CODES = ["000300", "000001", "399001"];
@@ -13,6 +14,14 @@ const HISTORY_LIMIT = 90;
 
 const SH_INDEX_CODES = new Set(["000001", "000016", "000300", "000688", "000905", "000852"]);
 const SZ_INDEX_CODES = new Set(["399001", "399005", "399006", "399102", "399303"]);
+const DEFAULT_ANALYSIS_CONFIG = {
+  version: 1,
+  analysisEngine: "local",
+  gptPlugin: {
+    timeoutMs: 20000,
+    fallbackToLocal: true
+  }
+};
 
 module.exports.directCommands = ["/market"];
 
@@ -147,6 +156,7 @@ function inferPhaseFromLocalTime() {
 
 async function runAnalysis(phase, withExplanation) {
   const portfolio = readPortfolio();
+  const analysisConfig = readAnalysisConfig();
   const assetCodes = Array.from(new Set(portfolio.funds.map((item) => item.code)));
   const indexCodes = resolveIndexCodes();
 
@@ -168,12 +178,17 @@ async function runAnalysis(phase, withExplanation) {
   let explanation = null;
   if (withExplanation && isExplanationEnabled()) {
     try {
-      explanation = await generateExplanation(signalResult, optionalNewsContext);
+      explanation = await generateExplanationByProvider(
+        signalResult,
+        optionalNewsContext,
+        analysisConfig
+      );
     } catch (error) {
       explanation = {
         summary: "",
         error: (error && error.message) ? error.message : String(error || "unknown error"),
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
+        provider: analysisConfig.analysisEngine
       };
     }
   }
@@ -600,7 +615,15 @@ function isExplanationEnabled() {
   return flag !== "false" && flag !== "0";
 }
 
-async function generateExplanation(signalResult, optionalNewsContext) {
+async function generateExplanationByProvider(signalResult, optionalNewsContext, analysisConfig) {
+  const config = normalizeAnalysisConfig(analysisConfig);
+  if (config.analysisEngine === "gpt_plugin") {
+    return generateExplanationViaGptPlugin(signalResult, optionalNewsContext, config);
+  }
+  return generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+}
+
+async function generateExplanationViaLocalModel(signalResult, optionalNewsContext) {
   const baseUrl = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
   const model = String(process.env.MARKET_ANALYSIS_LLM_MODEL || process.env.OLLAMA_MODEL || "").trim();
   const timeoutMs = parsePositiveInteger(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS, 15000);
@@ -647,8 +670,133 @@ async function generateExplanation(signalResult, optionalNewsContext) {
   return {
     summary: String(content || "").trim(),
     model,
-    generatedAt: new Date().toISOString()
+    generatedAt: new Date().toISOString(),
+    provider: "local"
   };
+}
+
+async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsContext, _analysisConfig) {
+  const signalResult = _signalResult || {};
+  const optionalNewsContext = _optionalNewsContext || null;
+  const analysisConfig = normalizeAnalysisConfig(_analysisConfig);
+  const timeoutMs = parsePositiveInteger(
+    analysisConfig && analysisConfig.gptPlugin && analysisConfig.gptPlugin.timeoutMs,
+    DEFAULT_ANALYSIS_CONFIG.gptPlugin.timeoutMs
+  );
+  const fallbackToLocal = Boolean(
+    analysisConfig
+    && analysisConfig.gptPlugin
+    && analysisConfig.gptPlugin.fallbackToLocal
+  );
+
+  let bridgeHandler = null;
+  try {
+    bridgeHandler = require(path.join(ROOT_DIR, "skills", "chatgpt-bridge", "handler.js"));
+  } catch (error) {
+    const detail = (error && error.message) ? error.message : String(error || "unknown error");
+    if (!fallbackToLocal) {
+      throw new Error(`gpt_plugin bridge unavailable: ${detail}`);
+    }
+    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+    return {
+      ...localFallback,
+      provider: "local",
+      fallbackFrom: "gpt_plugin",
+      fallbackReason: `gpt_plugin bridge unavailable: ${detail}`
+    };
+  }
+
+  if (!bridgeHandler || typeof bridgeHandler.execute !== "function") {
+    const reason = "gpt_plugin bridge execute() is missing";
+    if (!fallbackToLocal) {
+      throw new Error(reason);
+    }
+    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+    return {
+      ...localFallback,
+      provider: "local",
+      fallbackFrom: "gpt_plugin",
+      fallbackReason: reason
+    };
+  }
+
+  const prompt = buildGptPluginExplanationPrompt(signalResult, optionalNewsContext);
+  try {
+    const response = await withTimeout(
+      Promise.resolve(bridgeHandler.execute(prompt)),
+      timeoutMs,
+      "gpt_plugin request timeout"
+    );
+    const summary = extractTextFromBridgeResponse(response);
+    if (!summary) {
+      throw new Error("gpt_plugin returned empty response");
+    }
+    return {
+      summary,
+      generatedAt: new Date().toISOString(),
+      provider: "gpt_plugin"
+    };
+  } catch (error) {
+    const detail = (error && error.message) ? error.message : String(error || "unknown error");
+    if (!fallbackToLocal) {
+      throw new Error(`gpt_plugin failed: ${detail}`);
+    }
+    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+    return {
+      ...localFallback,
+      provider: "local",
+      fallbackFrom: "gpt_plugin",
+      fallbackReason: `gpt_plugin failed: ${detail}`
+    };
+  }
+}
+
+function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
+  return [
+    "你是市场分析解释器。",
+    "只能解释给定 signalResult，不得更改信号，不得新增决策，不得改变风险等级。",
+    "输出简短中文总结，最多 6 句话。",
+    "",
+    "输入数据(JSON):",
+    JSON.stringify({
+      signalResult: signalResult || null,
+      optionalNewsContext: optionalNewsContext || null
+    })
+  ].join("\n");
+}
+
+function extractTextFromBridgeResponse(response) {
+  if (typeof response === "string") {
+    return response.trim();
+  }
+  if (!response || typeof response !== "object") {
+    return "";
+  }
+  if (typeof response.text === "string") {
+    return response.text.trim();
+  }
+  if (typeof response.message === "string") {
+    return response.message.trim();
+  }
+  return "";
+}
+
+async function withTimeout(task, timeoutMs, message) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve(task),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(message || `timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function persistRun(input) {
@@ -748,6 +896,26 @@ function readPortfolio() {
   return normalized;
 }
 
+function readAnalysisConfig() {
+  ensureStorage();
+
+  let parsed = null;
+  if (fs.existsSync(CONFIG_FILE)) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
+    } catch (_error) {
+      parsed = null;
+    }
+  }
+
+  const normalized = normalizeAnalysisConfig(parsed);
+  if (!fs.existsSync(CONFIG_FILE)) {
+    writeJsonAtomic(CONFIG_FILE, normalized);
+  }
+
+  return normalized;
+}
+
 function readState() {
   ensureStorage();
 
@@ -824,6 +992,32 @@ function normalizePortfolio(input) {
   return {
     funds: Array.from(dedup.values()),
     cash
+  };
+}
+
+function normalizeAnalysisConfig(input) {
+  const source = (input && typeof input === "object") ? input : {};
+  const engineRaw = typeof source.analysisEngine === "string"
+    ? source.analysisEngine.trim().toLowerCase()
+    : "";
+  const analysisEngine = engineRaw === "gpt_plugin" ? "gpt_plugin" : "local";
+
+  const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
+    ? source.gptPlugin
+    : {};
+  const timeoutMs = parsePositiveInteger(gptPlugin.timeoutMs, DEFAULT_ANALYSIS_CONFIG.gptPlugin.timeoutMs);
+  const fallbackFlag = String(gptPlugin.fallbackToLocal ?? DEFAULT_ANALYSIS_CONFIG.gptPlugin.fallbackToLocal)
+    .trim()
+    .toLowerCase();
+  const fallbackToLocal = !(fallbackFlag === "false" || fallbackFlag === "0" || fallbackFlag === "off");
+
+  return {
+    version: 1,
+    analysisEngine,
+    gptPlugin: {
+      timeoutMs,
+      fallbackToLocal
+    }
   };
 }
 
@@ -915,7 +1109,6 @@ function buildRunResponseText(result) {
   const signalResult = result.signalResult;
   const lines = [
     `Market Analysis ${phaseLabel(signalResult.phase)} 完成`,
-    `时间: ${signalResult.generatedAt}`,
     `市场状态: ${signalResult.marketState}${signalResult.benchmark ? ` (${signalResult.benchmark})` : ""}`
   ];
 
@@ -935,9 +1128,6 @@ function buildRunResponseText(result) {
   if (result.explanation && result.explanation.error) {
     lines.push(`解释生成失败: ${result.explanation.error}`);
   }
-
-  lines.push(`记录ID: ${result.persisted.id}`);
-  lines.push(`快照: ${result.persisted.path}`);
 
   return lines.join("\n");
 }
@@ -965,6 +1155,10 @@ function ensureStorage() {
       funds: [],
       cash: 0
     });
+  }
+
+  if (!fs.existsSync(CONFIG_FILE)) {
+    writeJsonAtomic(CONFIG_FILE, DEFAULT_ANALYSIS_CONFIG);
   }
 
   if (!fs.existsSync(STATE_FILE)) {

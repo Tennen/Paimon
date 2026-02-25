@@ -37,6 +37,19 @@ type MarketPortfolio = {
   cash: number;
 };
 
+type MarketAnalysisEngine = "local" | "gpt_plugin";
+
+type MarketGptPluginConfig = {
+  timeoutMs: number;
+  fallbackToLocal: boolean;
+};
+
+type MarketAnalysisConfig = {
+  version: 1;
+  analysisEngine: MarketAnalysisEngine;
+  gptPlugin: MarketGptPluginConfig;
+};
+
 type MarketRunSummary = {
   id: string;
   createdAt: string;
@@ -88,6 +101,7 @@ type RunMarketOncePayloadParseResult =
 const MARKET_DATA_DIR = path.resolve(process.cwd(), "data/market-analysis");
 const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
 const MARKET_PORTFOLIO_FILE = path.join(MARKET_DATA_DIR, "portfolio.json");
+const MARKET_CONFIG_FILE = path.join(MARKET_DATA_DIR, "config.json");
 const MARKET_STATE_FILE = path.join(MARKET_DATA_DIR, "state.json");
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
@@ -95,6 +109,15 @@ const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
   funds: [],
   cash: 0
+};
+
+const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
+  version: 1,
+  analysisEngine: "local",
+  gptPlugin: {
+    timeoutMs: 20000,
+    fallbackToLocal: true
+  }
 };
 
 export class AdminIngressAdapter implements IngressAdapter {
@@ -468,25 +491,57 @@ export class AdminIngressAdapter implements IngressAdapter {
 
     app.get("/admin/api/market/config", (_req: Request, res: ExResponse) => {
       const portfolio = readMarketPortfolio();
+      const config = readMarketAnalysisConfig();
       res.json({
         portfolio,
+        config,
         portfolioPath: MARKET_PORTFOLIO_FILE,
+        configPath: MARKET_CONFIG_FILE,
         statePath: MARKET_STATE_FILE,
         runsDir: MARKET_RUNS_DIR
       });
     });
 
     app.put("/admin/api/market/config", (req: Request, res: ExResponse) => {
-      const portfolio = parseMarketPortfolioInput(req.body);
-      if (!portfolio) {
-        res.status(400).json({ error: "invalid market portfolio payload" });
+      if (!req.body || typeof req.body !== "object") {
+        res.status(400).json({ error: "invalid market config payload" });
         return;
       }
 
-      writeMarketPortfolio(portfolio);
+      const payload = req.body as Record<string, unknown>;
+      const hasPortfolio = "portfolio" in payload || "funds" in payload || "cash" in payload;
+      const hasConfig = "config" in payload || "analysisEngine" in payload || "gptPlugin" in payload;
+      if (!hasPortfolio && !hasConfig) {
+        res.status(400).json({ error: "missing market portfolio/config payload" });
+        return;
+      }
+
+      let portfolio = readMarketPortfolio();
+      if (hasPortfolio) {
+        const parsedPortfolio = parseMarketPortfolioInput(req.body);
+        if (!parsedPortfolio) {
+          res.status(400).json({ error: "invalid market portfolio payload" });
+          return;
+        }
+        portfolio = parsedPortfolio;
+        writeMarketPortfolio(portfolio);
+      }
+
+      let config = readMarketAnalysisConfig();
+      if (hasConfig) {
+        const parsedConfig = parseMarketAnalysisConfigInput(req.body);
+        if (!parsedConfig) {
+          res.status(400).json({ error: "invalid market analysis config payload" });
+          return;
+        }
+        config = parsedConfig;
+        writeMarketAnalysisConfig(config);
+      }
+
       res.json({
         ok: true,
-        portfolio
+        portfolio,
+        config
       });
     });
 
@@ -759,6 +814,19 @@ function parseMarketPortfolioInput(rawBody: unknown): MarketPortfolio | null {
   return normalizeMarketPortfolio(payload);
 }
 
+function parseMarketAnalysisConfigInput(rawBody: unknown): MarketAnalysisConfig | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const payload = "config" in body ? body.config : rawBody;
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  return normalizeMarketAnalysisConfig(payload);
+}
+
 function parseBootstrapMarketTasksPayload(rawBody: unknown): BootstrapMarketTasksPayload | null {
   if (!rawBody || typeof rawBody !== "object") {
     return null;
@@ -887,9 +955,36 @@ function readMarketPortfolio(): MarketPortfolio {
   }
 }
 
+function readMarketAnalysisConfig(): MarketAnalysisConfig {
+  ensureMarketStorage();
+
+  if (!fs.existsSync(MARKET_CONFIG_FILE)) {
+    writeJsonFileAtomic(MARKET_CONFIG_FILE, DEFAULT_MARKET_ANALYSIS_CONFIG);
+    return {
+      ...DEFAULT_MARKET_ANALYSIS_CONFIG,
+      gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(MARKET_CONFIG_FILE, "utf-8"));
+    return normalizeMarketAnalysisConfig(parsed);
+  } catch {
+    return {
+      ...DEFAULT_MARKET_ANALYSIS_CONFIG,
+      gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
+    };
+  }
+}
+
 function writeMarketPortfolio(portfolio: MarketPortfolio): void {
   ensureMarketStorage();
   writeJsonFileAtomic(MARKET_PORTFOLIO_FILE, normalizeMarketPortfolio(portfolio));
+}
+
+function writeMarketAnalysisConfig(config: MarketAnalysisConfig): void {
+  ensureMarketStorage();
+  writeJsonFileAtomic(MARKET_CONFIG_FILE, normalizeMarketAnalysisConfig(config));
 }
 
 function listMarketRunSummaries(limit: number, phase?: MarketPhase): MarketRunSummary[] {
@@ -1104,6 +1199,36 @@ function normalizeMarketRunSummary(input: unknown): MarketRunSummary | null {
     signals,
     explanationSummary: typeof source.explanationSummary === "string" ? source.explanationSummary : "",
     file: typeof source.file === "string" ? source.file : undefined
+  };
+}
+
+function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
+  const fallback = {
+    ...DEFAULT_MARKET_ANALYSIS_CONFIG,
+    gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
+  };
+  if (!input || typeof input !== "object") {
+    return fallback;
+  }
+
+  const source = input as Record<string, unknown>;
+  const engineRaw = typeof source.analysisEngine === "string" ? source.analysisEngine.trim().toLowerCase() : "";
+  const analysisEngine: MarketAnalysisEngine = engineRaw === "gpt_plugin" ? "gpt_plugin" : "local";
+  const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
+    ? source.gptPlugin as Record<string, unknown>
+    : {};
+  const timeoutMs = Number(gptPlugin.timeoutMs);
+  const fallbackToLocal = parseOptionalBoolean(gptPlugin.fallbackToLocal);
+
+  return {
+    version: 1,
+    analysisEngine,
+    gptPlugin: {
+      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? Math.floor(timeoutMs)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.timeoutMs,
+      fallbackToLocal: fallbackToLocal ?? DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.fallbackToLocal
+    }
   };
 }
 
