@@ -69,13 +69,41 @@ export type MarketRunOnceResponse = {
   ok: boolean;
   phase: MarketPhase;
   message: string;
-  task?: {
-    id: string;
-    name: string;
-  };
   acceptedAsync: boolean;
   responseText?: string;
   imageCount?: number;
+};
+
+export type MarketSectionProps = {
+  marketConfig: MarketConfig | null;
+  marketPortfolio: MarketPortfolio;
+  marketRuns: MarketRunSummary[];
+  savingMarketPortfolio: boolean;
+  bootstrappingMarketTasks: boolean;
+  runningMarketOncePhase: MarketPhase | null;
+  marketRunOnceWithExplanation: boolean;
+  enabledUsers: PushUser[];
+  marketTaskUserId: string;
+  marketMiddayTime: string;
+  marketCloseTime: string;
+  marketSearchInputs: string[];
+  marketSearchResults: MarketSecuritySearchItem[][];
+  searchingMarketFundIndex: number | null;
+  onCashChange: (value: number) => void;
+  onMarketTaskUserIdChange: (value: string) => void;
+  onMarketMiddayTimeChange: (value: string) => void;
+  onMarketCloseTimeChange: (value: string) => void;
+  onAddMarketFund: () => void;
+  onRemoveMarketFund: (index: number) => void;
+  onMarketFundChange: (index: number, key: keyof MarketFundHolding, value: string) => void;
+  onMarketSearchInputChange: (index: number, value: string) => void;
+  onSearchMarketByName: (index: number) => void;
+  onApplyMarketSearchResult: (index: number, item: MarketSecuritySearchItem) => void;
+  onSaveMarketPortfolio: () => void;
+  onRefresh: () => void;
+  onBootstrapMarketTasks: () => void;
+  onMarketRunOnceWithExplanationChange: (value: boolean) => void;
+  onRunMarketOnce: (phase: MarketPhase, withExplanation: boolean) => void;
 };
 
 export type MarketSecuritySearchItem = {

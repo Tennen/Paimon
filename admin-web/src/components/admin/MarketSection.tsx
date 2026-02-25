@@ -16,6 +16,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -26,41 +27,8 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
-  MarketConfig,
-  MarketFundHolding,
-  MarketPortfolio,
-  MarketRunSummary,
-  MarketSecuritySearchItem,
-  PushUser
+  MarketSectionProps
 } from "@/types/admin";
-
-type MarketSectionProps = {
-  marketConfig: MarketConfig | null;
-  marketPortfolio: MarketPortfolio;
-  marketRuns: MarketRunSummary[];
-  savingMarketPortfolio: boolean;
-  bootstrappingMarketTasks: boolean;
-  enabledUsers: PushUser[];
-  marketTaskUserId: string;
-  marketMiddayTime: string;
-  marketCloseTime: string;
-  marketSearchInputs: string[];
-  marketSearchResults: MarketSecuritySearchItem[][];
-  searchingMarketFundIndex: number | null;
-  onCashChange: (value: number) => void;
-  onMarketTaskUserIdChange: (value: string) => void;
-  onMarketMiddayTimeChange: (value: string) => void;
-  onMarketCloseTimeChange: (value: string) => void;
-  onAddMarketFund: () => void;
-  onRemoveMarketFund: (index: number) => void;
-  onMarketFundChange: (index: number, key: keyof MarketFundHolding, value: string) => void;
-  onMarketSearchInputChange: (index: number, value: string) => void;
-  onSearchMarketByName: (index: number) => void;
-  onApplyMarketSearchResult: (index: number, item: MarketSecuritySearchItem) => void;
-  onSaveMarketPortfolio: () => void;
-  onRefresh: () => void;
-  onBootstrapMarketTasks: () => void;
-};
 
 export function MarketSection(props: MarketSectionProps) {
   return (
@@ -256,6 +224,41 @@ export function MarketSection(props: MarketSectionProps) {
               {props.bootstrappingMarketTasks ? "处理中..." : "生成 / 更新 Market 定时任务"}
             </Button>
           </div>
+        </div>
+
+        <Separator />
+
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium">手动生成一次报告</h3>
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+            <Label htmlFor="market-with-explanation">是否生成 LLM 解释</Label>
+            <Switch
+              id="market-with-explanation"
+              checked={props.marketRunOnceWithExplanation}
+              onCheckedChange={props.onMarketRunOnceWithExplanationChange}
+              disabled={props.runningMarketOncePhase !== null}
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              disabled={!props.marketTaskUserId || props.runningMarketOncePhase !== null}
+              onClick={() => props.onRunMarketOnce("midday", props.marketRunOnceWithExplanation)}
+            >
+              {props.runningMarketOncePhase === "midday" ? "盘中生成中..." : "立即生成盘中报告"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!props.marketTaskUserId || props.runningMarketOncePhase !== null}
+              onClick={() => props.onRunMarketOnce("close", props.marketRunOnceWithExplanation)}
+            >
+              {props.runningMarketOncePhase === "close" ? "收盘生成中..." : "立即生成收盘报告"}
+            </Button>
+          </div>
+          {!props.marketTaskUserId ? (
+            <p className="text-xs text-destructive">请先选择推送用户后再手动生成报告</p>
+          ) : null}
         </div>
 
         <Separator />

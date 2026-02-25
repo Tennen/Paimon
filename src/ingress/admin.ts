@@ -81,6 +81,10 @@ type RunMarketOncePayload = {
   withExplanation?: boolean;
 };
 
+type RunMarketOncePayloadParseResult =
+  | { payload: RunMarketOncePayload; error?: undefined }
+  | { payload?: undefined; error: string };
+
 const MARKET_DATA_DIR = path.resolve(process.cwd(), "data/market-analysis");
 const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
 const MARKET_PORTFOLIO_FILE = path.join(MARKET_DATA_DIR, "portfolio.json");
@@ -544,11 +548,12 @@ export class AdminIngressAdapter implements IngressAdapter {
     });
 
     app.post("/admin/api/market/run-once", async (req: Request, res: ExResponse) => {
-      const payload = parseRunMarketOncePayload(req.body);
-      if (!payload) {
-        res.status(400).json({ error: "invalid run-once payload" });
+      const parsed = parseRunMarketOncePayload(req.body);
+      if (!parsed.payload) {
+        res.status(400).json({ ok: false, error: parsed.error });
         return;
       }
+      const payload = parsed.payload;
 
       const baseMessage = `/market ${payload.phase}`;
       const message = payload.withExplanation === false
@@ -561,7 +566,6 @@ export class AdminIngressAdapter implements IngressAdapter {
           ok: true,
           phase: payload.phase,
           message,
-          task: result.task,
           acceptedAsync: result.acceptedAsync,
           responseText: result.responseText,
           imageCount: result.imageCount
@@ -781,31 +785,37 @@ function parseBootstrapMarketTasksPayload(rawBody: unknown): BootstrapMarketTask
   };
 }
 
-function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayload | null {
+function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayloadParseResult {
   if (!rawBody || typeof rawBody !== "object") {
-    return null;
+    return { error: "invalid run-once payload" };
   }
 
   const body = rawBody as Record<string, unknown>;
+  const allowedKeys = new Set(["userId", "phase", "withExplanation"]);
+  const invalidKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
+  if (invalidKeys.length > 0) {
+    return { error: `unsupported fields: ${invalidKeys.join(", ")}` };
+  }
+
   const userId = typeof body.userId === "string" ? body.userId.trim() : "";
   if (!userId) {
-    return null;
+    return { error: "userId is required" };
   }
 
   const phase = parseMarketPhase(body.phase);
   if (!phase) {
-    return null;
+    return { error: "phase must be midday or close" };
   }
 
   if ("withExplanation" in body) {
     const withExplanation = parseOptionalBoolean(body.withExplanation);
     if (withExplanation === undefined) {
-      return null;
+      return { error: "withExplanation must be boolean" };
     }
-    return { userId, phase, withExplanation };
+    return { payload: { userId, phase, withExplanation } };
   }
 
-  return { userId, phase };
+  return { payload: { userId, phase } };
 }
 
 function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarketTasksPayload): ScheduledTask[] {

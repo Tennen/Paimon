@@ -324,4 +324,92 @@ Admin API:
 - `PUT /admin/api/market/config`
 - `GET /admin/api/market/runs?limit=12`
 - `GET /admin/api/market/runs/latest`
+- `POST /admin/api/market/run-once`
 - `POST /admin/api/market/tasks/bootstrap` (upsert two daily market tasks for a user)
+
+`POST /admin/api/market/run-once` (manual one-off run):
+
+- Request body fields:
+- `userId` (string, required): target receiver user id.
+- `phase` (`midday` | `close`, required): generate intraday or close report.
+- `withExplanation` (boolean, optional): when `false`, append `--no-llm` to skip LLM explanation.
+- Only `userId`, `phase`, `withExplanation` are accepted. Any extra field returns `400`.
+
+Request example:
+
+```bash
+curl -s http://localhost:3000/admin/api/market/run-once \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "zhangsan",
+    "phase": "midday",
+    "withExplanation": true
+  }'
+```
+
+Typical success response:
+
+```json
+{
+  "ok": true,
+  "phase": "midday",
+  "message": "/market midday",
+  "acceptedAsync": false,
+  "responseText": "已生成盘中报告",
+  "imageCount": 1
+}
+```
+
+Typical async accepted response:
+
+```json
+{
+  "ok": true,
+  "phase": "close",
+  "message": "/market close --no-llm",
+  "acceptedAsync": true,
+  "responseText": "任务已受理，稍后推送",
+  "imageCount": 0
+}
+```
+
+Typical `400` responses:
+
+```json
+{ "ok": false, "error": "userId is required" }
+```
+
+```json
+{ "ok": false, "error": "phase must be midday or close" }
+```
+
+Relation with scheduled tasks:
+
+- `run-once` triggers an immediate single execution and does not create/update cron tasks.
+- Scheduled daily execution still uses `/admin/api/market/tasks/bootstrap` and task settings.
+
+Manual one-off report generation:
+
+1. Confirm target `userId` exists and can receive messages.
+2. Trigger intraday run:
+
+```bash
+curl -s http://localhost:3000/admin/api/market/run-once \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"zhangsan","phase":"midday","withExplanation":true}'
+```
+
+3. Trigger close run (without LLM explanation):
+
+```bash
+curl -s http://localhost:3000/admin/api/market/run-once \
+  -H "Content-Type: application/json" \
+  -d '{"userId":"zhangsan","phase":"close","withExplanation":false}'
+```
+
+4. Verify latest run record:
+
+```bash
+curl -s "http://localhost:3000/admin/api/market/runs/latest?phase=midday"
+curl -s "http://localhost:3000/admin/api/market/runs/latest?phase=close"
+```

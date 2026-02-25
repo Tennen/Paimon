@@ -14,7 +14,9 @@ import {
   EvolutionStateSnapshot,
   MarketConfig,
   MarketFundHolding,
+  MarketPhase,
   MarketPortfolio,
+  MarketRunOnceResponse,
   MarketRunSummary,
   MarketSecuritySearchItem,
   MenuKey,
@@ -57,6 +59,8 @@ export default function App() {
   const [marketRuns, setMarketRuns] = useState<MarketRunSummary[]>([]);
   const [savingMarketPortfolio, setSavingMarketPortfolio] = useState(false);
   const [bootstrappingMarketTasks, setBootstrappingMarketTasks] = useState(false);
+  const [runningMarketOncePhase, setRunningMarketOncePhase] = useState<MarketPhase | null>(null);
+  const [marketRunOnceWithExplanation, setMarketRunOnceWithExplanation] = useState(true);
   const [marketTaskUserId, setMarketTaskUserId] = useState("");
   const [marketMiddayTime, setMarketMiddayTime] = useState("13:30");
   const [marketCloseTime, setMarketCloseTime] = useState("15:15");
@@ -682,6 +686,46 @@ export default function App() {
     }
   }
 
+  async function handleRunMarketOnce(phase: MarketPhase, withExplanation: boolean): Promise<void> {
+    if (!marketTaskUserId) {
+      setNotice({ type: "error", title: "请先选择推送用户" });
+      return;
+    }
+    if (runningMarketOncePhase) {
+      return;
+    }
+
+    setRunningMarketOncePhase(phase);
+    try {
+      const payload = await request<MarketRunOnceResponse>("/admin/api/market/run-once", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: marketTaskUserId,
+          phase,
+          withExplanation
+        })
+      });
+      await loadMarketRuns();
+      if (payload.acceptedAsync) {
+        setNotice({
+          type: "info",
+          title: "Market 报告已异步受理",
+          text: payload.responseText ?? payload.message
+        });
+      } else {
+        setNotice({
+          type: "success",
+          title: "Market 报告已生成",
+          text: payload.responseText ?? payload.message
+        });
+      }
+    } catch (error) {
+      notifyError("手动触发 Market 报告失败", error);
+    } finally {
+      setRunningMarketOncePhase((current) => (current === phase ? null : current));
+    }
+  }
+
   async function handleSubmitEvolutionGoal(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const goal = evolutionGoalDraft.trim();
@@ -804,6 +848,8 @@ export default function App() {
           marketRuns={marketRuns}
           savingMarketPortfolio={savingMarketPortfolio}
           bootstrappingMarketTasks={bootstrappingMarketTasks}
+          runningMarketOncePhase={runningMarketOncePhase}
+          marketRunOnceWithExplanation={marketRunOnceWithExplanation}
           enabledUsers={enabledUsers}
           marketTaskUserId={marketTaskUserId}
           marketMiddayTime={marketMiddayTime}
@@ -824,6 +870,8 @@ export default function App() {
           onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
           onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
           onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
+          onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
+          onRunMarketOnce={(phase, withExplanation) => void handleRunMarketOnce(phase, withExplanation)}
         />
       ) : null}
 
