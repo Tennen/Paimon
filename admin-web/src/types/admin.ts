@@ -47,9 +47,22 @@ export type MarketPortfolio = {
   cash: number;
 };
 
+export type MarketAnalysisEngine = "local" | "gpt_plugin";
+
+export type MarketAnalysisConfig = {
+  version: 1;
+  analysisEngine: MarketAnalysisEngine;
+  gptPlugin: {
+    timeoutMs: number;
+    fallbackToLocal: boolean;
+  };
+};
+
 export type MarketConfig = {
   portfolio: MarketPortfolio;
+  config: MarketAnalysisConfig;
   portfolioPath: string;
+  configPath: string;
   statePath: string;
   runsDir: string;
 };
@@ -80,8 +93,10 @@ export type MarketRunOnceResponse = {
 export type MarketSectionProps = {
   marketConfig: MarketConfig | null;
   marketPortfolio: MarketPortfolio;
+  marketAnalysisConfig: MarketAnalysisConfig;
   marketRuns: MarketRunSummary[];
   savingMarketPortfolio: boolean;
+  savingMarketAnalysisConfig: boolean;
   marketFundSaveStates: Array<"saved" | "dirty" | "saving">;
   bootstrappingMarketTasks: boolean;
   runningMarketOncePhase: MarketPhase | null;
@@ -94,6 +109,9 @@ export type MarketSectionProps = {
   marketSearchResults: MarketSecuritySearchItem[][];
   searchingMarketFundIndex: number | null;
   onCashChange: (value: number) => void;
+  onMarketAnalysisEngineChange: (value: MarketAnalysisEngine) => void;
+  onMarketGptPluginTimeoutMsChange: (value: number) => void;
+  onMarketGptPluginFallbackToLocalChange: (value: boolean) => void;
   onMarketTaskUserIdChange: (value: string) => void;
   onMarketMiddayTimeChange: (value: string) => void;
   onMarketCloseTimeChange: (value: string) => void;
@@ -105,6 +123,7 @@ export type MarketSectionProps = {
   onApplyMarketSearchResult: (index: number, item: MarketSecuritySearchItem) => void;
   onSaveMarketFund: (index: number) => void;
   onSaveMarketPortfolio: () => void;
+  onSaveMarketAnalysisConfig: () => void;
   onRefresh: () => void;
   onBootstrapMarketTasks: () => void;
   onMarketRunOnceWithExplanationChange: (value: boolean) => void;
@@ -260,4 +279,13 @@ export const EMPTY_TASK_FORM: TaskFormState = {
 export const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
   funds: [],
   cash: 0
+};
+
+export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
+  version: 1,
+  analysisEngine: "local",
+  gptPlugin: {
+    timeoutMs: 20000,
+    fallbackToLocal: true
+  }
 };

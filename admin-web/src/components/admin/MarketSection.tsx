@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
+  MarketAnalysisEngine,
   MarketSectionProps
 } from "@/types/admin";
 
@@ -90,6 +91,57 @@ export function MarketSection(props: MarketSectionProps) {
         <CardDescription>管理持仓、查看最近分析结果，并快速生成盘中/收盘任务</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <h3 className="text-sm font-medium">分析引擎配置</h3>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>Analysis Engine</Label>
+              <Select value={props.marketAnalysisConfig.analysisEngine} onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择分析引擎" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">local（本地规则 + 本地LLM解释）</SelectItem>
+                  <SelectItem value="gpt_plugin">gpt_plugin（调用远端GPT插件）</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="market-gpt-timeout">GPT Plugin 超时（毫秒）</Label>
+              <Input
+                id="market-gpt-timeout"
+                type="number"
+                min={1}
+                step="1000"
+                value={props.marketAnalysisConfig.gptPlugin.timeoutMs}
+                onChange={(event) => props.onMarketGptPluginTimeoutMsChange(Number(event.target.value))}
+              />
+            </div>
+
+            <div className="flex items-end">
+              <div className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2">
+                <Label htmlFor="market-gpt-fallback" className="text-xs">GPT Plugin 失败回退 local</Label>
+                <Switch
+                  id="market-gpt-fallback"
+                  checked={props.marketAnalysisConfig.gptPlugin.fallbackToLocal}
+                  onCheckedChange={props.onMarketGptPluginFallbackToLocalChange}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={props.savingMarketAnalysisConfig}
+              onClick={props.onSaveMarketAnalysisConfig}
+            >
+              {props.savingMarketAnalysisConfig ? "保存中..." : "保存分析引擎配置"}
+            </Button>
+          </div>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-[220px_1fr]">
           <div className="space-y-1.5">
             <Label htmlFor="market-cash">现金</Label>
@@ -378,6 +430,7 @@ export function MarketSection(props: MarketSectionProps) {
 
         <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
           <div className="mono">portfolio: {props.marketConfig?.portfolioPath ?? "-"}</div>
+          <div className="mono">config: {props.marketConfig?.configPath ?? "-"}</div>
           <div className="mono">state: {props.marketConfig?.statePath ?? "-"}</div>
           <div className="mono">runs: {props.marketConfig?.runsDir ?? "-"}</div>
         </div>

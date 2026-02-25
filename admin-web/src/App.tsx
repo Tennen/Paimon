@@ -7,12 +7,15 @@ import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
 import {
   AdminConfig,
+  DEFAULT_MARKET_ANALYSIS_CONFIG,
   DEFAULT_MARKET_PORTFOLIO,
   EMPTY_TASK_FORM,
   EMPTY_USER_FORM,
   EvolutionGoal,
   EvolutionStateSnapshot,
   MarketConfig,
+  MarketAnalysisConfig,
+  MarketAnalysisEngine,
   MarketFundHolding,
   MarketPhase,
   MarketPortfolio,
@@ -59,8 +62,10 @@ export default function App() {
 
   const [marketConfig, setMarketConfig] = useState<MarketConfig | null>(null);
   const [marketPortfolio, setMarketPortfolio] = useState<MarketPortfolio>(DEFAULT_MARKET_PORTFOLIO);
+  const [marketAnalysisConfig, setMarketAnalysisConfig] = useState<MarketAnalysisConfig>(DEFAULT_MARKET_ANALYSIS_CONFIG);
   const [marketRuns, setMarketRuns] = useState<MarketRunSummary[]>([]);
   const [savingMarketPortfolio, setSavingMarketPortfolio] = useState(false);
+  const [savingMarketAnalysisConfig, setSavingMarketAnalysisConfig] = useState(false);
   const [savingMarketFundIndex, setSavingMarketFundIndex] = useState<number | null>(null);
   const [marketSavedFundsByRow, setMarketSavedFundsByRow] = useState<Array<MarketFundHolding | null>>([]);
   const [marketSavedCash, setMarketSavedCash] = useState(0);
@@ -212,7 +217,9 @@ export default function App() {
     const payload = await request<MarketConfig>("/admin/api/market/config");
     setMarketConfig(payload);
     const portfolio = normalizeMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
+    const analysisConfig = normalizeMarketAnalysisConfig(payload.config ?? DEFAULT_MARKET_ANALYSIS_CONFIG);
     setMarketPortfolio(portfolio);
+    setMarketAnalysisConfig(analysisConfig);
     setMarketSavedFundsByRow(portfolio.funds.map((fund) => ({ ...fund })));
     setMarketSavedCash(portfolio.cash);
   }
@@ -595,6 +602,33 @@ export default function App() {
     }));
   }
 
+  function handleMarketAnalysisEngineChange(value: MarketAnalysisEngine): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      analysisEngine: value
+    }));
+  }
+
+  function handleMarketGptPluginTimeoutMsChange(value: number): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      gptPlugin: {
+        ...prev.gptPlugin,
+        timeoutMs: Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+      }
+    }));
+  }
+
+  function handleMarketGptPluginFallbackToLocalChange(value: boolean): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      gptPlugin: {
+        ...prev.gptPlugin,
+        fallbackToLocal: value
+      }
+    }));
+  }
+
   function handleMarketFundChange(index: number, key: keyof MarketFundHolding, value: string): void {
     setMarketPortfolio((prev) => ({
       ...prev,
@@ -754,7 +788,7 @@ export default function App() {
   }
 
   async function handleSaveMarketPortfolio(): Promise<void> {
-    if (savingMarketFundIndex !== null) {
+    if (savingMarketFundIndex !== null || savingMarketAnalysisConfig) {
       return;
     }
     const normalizedFunds = marketPortfolio.funds
@@ -785,6 +819,36 @@ export default function App() {
       notifyError("保存 Market 配置失败", error);
     } finally {
       setSavingMarketPortfolio(false);
+    }
+  }
+
+  async function handleSaveMarketAnalysisConfig(): Promise<void> {
+    if (savingMarketPortfolio || savingMarketFundIndex !== null) {
+      return;
+    }
+
+    const timeoutMs = Number(marketAnalysisConfig.gptPlugin.timeoutMs);
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      setNotice({ type: "error", title: "GPT Plugin 超时必须为正整数毫秒" });
+      return;
+    }
+    const normalizedConfig = normalizeMarketAnalysisConfig(marketAnalysisConfig);
+
+    setSavingMarketAnalysisConfig(true);
+    try {
+      const response = await request<{ ok: boolean; portfolio: MarketPortfolio; config: MarketAnalysisConfig }>("/admin/api/market/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          config: normalizedConfig
+        })
+      });
+      const nextConfig = normalizeMarketAnalysisConfig(response.config);
+      setMarketAnalysisConfig(nextConfig);
+      setNotice({ type: "success", title: "Market 分析引擎配置已保存" });
+    } catch (error) {
+      notifyError("保存 Market 分析引擎配置失败", error);
+    } finally {
+      setSavingMarketAnalysisConfig(false);
     }
   }
 
@@ -984,8 +1048,10 @@ export default function App() {
         <MarketSection
           marketConfig={marketConfig}
           marketPortfolio={marketPortfolio}
+          marketAnalysisConfig={marketAnalysisConfig}
           marketRuns={marketRuns}
           savingMarketPortfolio={savingMarketPortfolio}
+          savingMarketAnalysisConfig={savingMarketAnalysisConfig}
           marketFundSaveStates={marketFundSaveStates}
           bootstrappingMarketTasks={bootstrappingMarketTasks}
           runningMarketOncePhase={runningMarketOncePhase}
@@ -998,6 +1064,9 @@ export default function App() {
           marketSearchResults={marketSearchResults}
           searchingMarketFundIndex={searchingMarketFundIndex}
           onCashChange={handleMarketCashChange}
+          onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
+          onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
+          onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
           onMarketTaskUserIdChange={setMarketTaskUserId}
           onMarketMiddayTimeChange={setMarketMiddayTime}
           onMarketCloseTimeChange={setMarketCloseTime}
@@ -1009,6 +1078,7 @@ export default function App() {
           onApplyMarketSearchResult={handleApplyMarketSearchResult}
           onSaveMarketFund={(index) => void handleSaveMarketFund(index)}
           onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
+          onSaveMarketAnalysisConfig={() => void handleSaveMarketAnalysisConfig()}
           onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
           onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
           onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
@@ -1090,6 +1160,22 @@ function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
   return {
     cash: Number.isFinite(Number(portfolio?.cash)) ? Number(portfolio.cash) : 0,
     funds: Array.isArray(portfolio?.funds) ? portfolio.funds.map((fund) => normalizeMarketFund(fund)) : []
+  };
+}
+
+function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnalysisConfig {
+  const engine = config?.analysisEngine === "gpt_plugin" ? "gpt_plugin" : "local";
+  const timeoutMs = Number(config?.gptPlugin?.timeoutMs);
+  const fallbackToLocal = typeof config?.gptPlugin?.fallbackToLocal === "boolean"
+    ? config.gptPlugin.fallbackToLocal
+    : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.fallbackToLocal;
+  return {
+    version: 1,
+    analysisEngine: engine,
+    gptPlugin: {
+      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.timeoutMs,
+      fallbackToLocal
+    }
   };
 }
 
