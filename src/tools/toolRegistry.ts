@@ -19,6 +19,7 @@ export type ToolSchemaItem = {
 
 export type ToolDependencies = {
   skillManager: unknown;
+  evolutionService?: unknown;
 };
 
 export type ToolModule = {

@@ -17,6 +17,11 @@ Direct commands:
 - `/evolve status <goalId>`
 - `/evolve tick`
 - `/evolve help`
+- `/codex status`
+- `/codex model`
+- `/codex model <model>`
+- `/codex effort`
+- `/codex effort <minimal|low|medium|high|xhigh>`
 
 Commit behavior:
 
@@ -25,8 +30,7 @@ Commit behavior:
 - If `commitMessage` is omitted, evolution engine auto-generates commit message before commit.
 - After task success, engine auto commit + push; push failure makes the goal fail.
 
-This skill talks to the same admin evolution APIs:
+Runtime model:
 
-- `POST /admin/api/evolution/goals`
-- `GET /admin/api/evolution/state`
-- `POST /admin/api/evolution/tick`
+- Handler uses in-process evolution runtime context directly (no HTTP fetch).
+- Admin routes and handler share the same evolution business abstraction.

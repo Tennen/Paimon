@@ -3,11 +3,22 @@ import { SkillManager } from "../skills/skillManager";
 import { getSkillHandlerToolName } from "../skills/toolNaming";
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
 
+type EvolutionServiceBridge = {
+  getTickMs: () => number;
+  getSnapshot: () => unknown;
+  enqueueGoal: (input: { goal: string; commitMessage?: string }) => Promise<unknown>;
+  triggerNow: () => Promise<void>;
+  getCodexConfig: () => { codexModel: string; codexReasoningEffort: string; envPath: string };
+  updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) => { codexModel: string; codexReasoningEffort: string; envPath: string };
+};
+
 export class SkillTool {
   private readonly manager: SkillManager;
+  private readonly evolutionService?: EvolutionServiceBridge;
 
-  constructor(manager: SkillManager) {
+  constructor(manager: SkillManager, evolutionService?: EvolutionServiceBridge) {
     this.manager = manager;
+    this.evolutionService = evolutionService;
   }
 
   async execute(op: string, args: Record<string, unknown>, context: Record<string, unknown>): Promise<ToolResult> {
@@ -23,7 +34,7 @@ export class SkillTool {
     }
 
     try {
-      const result = await this.manager.invoke(name, input, context);
+      const result = await this.manager.invoke(name, input, this.buildInvokeContext(context));
       return { ok: true, output: result };
     } catch (error) {
       return { ok: false, error: `Failed to execute skill '${name}': ${(error as Error).message}` };
@@ -42,17 +53,34 @@ export class SkillTool {
 
     const input = (args.input as string | undefined) ?? "";
     try {
-      const result = await this.manager.invoke(skillName, input, context);
+      const result = await this.manager.invoke(skillName, input, this.buildInvokeContext(context));
       return { ok: true, output: result };
     } catch (error) {
       return { ok: false, error: `Failed to execute skill '${skillName}': ${(error as Error).message}` };
     }
   }
+
+  private buildInvokeContext(context: Record<string, unknown>): Record<string, unknown> {
+    if (!this.evolutionService) {
+      return context;
+    }
+    return {
+      ...context,
+      evolution: {
+        getTickMs: () => this.evolutionService?.getTickMs() ?? 0,
+        getSnapshot: () => this.evolutionService?.getSnapshot(),
+        enqueueGoal: (input: { goal: string; commitMessage?: string }) => this.evolutionService?.enqueueGoal(input),
+        triggerNow: () => this.evolutionService?.triggerNow(),
+        getCodexConfig: () => this.evolutionService?.getCodexConfig(),
+        updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) => this.evolutionService?.updateCodexConfig(input)
+      }
+    };
+  }
 }
 
 export function registerTool(registry: ToolRegistry, deps: ToolDependencies): void {
   const manager = deps.skillManager as SkillManager;
-  const tool = new SkillTool(manager);
+  const tool = new SkillTool(manager, deps.evolutionService as EvolutionServiceBridge | undefined);
 
   registry.register(
     {

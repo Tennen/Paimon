@@ -16,6 +16,8 @@ import {
 } from "../scheduler/schedulerService";
 import { ScheduledTask } from "../scheduler/taskStore";
 import { EvolutionEngine } from "../evolution/evolutionEngine";
+import { EvolutionCodexConfigService } from "../evolution/codexConfigService";
+import { EvolutionOperatorService } from "../evolution/operatorService";
 
 const execAsync = promisify(exec);
 
@@ -121,23 +123,25 @@ const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   }
 };
 
-const CODEX_REASONING_EFFORT_OPTIONS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
-
 export class AdminIngressAdapter implements IngressAdapter {
   private readonly envStore: EnvConfigStore;
   private readonly scheduler: SchedulerService;
-  private readonly evolutionEngine?: EvolutionEngine;
+  private readonly codexConfigService: EvolutionCodexConfigService;
+  private readonly evolutionService?: EvolutionOperatorService;
   private readonly adminDistCandidates: string[];
 
   constructor(
     envStore: EnvConfigStore,
     scheduler: SchedulerService,
     evolutionEngine?: EvolutionEngine,
-    adminDistCandidates?: string[]
+    adminDistCandidates?: string[],
+    evolutionService?: EvolutionOperatorService
   ) {
     this.envStore = envStore;
     this.scheduler = scheduler;
-    this.evolutionEngine = evolutionEngine;
+    this.codexConfigService = new EvolutionCodexConfigService(envStore);
+    this.evolutionService = evolutionService
+      ?? (evolutionEngine ? new EvolutionOperatorService(evolutionEngine, this.codexConfigService) : undefined);
     this.adminDistCandidates = adminDistCandidates && adminDistCandidates.length > 0
       ? adminDistCandidates.map((candidate) => path.resolve(process.cwd(), candidate))
       : DEFAULT_ADMIN_DIST_CANDIDATES;
@@ -151,13 +155,14 @@ export class AdminIngressAdapter implements IngressAdapter {
   private registerApiRoutes(app: Express): void {
     app.get("/admin/api/config", (_req, res) => {
       const envPath = this.envStore.getPath();
-      const evolutionSnapshot = this.evolutionEngine?.getSnapshot();
+      const evolutionSnapshot = this.evolutionService?.getSnapshot();
+      const codexConfig = this.codexConfigService.getConfig();
       res.json({
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
         planningTimeoutMs: getEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS"),
-        codexModel: getCodexModel(envPath),
-        codexReasoningEffort: getCodexReasoningEffort(envPath),
+        codexModel: codexConfig.codexModel,
+        codexReasoningEffort: codexConfig.codexReasoningEffort,
         envPath,
         taskStorePath: this.scheduler.getStorePath(),
         userStorePath: this.scheduler.getUserStorePath(),
@@ -165,7 +170,7 @@ export class AdminIngressAdapter implements IngressAdapter {
         tickMs: this.scheduler.getTickMs(),
         evolution: evolutionSnapshot
           ? {
-              tickMs: this.evolutionEngine?.getTickMs(),
+              tickMs: this.evolutionService?.getTickMs(),
               statePath: evolutionSnapshot.paths.stateFile,
               retryQueuePath: evolutionSnapshot.paths.retryQueueFile,
               metricsPath: evolutionSnapshot.paths.metricsFile
@@ -175,20 +180,20 @@ export class AdminIngressAdapter implements IngressAdapter {
     });
 
     app.get("/admin/api/evolution/state", (_req: Request, res: ExResponse) => {
-      if (!this.evolutionEngine) {
+      if (!this.evolutionService) {
         res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
         return;
       }
-      const snapshot = this.evolutionEngine.getSnapshot();
+      const snapshot = this.evolutionService.getSnapshot();
       res.json({
         ok: true,
-        tickMs: this.evolutionEngine.getTickMs(),
+        tickMs: this.evolutionService.getTickMs(),
         ...snapshot
       });
     });
 
     app.post("/admin/api/evolution/goals", async (req: Request, res: ExResponse) => {
-      if (!this.evolutionEngine) {
+      if (!this.evolutionService) {
         res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
         return;
       }
@@ -199,7 +204,7 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
 
       try {
-        const goal = await this.evolutionEngine.enqueueGoal(input);
+        const goal = await this.evolutionService.enqueueGoal(input);
         res.json({
           ok: true,
           goal
@@ -210,12 +215,12 @@ export class AdminIngressAdapter implements IngressAdapter {
     });
 
     app.post("/admin/api/evolution/tick", async (_req: Request, res: ExResponse) => {
-      if (!this.evolutionEngine) {
+      if (!this.evolutionService) {
         res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
         return;
       }
       try {
-        await this.evolutionEngine.triggerNow();
+        await this.evolutionService.triggerNow();
         res.json({ ok: true });
       } catch (error) {
         res.status(500).json({
@@ -321,7 +326,6 @@ export class AdminIngressAdapter implements IngressAdapter {
         codexReasoningEffort?: unknown;
         restart?: unknown;
       };
-      const envPath = this.envStore.getPath();
 
       const hasModel = "model" in body || "codexModel" in body;
       const hasReasoningEffort = "reasoningEffort" in body || "codexReasoningEffort" in body;
@@ -340,43 +344,34 @@ export class AdminIngressAdapter implements IngressAdapter {
       const reasoningEffortRaw = "codexReasoningEffort" in body
         ? body.codexReasoningEffort
         : body.reasoningEffort;
-      const normalizedReasoningEffort = normalizeCodexReasoningEffort(reasoningEffortRaw);
-      if (hasReasoningEffort && normalizedReasoningEffort === null) {
-        res.status(400).json({
-          error: "reasoningEffort must be one of: minimal, low, medium, high, xhigh, or empty"
-        });
+      const reasoningEffort = typeof reasoningEffortRaw === "string" ? reasoningEffortRaw : null;
+      if (hasReasoningEffort && reasoningEffort === null) {
+        res.status(400).json({ error: "reasoningEffort must be a string" });
         return;
       }
 
+      let configAfterUpdate: { codexModel: string; codexReasoningEffort: string; envPath: string };
       try {
-        if (hasModel) {
-          if (model) {
-            setEnvValue(envPath, "EVOLUTION_CODEX_MODEL", model);
-          } else {
-            unsetEnvValue(envPath, "EVOLUTION_CODEX_MODEL");
-          }
-        }
-
-        if (hasReasoningEffort && normalizedReasoningEffort !== null) {
-          if (normalizedReasoningEffort) {
-            setEnvValue(envPath, "EVOLUTION_CODEX_REASONING_EFFORT", normalizedReasoningEffort);
-          } else {
-            unsetEnvValue(envPath, "EVOLUTION_CODEX_REASONING_EFFORT");
-          }
-        }
+        configAfterUpdate = this.codexConfigService.updateConfig({
+          ...(hasModel ? { model: model ?? "" } : {}),
+          ...(hasReasoningEffort ? { reasoningEffort: reasoningEffort ?? "" } : {})
+        });
       } catch (error) {
-        res.status(500).json({ error: (error as Error).message ?? "failed to save codex config" });
+        const message = (error as Error).message ?? "failed to save codex config";
+        if (message.includes("must be one of")) {
+          res.status(400).json({ error: message });
+          return;
+        }
+        res.status(500).json({ error: message });
         return;
       }
 
-      const codexModel = getCodexModel(envPath);
-      const codexReasoningEffort = getCodexReasoningEffort(envPath);
       const restart = parseOptionalBoolean(body.restart) ?? false;
       if (!restart) {
         res.json({
           ok: true,
-          codexModel,
-          codexReasoningEffort,
+          codexModel: configAfterUpdate.codexModel,
+          codexReasoningEffort: configAfterUpdate.codexReasoningEffort,
           restarted: false
         });
         return;
@@ -386,16 +381,16 @@ export class AdminIngressAdapter implements IngressAdapter {
         const output = await restartPm2();
         res.json({
           ok: true,
-          codexModel,
-          codexReasoningEffort,
+          codexModel: configAfterUpdate.codexModel,
+          codexReasoningEffort: configAfterUpdate.codexReasoningEffort,
           restarted: true,
           output
         });
       } catch (error) {
         res.status(500).json({
           ok: false,
-          codexModel,
-          codexReasoningEffort,
+          codexModel: configAfterUpdate.codexModel,
+          codexReasoningEffort: configAfterUpdate.codexReasoningEffort,
           restarted: false,
           error: (error as Error).message ?? "pm2 restart failed"
         });
@@ -1785,42 +1780,6 @@ function getEnvValue(envPath: string, key: string): string {
   return values[key] ?? process.env[key] ?? "";
 }
 
-function getCodexModel(envPath: string): string {
-  const values = readEnvValues(envPath);
-  const candidates = [
-    values.EVOLUTION_CODEX_MODEL,
-    values.CODEX_MODEL,
-    process.env.EVOLUTION_CODEX_MODEL,
-    process.env.CODEX_MODEL
-  ];
-  for (const candidate of candidates) {
-    const text = String(candidate ?? "").trim();
-    if (text) {
-      return text;
-    }
-  }
-  return "";
-}
-
-function getCodexReasoningEffort(envPath: string): string {
-  const values = readEnvValues(envPath);
-  const candidates = [
-    values.EVOLUTION_CODEX_REASONING_EFFORT,
-    values.CODEX_MODEL_REASONING_EFFORT,
-    values.CODEX_REASONING_EFFORT,
-    process.env.EVOLUTION_CODEX_REASONING_EFFORT,
-    process.env.CODEX_MODEL_REASONING_EFFORT,
-    process.env.CODEX_REASONING_EFFORT
-  ];
-  for (const candidate of candidates) {
-    const normalized = normalizeCodexReasoningEffort(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return "";
-}
-
 function setEnvValue(envPath: string, key: string, value: string): void {
   const text = value.trim();
   if (!text) {
@@ -1910,23 +1869,6 @@ function normalizeOptionalIntegerString(value: unknown): string | null {
   }
 
   return String(Math.floor(parsed));
-}
-
-function normalizeCodexReasoningEffort(value: unknown): string | null {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  if (typeof value !== "string") {
-    return null;
-  }
-  const text = value.trim().toLowerCase();
-  if (!text) {
-    return "";
-  }
-  if (!CODEX_REASONING_EFFORT_OPTIONS.has(text)) {
-    return null;
-  }
-  return text;
 }
 
 async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] }> {

@@ -16,6 +16,8 @@ import { EnvConfigStore } from "./config/envConfigStore";
 import { SchedulerService } from "./scheduler/schedulerService";
 import { AdminIngressAdapter } from "./ingress/admin";
 import { EvolutionEngine } from "./evolution/evolutionEngine";
+import { EvolutionCodexConfigService } from "./evolution/codexConfigService";
+import { EvolutionOperatorService } from "./evolution/operatorService";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -23,9 +25,13 @@ app.use(express.json({ limit: "1mb" }));
 
 const skillManager = new SkillManager();
 const memoryStore = new MemoryStore();
+const envStore = new EnvConfigStore();
+const evolutionEngine = new EvolutionEngine();
+const codexConfigService = new EvolutionCodexConfigService(envStore);
+const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConfigService);
 
 const registry = new ToolRegistry();
-loadTools(registry, { skillManager });
+loadTools(registry, { skillManager, evolutionService });
 const toolRouter = new ToolRouter(registry);
 const llmEngine = new OllamaLLMEngine();
 const callbackDispatcher = new CallbackDispatcher();
@@ -38,15 +44,13 @@ const orchestrator = new Orchestrator(
   callbackDispatcher
 );
 const sessionManager = new SessionManager(orchestrator);
-const envStore = new EnvConfigStore();
 const scheduler = new SchedulerService(sessionManager);
-const evolutionEngine = new EvolutionEngine();
 
 new HttpIngressAdapter().register(app, sessionManager);
 new HANotifyIngressAdapter().register(app, sessionManager);
 new WeComIngressAdapter().register(app, sessionManager);
 new WeComBridgeIngressAdapter().register(app, sessionManager);
-new AdminIngressAdapter(envStore, scheduler, evolutionEngine).register(app, sessionManager);
+new AdminIngressAdapter(envStore, scheduler, evolutionEngine, undefined, evolutionService).register(app, sessionManager);
 
 const port = Number(process.env.PORT ?? 3000);
 
