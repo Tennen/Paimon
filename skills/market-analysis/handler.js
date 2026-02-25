@@ -769,7 +769,7 @@ function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
       signalResult: signalResult || null,
       optionalNewsContext: optionalNewsContext || null
     })
-  ].join("\n");
+  ].join("");
 }
 
 function extractTextFromBridgeResponse(response) {
