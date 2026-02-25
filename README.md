@@ -399,28 +399,6 @@ Minimal UI verification:
 2. Expand the result list and confirm the table height does not increase.
 3. Scroll inside the parent container and confirm there is no extra blank scroll area caused by the expanded result list.
 
-### Market 证券搜索响应约定与兼容策略
-
-接口：`GET /admin/api/market/securities/search`
-
-后端响应约定：
-
-- 顶层返回 `items`，且始终为数组（异常场景降级为 `[]`）。
-- `items` 每个元素始终包含以下字符串字段：`code`、`name`、`market`、`securityType`。
-- 任一字段缺失、为 `null`、或类型异常时，后端会兜底为 `""`，并记录异常 payload 日志，避免前端渲染中断。
-
-前端兼容策略：
-
-- 搜索结果统一经过兼容层归一化，兼容 `items` / `data` / `result` 等历史或第三方字段形态。
-- 归一化阶段会过滤无效项（如无 `code` 且无 `name` 的记录）。
-- 渲染下拉前使用 `Array.isArray` 保护；当结果无效时清空当前展开的搜索下拉索引，避免 `map` 或字段访问导致页面崩溃。
-
-手动验证流程：
-
-1. 进入 Admin -> Market Analysis。
-2. 在任一持仓行执行“名称查 code”并选择结果。
-3. 点击该行保存，确认页面不崩溃，且保存成功。
-
 `POST /admin/api/market/run-once` (manual one-off run):
 
 - Request body fields:

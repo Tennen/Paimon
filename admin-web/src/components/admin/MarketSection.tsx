@@ -65,19 +65,8 @@ export function MarketSection(props: MarketSectionProps) {
     updateSearchSelectorPosition(openSearchSelectorIndex);
   }, [openSearchSelectorIndex, updateSearchSelectorPosition]);
 
-  const openSearchResults = openSearchSelectorIndex !== null && Array.isArray(props.marketSearchResults[openSearchSelectorIndex])
-    ? props.marketSearchResults[openSearchSelectorIndex]
-    : [];
-
   useEffect(() => {
     if (openSearchSelectorIndex === null) {
-      return;
-    }
-
-    const currentResults = props.marketSearchResults[openSearchSelectorIndex];
-    if (!Array.isArray(currentResults)) {
-      setOpenSearchSelectorIndex(null);
-      setSearchSelectorPosition(null);
       return;
     }
 
@@ -154,9 +143,7 @@ export function MarketSection(props: MarketSectionProps) {
                 </TableCell>
               </TableRow>
             ) : (
-              props.marketPortfolio.funds.map((fund, index) => {
-                const rowSearchResults = Array.isArray(props.marketSearchResults[index]) ? props.marketSearchResults[index] : [];
-                return (
+              props.marketPortfolio.funds.map((fund, index) => (
                 <TableRow key={`market-fund-${index}`}>
                   <TableCell>
                     <Input
@@ -199,7 +186,7 @@ export function MarketSection(props: MarketSectionProps) {
                         {props.searchingMarketFundIndex === index ? "查找中" : "查找"}
                       </Button>
                     </div>
-                    {rowSearchResults.length > 0 ? (
+                    {props.marketSearchResults[index] && props.marketSearchResults[index].length > 0 ? (
                       <Button
                         type="button"
                         size="sm"
@@ -219,7 +206,7 @@ export function MarketSection(props: MarketSectionProps) {
                           });
                         }}
                       >
-                        {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${rowSearchResults.length})`}
+                        {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${props.marketSearchResults[index].length})`}
                       </Button>
                     ) : null}
                   </TableCell>
@@ -265,8 +252,7 @@ export function MarketSection(props: MarketSectionProps) {
                     </div>
                   </TableCell>
                 </TableRow>
-                );
-              })
+              ))
             )}
           </TableBody>
         </Table>
@@ -418,7 +404,8 @@ export function MarketSection(props: MarketSectionProps) {
       </CardContent>
       {openSearchSelectorIndex !== null &&
       searchSelectorPosition &&
-      openSearchResults.length > 0
+      props.marketSearchResults[openSearchSelectorIndex] &&
+      props.marketSearchResults[openSearchSelectorIndex].length > 0
         ? createPortal(
           <div
             className="fixed z-50 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
@@ -428,7 +415,7 @@ export function MarketSection(props: MarketSectionProps) {
               width: searchSelectorPosition.width
             }}
           >
-            {openSearchResults.map((item, suggestionIndex) => (
+            {props.marketSearchResults[openSearchSelectorIndex].map((item, suggestionIndex) => (
               <Button
                 key={`market-suggest-${openSearchSelectorIndex}-${item.code}-${suggestionIndex}`}
                 type="button"
