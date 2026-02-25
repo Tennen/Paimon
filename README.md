@@ -391,13 +391,6 @@ Admin Market holdings editing:
 - Row status indicates whether the holding is unsaved, saving, or saved.
 - Holding `name` is persisted together with `code`, `quantity`, and `avgCost`.
 - `GET /admin/api/market/config` returns holding names at `portfolio.funds[].name`.
-- UI constraint: in Market Analysis, the "名称查 code" result list must render as a floating overlay and must not affect table row height or overall scrollable table height.
-
-Minimal UI verification:
-
-1. Open Admin -> Market Analysis and trigger "名称查 code" on any holding row.
-2. Expand the result list and confirm the table height does not increase.
-3. Scroll inside the parent container and confirm there is no extra blank scroll area caused by the expanded result list.
 
 `POST /admin/api/market/run-once` (manual one-off run):
 

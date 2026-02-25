@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,59 +33,6 @@ import {
 
 export function MarketSection(props: MarketSectionProps) {
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
-  const searchSelectorTriggersRef = useRef<Record<number, HTMLButtonElement | null>>({});
-  const [searchSelectorPosition, setSearchSelectorPosition] = useState<{
-    top: number;
-    left: number;
-    width: number;
-  } | null>(null);
-
-  const updateSearchSelectorPosition = useCallback((index: number | null) => {
-    if (index === null) {
-      setSearchSelectorPosition(null);
-      return;
-    }
-
-    const trigger = searchSelectorTriggersRef.current[index];
-    if (!trigger) {
-      setSearchSelectorPosition(null);
-      return;
-    }
-
-    const rect = trigger.getBoundingClientRect();
-    setSearchSelectorPosition({
-      top: rect.bottom + 4,
-      left: rect.left,
-      width: rect.width
-    });
-  }, []);
-
-  useEffect(() => {
-    updateSearchSelectorPosition(openSearchSelectorIndex);
-  }, [openSearchSelectorIndex, updateSearchSelectorPosition]);
-
-  useEffect(() => {
-    if (openSearchSelectorIndex === null) {
-      return;
-    }
-
-    updateSearchSelectorPosition(openSearchSelectorIndex);
-  }, [openSearchSelectorIndex, props.marketSearchResults, updateSearchSelectorPosition]);
-
-  useEffect(() => {
-    if (openSearchSelectorIndex === null) {
-      return;
-    }
-
-    const handleReposition = () => updateSearchSelectorPosition(openSearchSelectorIndex);
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
-
-    return () => {
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
-    };
-  }, [openSearchSelectorIndex, updateSearchSelectorPosition]);
 
   return (
     <Card>
@@ -187,27 +133,36 @@ export function MarketSection(props: MarketSectionProps) {
                       </Button>
                     </div>
                     {props.marketSearchResults[index] && props.marketSearchResults[index].length > 0 ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        className="h-7 px-2 text-xs"
-                        ref={(element) => {
-                          searchSelectorTriggersRef.current[index] = element;
-                          if (element && openSearchSelectorIndex === index) {
-                            updateSearchSelectorPosition(index);
-                          }
-                        }}
-                        onClick={() => {
-                          setOpenSearchSelectorIndex((current) => {
-                            const nextIndex = current === index ? null : index;
-                            updateSearchSelectorPosition(nextIndex);
-                            return nextIndex;
-                          });
-                        }}
-                      >
-                        {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${props.marketSearchResults[index].length})`}
-                      </Button>
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setOpenSearchSelectorIndex((current) => (current === index ? null : index))}
+                        >
+                          {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${props.marketSearchResults[index].length})`}
+                        </Button>
+                        {openSearchSelectorIndex === index ? (
+                          <div className="absolute left-0 top-9 z-30 max-h-56 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+                            {props.marketSearchResults[index].map((item, suggestionIndex) => (
+                              <Button
+                                key={`market-suggest-${index}-${item.code}-${suggestionIndex}`}
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="mb-1 h-auto w-full justify-start px-2 py-1 text-left text-xs last:mb-0"
+                                onClick={() => {
+                                  props.onApplyMarketSearchResult(index, item);
+                                  setOpenSearchSelectorIndex((current) => (current === index ? null : current));
+                                }}
+                              >
+                                {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     ) : null}
                   </TableCell>
                   <TableCell>
@@ -402,38 +357,6 @@ export function MarketSection(props: MarketSectionProps) {
           </TableBody>
         </Table>
       </CardContent>
-      {openSearchSelectorIndex !== null &&
-      searchSelectorPosition &&
-      props.marketSearchResults[openSearchSelectorIndex] &&
-      props.marketSearchResults[openSearchSelectorIndex].length > 0
-        ? createPortal(
-          <div
-            className="fixed z-50 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
-            style={{
-              top: searchSelectorPosition.top,
-              left: searchSelectorPosition.left,
-              width: searchSelectorPosition.width
-            }}
-          >
-            {props.marketSearchResults[openSearchSelectorIndex].map((item, suggestionIndex) => (
-              <Button
-                key={`market-suggest-${openSearchSelectorIndex}-${item.code}-${suggestionIndex}`}
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="mb-1 h-auto w-full justify-start px-2 py-1 text-left text-xs last:mb-0"
-                onClick={() => {
-                  props.onApplyMarketSearchResult(openSearchSelectorIndex, item);
-                  setOpenSearchSelectorIndex((current) => (current === openSearchSelectorIndex ? null : current));
-                }}
-              >
-                {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
-              </Button>
-            ))}
-          </div>,
-          document.body
-        )
-        : null}
     </Card>
   );
 }
