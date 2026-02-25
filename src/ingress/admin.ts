@@ -277,6 +277,21 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
+    app.post("/admin/api/repo/sync-build", async (_req: Request, res: ExResponse) => {
+      try {
+        const result = await syncRepoAndBuild();
+        res.json({
+          ok: true,
+          ...result
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "sync-build failed"
+        });
+      }
+    });
+
     app.get("/admin/api/users", (_req: Request, res: ExResponse) => {
       res.json({ users: this.scheduler.listUsers() });
     });
@@ -1245,4 +1260,95 @@ async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] 
 async function restartPm2(): Promise<string> {
   const { stdout, stderr } = await execAsync("pm2 restart 0");
   return `${stdout ?? ""}${stderr ?? ""}`.trim();
+}
+
+async function syncRepoAndBuild(): Promise<{
+  cwd: string;
+  pullCommand: string;
+  pullOutput: string;
+  buildOutput: string;
+}> {
+  const cwd = process.cwd();
+  const gprResult = await runCommandWithOutput("zsh -lic 'gpr'");
+
+  let pullCommand = "gpr";
+  let pullOutput = joinCommandOutput(gprResult);
+
+  if (!gprResult.ok) {
+    if (!isGprNotFound(gprResult)) {
+      throw new Error(`gpr failed:\n${pullOutput || gprResult.error || "unknown error"}`);
+    }
+
+    const fallbackResult = await runCommandWithOutput("git pull --rebase");
+    if (!fallbackResult.ok) {
+      const fallbackOutput = joinCommandOutput(fallbackResult);
+      throw new Error(`git pull --rebase failed:\n${fallbackOutput || fallbackResult.error || "unknown error"}`);
+    }
+
+    pullCommand = "git pull --rebase";
+    pullOutput = [
+      "gpr not found, fallback to git pull --rebase",
+      joinCommandOutput(fallbackResult)
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const buildResult = await runCommandWithOutput("npm run build");
+  if (!buildResult.ok) {
+    const buildOutput = joinCommandOutput(buildResult);
+    throw new Error(`npm run build failed:\n${buildOutput || buildResult.error || "unknown error"}`);
+  }
+
+  return {
+    cwd,
+    pullCommand,
+    pullOutput,
+    buildOutput: joinCommandOutput(buildResult)
+  };
+}
+
+async function runCommandWithOutput(command: string): Promise<{
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  error: string;
+}> {
+  try {
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: process.cwd(),
+      env: process.env,
+      maxBuffer: 32 * 1024 * 1024
+    });
+    return {
+      ok: true,
+      stdout: (stdout ?? "").trim(),
+      stderr: (stderr ?? "").trim(),
+      error: ""
+    };
+  } catch (error) {
+    const detail = error as {
+      stdout?: string;
+      stderr?: string;
+      message?: string;
+    };
+    return {
+      ok: false,
+      stdout: (detail.stdout ?? "").toString().trim(),
+      stderr: (detail.stderr ?? "").toString().trim(),
+      error: String(detail.message ?? "command failed")
+    };
+  }
+}
+
+function joinCommandOutput(result: { stdout: string; stderr: string; error: string }): string {
+  return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+}
+
+function isGprNotFound(result: { stdout: string; stderr: string; error: string }): boolean {
+  const text = `${result.stdout}\n${result.stderr}\n${result.error}`.toLowerCase();
+  if (!text.includes("gpr")) {
+    return false;
+  }
+  return text.includes("not found") || text.includes("command not found");
 }

@@ -37,6 +37,7 @@ export default function App() {
 
   const [savingModel, setSavingModel] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [syncingRepoBuild, setSyncingRepoBuild] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState("");
   const [savingUser, setSavingUser] = useState(false);
@@ -250,6 +251,32 @@ export default function App() {
       notifyError("pm2 重启失败", error);
     } finally {
       setRestarting(false);
+    }
+  }
+
+  async function handleSyncRepoBuild(): Promise<void> {
+    setSyncingRepoBuild(true);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        cwd: string;
+        pullCommand: string;
+        pullOutput: string;
+        buildOutput: string;
+      }>("/admin/api/repo/sync-build", {
+        method: "POST",
+        body: "{}"
+      });
+
+      setNotice({
+        type: "success",
+        title: `代码同步并构建完成 (${payload.pullCommand})`,
+        text: [payload.pullOutput, payload.buildOutput].filter(Boolean).join("\n\n")
+      });
+    } catch (error) {
+      notifyError("拉取代码并构建失败", error);
+    } finally {
+      setSyncingRepoBuild(false);
     }
   }
 
@@ -615,6 +642,7 @@ export default function App() {
           planningTimeoutDraft={planningTimeoutDraft}
           savingModel={savingModel}
           restarting={restarting}
+          syncingRepoBuild={syncingRepoBuild}
           onModelSelect={setModelDraft}
           onModelDraftChange={setModelDraft}
           onPlanningModelSelect={setPlanningModelDraft}
@@ -623,6 +651,7 @@ export default function App() {
           onRefreshModels={() => void loadModels()}
           onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
           onRestartPm2={() => void handleRestartPm2()}
+          onSyncRepoBuild={() => void handleSyncRepoBuild()}
         />
       ) : null}
 

@@ -28,6 +28,7 @@ type SystemSectionProps = {
   planningTimeoutDraft: string;
   savingModel: boolean;
   restarting: boolean;
+  syncingRepoBuild: boolean;
   onModelSelect: (value: string) => void;
   onModelDraftChange: (value: string) => void;
   onPlanningModelSelect: (value: string) => void;
@@ -36,6 +37,7 @@ type SystemSectionProps = {
   onRefreshModels: () => void;
   onSaveModel: (restartAfterSave: boolean) => void;
   onRestartPm2: () => void;
+  onSyncRepoBuild: () => void;
 };
 
 export function SystemSection(props: SystemSectionProps) {
@@ -133,6 +135,14 @@ export function SystemSection(props: SystemSectionProps) {
           </Button>
           <Button type="button" variant="destructive" disabled={props.restarting} onClick={props.onRestartPm2}>
             {props.restarting ? "重启中..." : "pm2 restart 0"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={props.syncingRepoBuild}
+            onClick={props.onSyncRepoBuild}
+          >
+            {props.syncingRepoBuild ? "执行中..." : "gpr + npm run build"}
           </Button>
         </div>
 
