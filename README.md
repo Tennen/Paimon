@@ -253,6 +253,14 @@ Admin APIs:
 - `POST /admin/api/evolution/goals`
 - `POST /admin/api/evolution/tick`
 
+WeCom / HTTP direct commands:
+
+- `/evolve <goal>`
+- `/coding <goal>`
+- `/evolve status`
+- `/evolve status <goalId>`
+- `/evolve tick`
+
 Example:
 
 ```bash
