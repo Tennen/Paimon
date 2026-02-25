@@ -21,6 +21,7 @@ type CreateGoalInput = {
   id: string;
   goal: string;
   commitMessage: string;
+  commitMessageProvidedByUser?: boolean;
 };
 
 const MAX_GOAL_EVENTS = 80;
@@ -82,6 +83,7 @@ export class EvolutionStateStore {
       id: input.id,
       goal: input.goal,
       commitMessage: input.commitMessage,
+      ...(input.commitMessageProvidedByUser === true ? { commitMessageProvidedByUser: true } : {}),
       status: "pending",
       stage: "queued",
       createdAt: now,
@@ -233,11 +235,13 @@ function normalizeGoal(raw: unknown): EvolutionGoal | null {
   const currentStep = Number.isInteger(goal.plan?.currentStep)
     ? Math.max(0, Math.min(steps.length, Number(goal.plan?.currentStep)))
     : 0;
+  const gitPush = normalizeGoalGitPush(goal.git?.push);
 
   return {
     id: goal.id,
     goal: goal.goal,
     commitMessage: goal.commitMessage,
+    ...(goal.commitMessageProvidedByUser === true ? { commitMessageProvidedByUser: true } : {}),
     status,
     stage: normalizeGoalStage(goal.stage, status),
     createdAt: normalizeIso(goal.createdAt),
@@ -281,9 +285,36 @@ function normalizeGoal(raw: unknown): EvolutionGoal | null {
         : {}),
       ...(typeof goal.git?.selfEvolutionDiffFile === "string" && goal.git.selfEvolutionDiffFile
         ? { selfEvolutionDiffFile: goal.git.selfEvolutionDiffFile }
-        : {})
+        : {}),
+      ...(gitPush ? { push: gitPush } : {})
     }
   };
+}
+
+function normalizeGoalGitPush(raw: unknown): EvolutionGoal["git"]["push"] | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+  const value = raw as NonNullable<EvolutionGoal["git"]["push"]>;
+  const normalized: NonNullable<EvolutionGoal["git"]["push"]> = {};
+
+  if (typeof value.remote === "string" && value.remote.trim().length > 0) {
+    normalized.remote = value.remote.trim().slice(0, 200);
+  }
+  if (typeof value.branch === "string" && value.branch.trim().length > 0) {
+    normalized.branch = value.branch.trim().slice(0, 200);
+  }
+  if (typeof value.commit === "string" && value.commit.trim().length > 0) {
+    normalized.commit = value.commit.trim().slice(0, 80);
+  }
+  if (typeof value.pushedAt === "string") {
+    normalized.pushedAt = normalizeIso(value.pushedAt);
+  }
+  if (typeof value.lastError === "string" && value.lastError.trim().length > 0) {
+    normalized.lastError = value.lastError.trim().slice(0, 800);
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function normalizeGoalHistory(raw: unknown): EvolutionState["history"][number] | null {

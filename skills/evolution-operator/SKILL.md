@@ -18,6 +18,13 @@ Direct commands:
 - `/evolve tick`
 - `/evolve help`
 
+Commit behavior:
+
+- Goal creation supports optional `commitMessage`.
+- Use `/evolve <goal> commit: <message>` or `/evolve <goal> 提交: <message>`.
+- If `commitMessage` is omitted, evolution engine auto-generates commit message before commit.
+- After task success, engine auto commit + push; push failure makes the goal fail.
+
 This skill talks to the same admin evolution APIs:
 
 - `POST /admin/api/evolution/goals`

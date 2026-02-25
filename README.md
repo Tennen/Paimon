@@ -245,7 +245,10 @@ Core behavior:
 - Run checks (`npm test` / `npm lint` / `tsc --noEmit`, based on available scripts).
 - Auto-fix from check summary when failures occur.
 - Exponential backoff retry for 429/rate-limit (`10m * 2^attempt`, max 6h).
-- Commit changes and update metrics.
+- Auto commit after checks pass.
+- Auto push after commit succeeds (to configured remote/branch or current upstream).
+- Push failure marks goal as failed and enters existing failure/retry flow.
+- Update metrics and goal events.
 
 Admin APIs:
 
@@ -280,6 +283,14 @@ Optional env:
 - `EVOLUTION_RETRY_BASE_MS` (default `600000`)
 - `EVOLUTION_RETRY_MAX_MS` (default `21600000`)
 - `EVOLUTION_ENABLE_HARD_ROLLBACK` (default `false`)
+- `EVOLUTION_GIT_PUSH_REMOTE` (optional, higher priority than git upstream)
+- `EVOLUTION_GIT_PUSH_BRANCH` (optional, higher priority than git upstream)
+
+Commit message rule:
+
+- If request payload includes `commitMessage`, engine uses it as-is.
+- If `commitMessage` is not provided, engine generates one from staged diff before commit.
+- If generation fails, engine falls back to a deterministic message.
 
 ## Skills (extensible)
 

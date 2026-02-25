@@ -120,7 +120,9 @@ function buildHelpText() {
     "/evolve status：查看整体状态",
     "/evolve status <goalId>：查看指定 Goal",
     "/evolve tick：立即触发一轮执行",
-    "可在 goal 后追加：提交: <commit message>"
+    "可在 goal 后追加：提交: <commit message>（可选）",
+    "不传 commitMessage 时，系统会在提交前自动生成",
+    "任务成功后会自动 commit + push；push 失败会导致 Goal 失败"
   ].join("\n");
 }
 

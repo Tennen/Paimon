@@ -133,6 +133,7 @@ export type EvolutionGoal = {
   id: string;
   goal: string;
   commitMessage: string;
+  commitMessageProvidedByUser?: boolean;
   status: EvolutionGoalStatus;
   stage: string;
   createdAt: string;
@@ -149,6 +150,18 @@ export type EvolutionGoal = {
   };
   events: EvolutionGoalEvent[];
   rawTail: EvolutionRawLine[];
+  git?: {
+    stableTagEnsured: boolean;
+    startedFromRef?: string;
+    selfEvolutionDiffFile?: string;
+    push?: {
+      remote?: string;
+      branch?: string;
+      commit?: string;
+      pushedAt?: string;
+      lastError?: string;
+    };
+  };
 };
 
 export type EvolutionGoalHistory = {
