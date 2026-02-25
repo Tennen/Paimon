@@ -28,6 +28,7 @@ type MarketPhase = "midday" | "close";
 
 type MarketPortfolioFund = {
   code: string;
+  name: string;
   quantity: number;
   avgCost: number;
 };
@@ -1250,6 +1251,7 @@ function normalizeMarketPortfolio(input: unknown): MarketPortfolio {
     }
     const value = item as Record<string, unknown>;
     const code = normalizeMarketCode(value.code);
+    const name = typeof value.name === "string" ? value.name.trim() : "";
     const quantity = Number(value.quantity);
     const avgCost = Number(value.avgCost);
     if (!code || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(avgCost) || avgCost < 0) {
@@ -1257,6 +1259,7 @@ function normalizeMarketPortfolio(input: unknown): MarketPortfolio {
     }
     funds.push({
       code,
+      name,
       quantity: roundTo(quantity, 4),
       avgCost: roundTo(avgCost, 4)
     });

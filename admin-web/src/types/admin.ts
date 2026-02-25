@@ -80,6 +80,7 @@ export type MarketSectionProps = {
   marketPortfolio: MarketPortfolio;
   marketRuns: MarketRunSummary[];
   savingMarketPortfolio: boolean;
+  marketFundSaveStates: Array<"saved" | "dirty" | "saving">;
   bootstrappingMarketTasks: boolean;
   runningMarketOncePhase: MarketPhase | null;
   marketRunOnceWithExplanation: boolean;
@@ -100,6 +101,7 @@ export type MarketSectionProps = {
   onMarketSearchInputChange: (index: number, value: string) => void;
   onSearchMarketByName: (index: number) => void;
   onApplyMarketSearchResult: (index: number, item: MarketSecuritySearchItem) => void;
+  onSaveMarketFund: (index: number) => void;
   onSaveMarketPortfolio: () => void;
   onRefresh: () => void;
   onBootstrapMarketTasks: () => void;

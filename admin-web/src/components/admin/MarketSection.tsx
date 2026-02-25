@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -31,6 +32,8 @@ import {
 } from "@/types/admin";
 
 export function MarketSection(props: MarketSectionProps) {
+  const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
+
   return (
     <Card>
       <CardHeader>
@@ -59,7 +62,7 @@ export function MarketSection(props: MarketSectionProps) {
               添加持仓
             </Button>
             <Button type="button" disabled={props.savingMarketPortfolio} onClick={props.onSaveMarketPortfolio}>
-              {props.savingMarketPortfolio ? "保存中..." : "保存 Market 配置"}
+              {props.savingMarketPortfolio ? "保存中..." : "保存全部（含现金）"}
             </Button>
             <Button type="button" variant="secondary" onClick={props.onRefresh}>
               刷新
@@ -75,7 +78,7 @@ export function MarketSection(props: MarketSectionProps) {
               <TableHead className="w-[320px]">名称查 code</TableHead>
               <TableHead className="w-[160px]">持仓数量</TableHead>
               <TableHead className="w-[160px]">平均成本</TableHead>
-              <TableHead className="w-[120px]">操作</TableHead>
+              <TableHead className="w-[180px]">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -121,25 +124,44 @@ export function MarketSection(props: MarketSectionProps) {
                         size="sm"
                         variant="outline"
                         disabled={props.searchingMarketFundIndex === index}
-                        onClick={() => props.onSearchMarketByName(index)}
+                        onClick={() => {
+                          setOpenSearchSelectorIndex(index);
+                          props.onSearchMarketByName(index);
+                        }}
                       >
                         {props.searchingMarketFundIndex === index ? "查找中" : "查找"}
                       </Button>
                     </div>
                     {props.marketSearchResults[index] && props.marketSearchResults[index].length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {props.marketSearchResults[index].map((item, suggestionIndex) => (
-                          <Button
-                            key={`market-suggest-${index}-${item.code}-${suggestionIndex}`}
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            className="h-7 px-2 text-xs"
-                            onClick={() => props.onApplyMarketSearchResult(index, item)}
-                          >
-                            {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
-                          </Button>
-                        ))}
+                      <div className="relative">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => setOpenSearchSelectorIndex((current) => (current === index ? null : index))}
+                        >
+                          {openSearchSelectorIndex === index ? "收起结果" : `选择结果 (${props.marketSearchResults[index].length})`}
+                        </Button>
+                        {openSearchSelectorIndex === index ? (
+                          <div className="absolute left-0 top-9 z-30 max-h-56 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+                            {props.marketSearchResults[index].map((item, suggestionIndex) => (
+                              <Button
+                                key={`market-suggest-${index}-${item.code}-${suggestionIndex}`}
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="mb-1 h-auto w-full justify-start px-2 py-1 text-left text-xs last:mb-0"
+                                onClick={() => {
+                                  props.onApplyMarketSearchResult(index, item);
+                                  setOpenSearchSelectorIndex((current) => (current === index ? null : current));
+                                }}
+                              >
+                                {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </TableCell>
@@ -162,9 +184,27 @@ export function MarketSection(props: MarketSectionProps) {
                     />
                   </TableCell>
                   <TableCell>
-                    <Button type="button" size="sm" variant="destructive" onClick={() => props.onRemoveMarketFund(index)}>
-                      删除
-                    </Button>
+                    <div className="flex flex-col gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={props.marketFundSaveStates[index] === "saving"}
+                        onClick={() => props.onSaveMarketFund(index)}
+                      >
+                        {props.marketFundSaveStates[index] === "saving" ? "保存中..." : "保存该行"}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">
+                        {props.marketFundSaveStates[index] === "saving"
+                          ? "保存中"
+                          : props.marketFundSaveStates[index] === "saved"
+                            ? "已保存"
+                            : "未保存"}
+                      </div>
+                      <Button type="button" size="sm" variant="destructive" onClick={() => props.onRemoveMarketFund(index)}>
+                        删除
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

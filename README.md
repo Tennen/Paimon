@@ -385,6 +385,13 @@ Admin API:
 - `POST /admin/api/market/run-once`
 - `POST /admin/api/market/tasks/bootstrap` (upsert two daily market tasks for a user)
 
+Admin Market holdings editing:
+
+- Portfolio rows in Admin Market are saved per-row. After editing one holding, click that row's save action to persist the change.
+- Row status indicates whether the holding is unsaved, saving, or saved.
+- Holding `name` is persisted together with `code`, `quantity`, and `avgCost`.
+- `GET /admin/api/market/config` returns holding names at `portfolio.funds[].name`.
+
 `POST /admin/api/market/run-once` (manual one-off run):
 
 - Request body fields:

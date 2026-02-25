@@ -58,6 +58,9 @@ export default function App() {
   const [marketPortfolio, setMarketPortfolio] = useState<MarketPortfolio>(DEFAULT_MARKET_PORTFOLIO);
   const [marketRuns, setMarketRuns] = useState<MarketRunSummary[]>([]);
   const [savingMarketPortfolio, setSavingMarketPortfolio] = useState(false);
+  const [savingMarketFundIndex, setSavingMarketFundIndex] = useState<number | null>(null);
+  const [marketSavedFundsByRow, setMarketSavedFundsByRow] = useState<Array<MarketFundHolding | null>>([]);
+  const [marketSavedCash, setMarketSavedCash] = useState(0);
   const [bootstrappingMarketTasks, setBootstrappingMarketTasks] = useState(false);
   const [runningMarketOncePhase, setRunningMarketOncePhase] = useState<MarketPhase | null>(null);
   const [marketRunOnceWithExplanation, setMarketRunOnceWithExplanation] = useState(true);
@@ -106,6 +109,19 @@ export default function App() {
     const history = evolutionSnapshot?.state.history ?? [];
     return history.slice().sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt));
   }, [evolutionSnapshot]);
+
+  const marketFundSaveStates = useMemo<Array<"saved" | "dirty" | "saving">>(() => {
+    return marketPortfolio.funds.map((fund, index) => {
+      if (savingMarketFundIndex === index) {
+        return "saving";
+      }
+      const saved = marketSavedFundsByRow[index];
+      if (!saved) {
+        return "dirty";
+      }
+      return isSameMarketFund(normalizeMarketFund(saved), normalizeMarketFund(fund)) ? "saved" : "dirty";
+    });
+  }, [marketPortfolio.funds, marketSavedFundsByRow, savingMarketFundIndex]);
 
   useEffect(() => {
     void bootstrap();
@@ -190,18 +206,10 @@ export default function App() {
   async function loadMarketConfig(): Promise<void> {
     const payload = await request<MarketConfig>("/admin/api/market/config");
     setMarketConfig(payload);
-    const portfolio = payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO;
-    setMarketPortfolio({
-      cash: Number.isFinite(Number(portfolio.cash)) ? Number(portfolio.cash) : 0,
-      funds: Array.isArray(portfolio.funds)
-        ? portfolio.funds.map((fund) => ({
-            code: String(fund?.code ?? ""),
-            name: String(fund?.name ?? ""),
-            quantity: Number.isFinite(Number(fund?.quantity)) ? Number(fund.quantity) : 0,
-            avgCost: Number.isFinite(Number(fund?.avgCost)) ? Number(fund.avgCost) : 0
-          }))
-        : []
-    });
+    const portfolio = normalizeMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
+    setMarketPortfolio(portfolio);
+    setMarketSavedFundsByRow(portfolio.funds.map((fund) => ({ ...fund })));
+    setMarketSavedCash(portfolio.cash);
   }
 
   async function loadMarketRuns(): Promise<void> {
@@ -510,6 +518,7 @@ export default function App() {
       ...prev,
       funds: prev.funds.concat([{ code: "", name: "", quantity: 0, avgCost: 0 }])
     }));
+    setMarketSavedFundsByRow((prev) => prev.concat(null));
     setMarketSearchInputs((prev) => prev.concat(""));
     setMarketSearchResults((prev) => prev.concat([[]]));
   }
@@ -519,9 +528,19 @@ export default function App() {
       ...prev,
       funds: prev.funds.filter((_, idx) => idx !== index)
     }));
+    setMarketSavedFundsByRow((prev) => prev.filter((_, idx) => idx !== index));
     setMarketSearchInputs((prev) => prev.filter((_, idx) => idx !== index));
     setMarketSearchResults((prev) => prev.filter((_, idx) => idx !== index));
     setSearchingMarketFundIndex((prev) => {
+      if (prev === null) {
+        return null;
+      }
+      if (prev === index) {
+        return null;
+      }
+      return prev > index ? prev - 1 : prev;
+    });
+    setSavingMarketFundIndex((prev) => {
       if (prev === null) {
         return null;
       }
@@ -632,21 +651,80 @@ export default function App() {
       }
       return next;
     });
+    setMarketSearchResults((prev) => {
+      const next = resizeSearchResultsArray(prev, marketPortfolio.funds.length).slice();
+      if (index >= 0 && index < next.length) {
+        next[index] = [];
+      }
+      return next;
+    });
+  }
+
+  async function handleSaveMarketFund(index: number): Promise<void> {
+    if (savingMarketPortfolio || savingMarketFundIndex !== null) {
+      return;
+    }
+    const fund = marketPortfolio.funds[index];
+    if (!fund) {
+      return;
+    }
+    const target = normalizeMarketFund(fund);
+    if (!isValidMarketFund(target)) {
+      setNotice({ type: "error", title: "请完善该行持仓后再保存（代码/数量/成本）" });
+      return;
+    }
+
+    const funds = marketPortfolio.funds
+      .map((_, rowIndex) => {
+        if (rowIndex === index) {
+          return target;
+        }
+        const saved = marketSavedFundsByRow[rowIndex];
+        return saved ? normalizeMarketFund(saved) : null;
+      })
+      .filter((item): item is MarketFundHolding => item !== null && isValidMarketFund(item));
+
+    setSavingMarketFundIndex(index);
+    try {
+      const response = await request<{ ok: boolean; portfolio: MarketPortfolio }>("/admin/api/market/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          portfolio: {
+            funds,
+            cash: marketSavedCash
+          }
+        })
+      });
+      const nextPortfolio = normalizeMarketPortfolio(response.portfolio);
+      setMarketPortfolio((prev) => ({
+        ...prev,
+        funds: prev.funds.map((item, rowIndex) => (rowIndex === index ? target : item))
+      }));
+      setMarketSavedFundsByRow((prev) => {
+        const next = resizeSavedFundsArray(prev, marketPortfolio.funds.length).slice();
+        if (index >= 0 && index < next.length) {
+          next[index] = { ...target };
+        }
+        return next;
+      });
+      setMarketSavedCash(nextPortfolio.cash);
+      setNotice({ type: "success", title: "该行持仓已保存" });
+    } catch (error) {
+      notifyError("保存该行持仓失败", error);
+    } finally {
+      setSavingMarketFundIndex((current) => (current === index ? null : current));
+    }
   }
 
   async function handleSaveMarketPortfolio(): Promise<void> {
+    if (savingMarketFundIndex !== null) {
+      return;
+    }
     const normalizedFunds = marketPortfolio.funds
       .map((fund) => {
-        const digits = fund.code.replace(/\D/g, "");
-        const code = digits ? digits.slice(-6).padStart(6, "0") : "";
-        return {
-          code,
-          name: String(fund.name ?? "").trim(),
-          quantity: Number(fund.quantity),
-          avgCost: Number(fund.avgCost)
-        };
+        return normalizeMarketFund(fund);
       })
-      .filter((fund) => fund.code && Number.isFinite(fund.quantity) && fund.quantity > 0 && Number.isFinite(fund.avgCost) && fund.avgCost >= 0);
+      .filter((fund) => isValidMarketFund(fund));
 
     const payload: MarketPortfolio = {
       funds: normalizedFunds,
@@ -661,8 +739,10 @@ export default function App() {
         method: "PUT",
         body: JSON.stringify({ portfolio: payload })
       });
-      setMarketPortfolio(response.portfolio);
-      await loadMarketConfig();
+      const nextPortfolio = normalizeMarketPortfolio(response.portfolio);
+      setMarketPortfolio(nextPortfolio);
+      setMarketSavedFundsByRow(nextPortfolio.funds.map((item) => ({ ...item })));
+      setMarketSavedCash(nextPortfolio.cash);
       setNotice({ type: "success", title: "Market 持仓配置已保存" });
     } catch (error) {
       notifyError("保存 Market 配置失败", error);
@@ -863,6 +943,7 @@ export default function App() {
           marketPortfolio={marketPortfolio}
           marketRuns={marketRuns}
           savingMarketPortfolio={savingMarketPortfolio}
+          marketFundSaveStates={marketFundSaveStates}
           bootstrappingMarketTasks={bootstrappingMarketTasks}
           runningMarketOncePhase={runningMarketOncePhase}
           marketRunOnceWithExplanation={marketRunOnceWithExplanation}
@@ -883,6 +964,7 @@ export default function App() {
           onMarketSearchInputChange={handleMarketSearchInputChange}
           onSearchMarketByName={(index) => void handleSearchMarketByName(index)}
           onApplyMarketSearchResult={handleApplyMarketSearchResult}
+          onSaveMarketFund={(index) => void handleSaveMarketFund(index)}
           onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
           onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
           onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
@@ -939,6 +1021,44 @@ function resizeSearchResultsArray(values: MarketSecuritySearchItem[][], targetLe
     return values.slice(0, targetLength);
   }
   return values.concat(Array.from({ length: targetLength - values.length }, () => [] as MarketSecuritySearchItem[]));
+}
+
+function resizeSavedFundsArray(values: Array<MarketFundHolding | null>, targetLength: number): Array<MarketFundHolding | null> {
+  if (values.length === targetLength) {
+    return values;
+  }
+  if (values.length > targetLength) {
+    return values.slice(0, targetLength);
+  }
+  return values.concat(Array.from({ length: targetLength - values.length }, () => null));
+}
+
+function normalizeMarketFund(fund: Partial<MarketFundHolding> | null | undefined): MarketFundHolding {
+  const digits = String(fund?.code ?? "").replace(/\D/g, "");
+  return {
+    code: digits ? digits.slice(-6).padStart(6, "0") : "",
+    name: String(fund?.name ?? "").trim(),
+    quantity: Number.isFinite(Number(fund?.quantity)) ? Number(fund?.quantity) : 0,
+    avgCost: Number.isFinite(Number(fund?.avgCost)) ? Number(fund?.avgCost) : 0
+  };
+}
+
+function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
+  return {
+    cash: Number.isFinite(Number(portfolio?.cash)) ? Number(portfolio.cash) : 0,
+    funds: Array.isArray(portfolio?.funds) ? portfolio.funds.map((fund) => normalizeMarketFund(fund)) : []
+  };
+}
+
+function isValidMarketFund(fund: MarketFundHolding): boolean {
+  return Boolean(fund.code) && Number.isFinite(fund.quantity) && fund.quantity > 0 && Number.isFinite(fund.avgCost) && fund.avgCost >= 0;
+}
+
+function isSameMarketFund(left: MarketFundHolding, right: MarketFundHolding): boolean {
+  return left.code === right.code
+    && left.name === right.name
+    && left.quantity === right.quantity
+    && left.avgCost === right.avgCost;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
