@@ -75,6 +75,12 @@ type BootstrapMarketTasksPayload = {
   enabled?: boolean;
 };
 
+type RunMarketOncePayload = {
+  userId: string;
+  phase: MarketPhase;
+  withExplanation?: boolean;
+};
+
 const MARKET_DATA_DIR = path.resolve(process.cwd(), "data/market-analysis");
 const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
 const MARKET_PORTFOLIO_FILE = path.join(MARKET_DATA_DIR, "portfolio.json");
@@ -537,6 +543,40 @@ export class AdminIngressAdapter implements IngressAdapter {
       res.json({ latest });
     });
 
+    app.post("/admin/api/market/run-once", async (req: Request, res: ExResponse) => {
+      const payload = parseRunMarketOncePayload(req.body);
+      if (!payload) {
+        res.status(400).json({ error: "invalid run-once payload" });
+        return;
+      }
+
+      const baseMessage = `/market ${payload.phase}`;
+      const message = payload.withExplanation === false
+        ? `${baseMessage} --no-llm`
+        : baseMessage;
+
+      try {
+        const result = await this.scheduler.runMessageNow(payload.userId, message);
+        res.json({
+          ok: true,
+          phase: payload.phase,
+          message,
+          task: result.task,
+          acceptedAsync: result.acceptedAsync,
+          responseText: result.responseText,
+          imageCount: result.imageCount
+        });
+      } catch (error) {
+        const messageText = (error as Error).message ?? "run failed";
+        const normalized = messageText.toLowerCase();
+        if (normalized.includes("user") || normalized.includes("invalid") || normalized.includes("required")) {
+          res.status(400).json({ ok: false, error: messageText });
+          return;
+        }
+        res.status(500).json({ ok: false, error: messageText });
+      }
+    });
+
     app.post("/admin/api/market/tasks/bootstrap", (req: Request, res: ExResponse) => {
       const payload = parseBootstrapMarketTasksPayload(req.body);
       if (!payload) {
@@ -739,6 +779,33 @@ function parseBootstrapMarketTasksPayload(rawBody: unknown): BootstrapMarketTask
     closeTime,
     ...(enabled === undefined ? {} : { enabled })
   };
+}
+
+function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+  if (!userId) {
+    return null;
+  }
+
+  const phase = parseMarketPhase(body.phase);
+  if (!phase) {
+    return null;
+  }
+
+  if ("withExplanation" in body) {
+    const withExplanation = parseOptionalBoolean(body.withExplanation);
+    if (withExplanation === undefined) {
+      return null;
+    }
+    return { userId, phase, withExplanation };
+  }
+
+  return { userId, phase };
 }
 
 function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarketTasksPayload): ScheduledTask[] {

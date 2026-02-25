@@ -248,6 +248,24 @@ export class SchedulerService {
     return this.executeTask(task, `manual-${Date.now()}`);
   }
 
+  async runMessageNow(userId: string, message: string): Promise<TriggerTaskResult> {
+    const user = this.getRequiredUser(userId);
+    const now = new Date().toISOString();
+    const task: ScheduledTask = {
+      id: createEntityId("task-once"),
+      name: "run-once",
+      enabled: true,
+      type: "daily",
+      time: "00:00",
+      userId: user.id,
+      toUser: user.wecomUserId,
+      message: normalizeRequiredText(message, "message"),
+      createdAt: now,
+      updatedAt: now
+    };
+    return this.executeTask(task, `manual-${Date.now()}`);
+  }
+
   private enqueueRun(job: () => Promise<void>): void {
     const next = this.queue
       .catch(() => undefined)

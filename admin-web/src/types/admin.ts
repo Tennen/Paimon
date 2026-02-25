@@ -51,16 +51,31 @@ export type MarketConfig = {
   runsDir: string;
 };
 
+export type MarketPhase = "midday" | "close";
+
 export type MarketRunSummary = {
   id: string;
   createdAt: string;
-  phase: "midday" | "close";
+  phase: MarketPhase;
   marketState: string;
   benchmark?: string;
   assetSignalCount: number;
   signals: Array<{ code: string; signal: string }>;
   explanationSummary?: string;
   file?: string;
+};
+
+export type MarketRunOnceResponse = {
+  ok: boolean;
+  phase: MarketPhase;
+  message: string;
+  task?: {
+    id: string;
+    name: string;
+  };
+  acceptedAsync: boolean;
+  responseText?: string;
+  imageCount?: number;
 };
 
 export type MarketSecuritySearchItem = {
