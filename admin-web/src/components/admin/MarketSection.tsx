@@ -30,6 +30,7 @@ import {
   MarketFundHolding,
   MarketPortfolio,
   MarketRunSummary,
+  MarketSecuritySearchItem,
   PushUser
 } from "@/types/admin";
 
@@ -43,6 +44,9 @@ type MarketSectionProps = {
   marketTaskUserId: string;
   marketMiddayTime: string;
   marketCloseTime: string;
+  marketSearchInputs: string[];
+  marketSearchResults: MarketSecuritySearchItem[][];
+  searchingMarketFundIndex: number | null;
   onCashChange: (value: number) => void;
   onMarketTaskUserIdChange: (value: string) => void;
   onMarketMiddayTimeChange: (value: string) => void;
@@ -50,6 +54,9 @@ type MarketSectionProps = {
   onAddMarketFund: () => void;
   onRemoveMarketFund: (index: number) => void;
   onMarketFundChange: (index: number, key: keyof MarketFundHolding, value: string) => void;
+  onMarketSearchInputChange: (index: number, value: string) => void;
+  onSearchMarketByName: (index: number) => void;
+  onApplyMarketSearchResult: (index: number, item: MarketSecuritySearchItem) => void;
   onSaveMarketPortfolio: () => void;
   onRefresh: () => void;
   onBootstrapMarketTasks: () => void;
@@ -96,6 +103,7 @@ export function MarketSection(props: MarketSectionProps) {
           <TableHeader>
             <TableRow>
               <TableHead className="w-[180px]">代码</TableHead>
+              <TableHead className="w-[340px]">名称查 code</TableHead>
               <TableHead className="w-[160px]">持仓数量</TableHead>
               <TableHead className="w-[160px]">平均成本</TableHead>
               <TableHead className="w-[120px]">操作</TableHead>
@@ -104,7 +112,7 @@ export function MarketSection(props: MarketSectionProps) {
           <TableBody>
             {props.marketPortfolio.funds.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground">
+                <TableCell colSpan={5} className="text-muted-foreground">
                   暂无持仓，点击“添加持仓”开始配置
                 </TableCell>
               </TableRow>
@@ -118,6 +126,46 @@ export function MarketSection(props: MarketSectionProps) {
                       onChange={(event) => props.onMarketFundChange(index, "code", event.target.value)}
                       placeholder="例如 510300"
                     />
+                  </TableCell>
+                  <TableCell className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        value={props.marketSearchInputs[index] ?? ""}
+                        onChange={(event) => props.onMarketSearchInputChange(index, event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            props.onSearchMarketByName(index);
+                          }
+                        }}
+                        placeholder="输入名称/拼音，例如 沪深300ETF"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={props.searchingMarketFundIndex === index}
+                        onClick={() => props.onSearchMarketByName(index)}
+                      >
+                        {props.searchingMarketFundIndex === index ? "查找中" : "查找"}
+                      </Button>
+                    </div>
+                    {props.marketSearchResults[index] && props.marketSearchResults[index].length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {props.marketSearchResults[index].map((item, suggestionIndex) => (
+                          <Button
+                            key={`market-suggest-${index}-${item.code}-${suggestionIndex}`}
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => props.onApplyMarketSearchResult(index, item)}
+                          >
+                            {item.name} ({item.code}{item.market ? `.${item.market}` : ""})
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     <Input

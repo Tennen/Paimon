@@ -63,6 +63,14 @@ export type MarketRunSummary = {
   file?: string;
 };
 
+export type MarketSecuritySearchItem = {
+  code: string;
+  name: string;
+  market: string;
+  securityType: string;
+  secid?: string;
+};
+
 export type EvolutionGoalStatus = "pending" | "running" | "waiting_retry" | "succeeded" | "failed";
 
 export type EvolutionGoal = {

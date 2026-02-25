@@ -16,6 +16,7 @@ import {
   MarketFundHolding,
   MarketPortfolio,
   MarketRunSummary,
+  MarketSecuritySearchItem,
   MenuKey,
   Notice,
   PushUser,
@@ -59,6 +60,9 @@ export default function App() {
   const [marketTaskUserId, setMarketTaskUserId] = useState("");
   const [marketMiddayTime, setMarketMiddayTime] = useState("13:30");
   const [marketCloseTime, setMarketCloseTime] = useState("15:15");
+  const [marketSearchInputs, setMarketSearchInputs] = useState<string[]>([]);
+  const [marketSearchResults, setMarketSearchResults] = useState<MarketSecuritySearchItem[][]>([]);
+  const [searchingMarketFundIndex, setSearchingMarketFundIndex] = useState<number | null>(null);
 
   const [evolutionSnapshot, setEvolutionSnapshot] = useState<EvolutionStateSnapshot | null>(null);
   const [loadingEvolution, setLoadingEvolution] = useState(false);
@@ -117,6 +121,12 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, [activeMenu]);
+
+  useEffect(() => {
+    const nextLength = marketPortfolio.funds.length;
+    setMarketSearchInputs((prev) => resizeStringArray(prev, nextLength));
+    setMarketSearchResults((prev) => resizeSearchResultsArray(prev, nextLength));
+  }, [marketPortfolio.funds.length]);
 
   async function bootstrap(): Promise<void> {
     try {
@@ -485,6 +495,8 @@ export default function App() {
       ...prev,
       funds: prev.funds.concat([{ code: "", quantity: 0, avgCost: 0 }])
     }));
+    setMarketSearchInputs((prev) => prev.concat(""));
+    setMarketSearchResults((prev) => prev.concat([[]]));
   }
 
   function handleRemoveMarketFund(index: number): void {
@@ -492,6 +504,17 @@ export default function App() {
       ...prev,
       funds: prev.funds.filter((_, idx) => idx !== index)
     }));
+    setMarketSearchInputs((prev) => prev.filter((_, idx) => idx !== index));
+    setMarketSearchResults((prev) => prev.filter((_, idx) => idx !== index));
+    setSearchingMarketFundIndex((prev) => {
+      if (prev === null) {
+        return null;
+      }
+      if (prev === index) {
+        return null;
+      }
+      return prev > index ? prev - 1 : prev;
+    });
   }
 
   function handleMarketCashChange(value: number): void {
@@ -527,6 +550,69 @@ export default function App() {
         };
       })
     }));
+  }
+
+  function handleMarketSearchInputChange(index: number, value: string): void {
+    setMarketSearchInputs((prev) => {
+      const next = resizeStringArray(prev, marketPortfolio.funds.length).slice();
+      if (index < 0 || index >= next.length) {
+        return next;
+      }
+      next[index] = value;
+      return next;
+    });
+  }
+
+  async function handleSearchMarketByName(index: number): Promise<void> {
+    const keyword = (marketSearchInputs[index] ?? "").trim();
+    if (!keyword) {
+      setNotice({ type: "error", title: "请输入名称后再查找" });
+      return;
+    }
+
+    setSearchingMarketFundIndex(index);
+    try {
+      const payload = await request<{ keyword: string; items: MarketSecuritySearchItem[] }>(
+        `/admin/api/market/securities/search?keyword=${encodeURIComponent(keyword)}&limit=8`
+      );
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      setMarketSearchResults((prev) => {
+        const next = resizeSearchResultsArray(prev, marketPortfolio.funds.length).slice();
+        if (index >= 0 && index < next.length) {
+          next[index] = items;
+        }
+        return next;
+      });
+      if (items.length === 0) {
+        setNotice({ type: "info", title: `未找到“${keyword}”相关代码` });
+      }
+    } catch (error) {
+      notifyError("名称查找 code 失败", error);
+    } finally {
+      setSearchingMarketFundIndex((prev) => (prev === index ? null : prev));
+    }
+  }
+
+  function handleApplyMarketSearchResult(index: number, item: MarketSecuritySearchItem): void {
+    setMarketPortfolio((prev) => ({
+      ...prev,
+      funds: prev.funds.map((fund, idx) => {
+        if (idx !== index) {
+          return fund;
+        }
+        return {
+          ...fund,
+          code: item.code
+        };
+      })
+    }));
+    setMarketSearchInputs((prev) => {
+      const next = resizeStringArray(prev, marketPortfolio.funds.length).slice();
+      if (index >= 0 && index < next.length) {
+        next[index] = item.name;
+      }
+      return next;
+    });
   }
 
   async function handleSaveMarketPortfolio(): Promise<void> {
@@ -722,6 +808,9 @@ export default function App() {
           marketTaskUserId={marketTaskUserId}
           marketMiddayTime={marketMiddayTime}
           marketCloseTime={marketCloseTime}
+          marketSearchInputs={marketSearchInputs}
+          marketSearchResults={marketSearchResults}
+          searchingMarketFundIndex={searchingMarketFundIndex}
           onCashChange={handleMarketCashChange}
           onMarketTaskUserIdChange={setMarketTaskUserId}
           onMarketMiddayTimeChange={setMarketMiddayTime}
@@ -729,6 +818,9 @@ export default function App() {
           onAddMarketFund={handleAddMarketFund}
           onRemoveMarketFund={handleRemoveMarketFund}
           onMarketFundChange={handleMarketFundChange}
+          onMarketSearchInputChange={handleMarketSearchInputChange}
+          onSearchMarketByName={(index) => void handleSearchMarketByName(index)}
+          onApplyMarketSearchResult={handleApplyMarketSearchResult}
           onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
           onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
           onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
@@ -763,6 +855,26 @@ export default function App() {
       ) : null}
     </main>
   );
+}
+
+function resizeStringArray(values: string[], targetLength: number): string[] {
+  if (values.length === targetLength) {
+    return values;
+  }
+  if (values.length > targetLength) {
+    return values.slice(0, targetLength);
+  }
+  return values.concat(Array.from({ length: targetLength - values.length }, () => ""));
+}
+
+function resizeSearchResultsArray(values: MarketSecuritySearchItem[][], targetLength: number): MarketSecuritySearchItem[][] {
+  if (values.length === targetLength) {
+    return values;
+  }
+  if (values.length > targetLength) {
+    return values.slice(0, targetLength);
+  }
+  return values.concat(Array.from({ length: targetLength - values.length }, () => [] as MarketSecuritySearchItem[]));
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
