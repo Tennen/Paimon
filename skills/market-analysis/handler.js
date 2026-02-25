@@ -644,9 +644,12 @@ async function generateExplanationViaLocalModel(signalResult, optionalNewsContex
         {
           role: "system",
           content: [
-            "你是市场分析解释器。",
-            "只能解释给定 signalResult，不得更改信号，不得新增决策，不得改变风险等级。",
-            "输出简短中文总结，最多 6 句话。"
+            "你是市场分析解释器与建议助手。",
+            "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
+            "允许基于 signalResult 与可选新闻上下文，给出 1-3 条“可选建议举措”（用户可以不采纳）。",
+            "建议必须明确标注为“参考建议”，且不能与既有 signalResult 冲突。",
+            "请只输出 JSON，不要 markdown，不要额外字段：",
+            "{\"summary\":\"简短中文总结，最多6句话\",\"suggestions\":[\"参考建议1\",\"参考建议2\"]}"
           ].join("\n")
         },
         {
@@ -666,9 +669,11 @@ async function generateExplanationViaLocalModel(signalResult, optionalNewsContex
     && typeof payload.message.content === "string"
       ? payload.message.content
       : (typeof payload.response === "string" ? payload.response : "");
+  const parsed = normalizeExplanationOutput(content);
 
   return {
-    summary: String(content || "").trim(),
+    summary: parsed.summary,
+    suggestions: parsed.suggestions,
     model,
     generatedAt: new Date().toISOString(),
     provider: "local"
@@ -753,15 +758,18 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
 
 function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
   return [
-    "你是市场分析解释器。",
-    "只能解释给定 signalResult，不得更改信号，不得新增决策，不得改变风险等级。",
-    "输出简短中文总结，最多 6 句话。",
+    "你是市场分析解释器与建议助手。",
+    "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
+    "允许基于 signalResult 与可选新闻上下文，给出 1-3 条“可选建议举措”（用户可以不采纳）。",
+    "建议必须明确标注为“参考建议”，且不能与既有 signalResult 冲突。",
+    "请只输出 JSON，不要 markdown，不要额外字段：",
+    "{\"summary\":\"简短中文总结，最多6句话\",\"suggestions\":[\"参考建议1\",\"参考建议2\"]}",
     "输入数据(JSON):",
     JSON.stringify({
       signalResult: signalResult || null,
       optionalNewsContext: optionalNewsContext || null
     })
-  ].join("");
+  ].join("\n");
 }
 
 function extractTextFromBridgeResponse(response) {
@@ -778,6 +786,102 @@ function extractTextFromBridgeResponse(response) {
     return response.message.trim();
   }
   return "";
+}
+
+function normalizeExplanationOutput(raw) {
+  const text = String(raw || "").trim();
+  const parsed = tryParseExplanationJson(text);
+  if (parsed) {
+    return parsed;
+  }
+
+  return {
+    summary: text.slice(0, 1200),
+    suggestions: extractSuggestionLines(text)
+  };
+}
+
+function tryParseExplanationJson(rawText) {
+  const text = String(rawText || "").trim();
+  if (!text) {
+    return {
+      summary: "",
+      suggestions: []
+    };
+  }
+
+  const candidates = [text, stripJsonCodeFence(text)];
+  for (const candidate of candidates) {
+    const parsed = parseJsonSafe(candidate);
+    if (!parsed || typeof parsed !== "object") {
+      continue;
+    }
+    const summary = typeof parsed.summary === "string"
+      ? parsed.summary.trim().slice(0, 1200)
+      : "";
+
+    const suggestionsRaw = Array.isArray(parsed.suggestions)
+      ? parsed.suggestions
+      : Array.isArray(parsed.advice)
+        ? parsed.advice
+        : Array.isArray(parsed.recommendations)
+          ? parsed.recommendations
+          : Array.isArray(parsed.actions)
+            ? parsed.actions
+            : [];
+    const suggestions = suggestionsRaw
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    if (!summary && suggestions.length === 0) {
+      continue;
+    }
+    return {
+      summary,
+      suggestions
+    };
+  }
+
+  return null;
+}
+
+function stripJsonCodeFence(text) {
+  const trimmed = String(text || "").trim();
+  const matched = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (!matched || !matched[1]) {
+    return trimmed;
+  }
+  return matched[1].trim();
+}
+
+function parseJsonSafe(text) {
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function extractSuggestionLines(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const suggestions = [];
+  for (const line of lines) {
+    if (
+      /^[-*•]\s+/.test(line)
+      || /^\d+[.)、]\s+/.test(line)
+      || /^(建议|建议举措|建议动作|action|advice)[:：]/i.test(line)
+    ) {
+      suggestions.push(line.replace(/^[-*•]\s+/, "").replace(/^\d+[.)、]\s+/, "").trim());
+    }
+    if (suggestions.length >= 3) {
+      break;
+    }
+  }
+  return suggestions;
 }
 
 async function withTimeout(task, timeoutMs, message) {
@@ -1122,6 +1226,13 @@ function buildRunResponseText(result) {
 
   if (result.explanation && result.explanation.summary) {
     lines.push(`解释: ${result.explanation.summary}`);
+  }
+
+  if (result.explanation && Array.isArray(result.explanation.suggestions) && result.explanation.suggestions.length > 0) {
+    lines.push("参考建议(可不采纳，不改变既有信号):");
+    for (const suggestion of result.explanation.suggestions.slice(0, 3)) {
+      lines.push(`- ${suggestion}`);
+    }
   }
 
   if (result.explanation && result.explanation.error) {
