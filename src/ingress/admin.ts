@@ -15,6 +15,7 @@ import {
   UpdateScheduledTaskInput
 } from "../scheduler/schedulerService";
 import { ScheduledTask } from "../scheduler/taskStore";
+import { EvolutionEngine } from "../evolution/evolutionEngine";
 
 const execAsync = promisify(exec);
 
@@ -79,11 +80,18 @@ const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
 export class AdminIngressAdapter implements IngressAdapter {
   private readonly envStore: EnvConfigStore;
   private readonly scheduler: SchedulerService;
+  private readonly evolutionEngine?: EvolutionEngine;
   private readonly adminDistCandidates: string[];
 
-  constructor(envStore: EnvConfigStore, scheduler: SchedulerService, adminDistCandidates?: string[]) {
+  constructor(
+    envStore: EnvConfigStore,
+    scheduler: SchedulerService,
+    evolutionEngine?: EvolutionEngine,
+    adminDistCandidates?: string[]
+  ) {
     this.envStore = envStore;
     this.scheduler = scheduler;
+    this.evolutionEngine = evolutionEngine;
     this.adminDistCandidates = adminDistCandidates && adminDistCandidates.length > 0
       ? adminDistCandidates.map((candidate) => path.resolve(process.cwd(), candidate))
       : DEFAULT_ADMIN_DIST_CANDIDATES;
@@ -97,6 +105,7 @@ export class AdminIngressAdapter implements IngressAdapter {
   private registerApiRoutes(app: Express): void {
     app.get("/admin/api/config", (_req, res) => {
       const envPath = this.envStore.getPath();
+      const evolutionSnapshot = this.evolutionEngine?.getSnapshot();
       res.json({
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
@@ -105,8 +114,67 @@ export class AdminIngressAdapter implements IngressAdapter {
         taskStorePath: this.scheduler.getStorePath(),
         userStorePath: this.scheduler.getUserStorePath(),
         timezone: this.scheduler.getTimezone(),
-        tickMs: this.scheduler.getTickMs()
+        tickMs: this.scheduler.getTickMs(),
+        evolution: evolutionSnapshot
+          ? {
+              tickMs: this.evolutionEngine?.getTickMs(),
+              statePath: evolutionSnapshot.paths.stateFile,
+              retryQueuePath: evolutionSnapshot.paths.retryQueueFile,
+              metricsPath: evolutionSnapshot.paths.metricsFile
+            }
+          : null
       });
+    });
+
+    app.get("/admin/api/evolution/state", (_req: Request, res: ExResponse) => {
+      if (!this.evolutionEngine) {
+        res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
+        return;
+      }
+      const snapshot = this.evolutionEngine.getSnapshot();
+      res.json({
+        ok: true,
+        tickMs: this.evolutionEngine.getTickMs(),
+        ...snapshot
+      });
+    });
+
+    app.post("/admin/api/evolution/goals", async (req: Request, res: ExResponse) => {
+      if (!this.evolutionEngine) {
+        res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
+        return;
+      }
+      const input = parseEvolutionGoalInput(req.body);
+      if (!input) {
+        res.status(400).json({ ok: false, error: "goal is required" });
+        return;
+      }
+
+      try {
+        const goal = await this.evolutionEngine.enqueueGoal(input);
+        res.json({
+          ok: true,
+          goal
+        });
+      } catch (error) {
+        res.status(400).json({ ok: false, error: (error as Error).message ?? "failed to enqueue goal" });
+      }
+    });
+
+    app.post("/admin/api/evolution/tick", async (_req: Request, res: ExResponse) => {
+      if (!this.evolutionEngine) {
+        res.status(501).json({ ok: false, error: "evolution engine is not enabled" });
+        return;
+      }
+      try {
+        await this.evolutionEngine.triggerNow();
+        res.json({ ok: true });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to trigger evolution tick"
+        });
+      }
     });
 
     app.get("/admin/api/models", async (_req, res) => {
@@ -557,6 +625,19 @@ function parseUpdateTaskInput(rawBody: unknown): UpdateScheduledTaskInput | null
   }
 
   return payload;
+}
+
+function parseEvolutionGoalInput(rawBody: unknown): { goal: string; commitMessage?: string } | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+  const body = rawBody as Record<string, unknown>;
+  const goal = typeof body.goal === "string" ? body.goal.trim() : "";
+  if (!goal) {
+    return null;
+  }
+  const commitMessage = typeof body.commitMessage === "string" ? body.commitMessage.trim() : "";
+  return commitMessage ? { goal, commitMessage } : { goal };
 }
 
 function parseMarketPortfolioInput(rawBody: unknown): MarketPortfolio | null {

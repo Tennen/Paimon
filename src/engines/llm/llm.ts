@@ -1,8 +1,10 @@
 import { SkillSelectionResult, SkillPlanningResult } from "../../types";
 
 export type LLMRuntimeContext = {
-  now: string;
-  timezone: string;
+  now?: string;
+  timezone?: string;
+  isoTime?: string;
+  userTimezone?: string;
   memory?: string;
   action_history?: Array<{
     iteration: number;

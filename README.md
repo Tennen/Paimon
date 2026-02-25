@@ -227,6 +227,52 @@ export WECOM_BRIDGE_TOKEN="your_stream_token"
 
 Per-session memory is stored at `data/memory/<sessionId>/MEMORY.md` and injected into LLM runtime context as `memory`.
 
+## Self-Improving Evolution Engine
+
+Paimon now includes a built-in evolution loop for autonomous repo changes based on queued goals.
+
+State files:
+
+- `state/evolution.json`
+- `state/retry_queue.json`
+- `state/metrics.json`
+
+Core behavior:
+
+- Tick loop (default every 30s): fetch pending goal or due retry.
+- Plan via `codex exec --json`.
+- Execute each plan step via codex.
+- Run checks (`npm test` / `npm lint` / `tsc --noEmit`, based on available scripts).
+- Auto-fix from check summary when failures occur.
+- Exponential backoff retry for 429/rate-limit (`10m * 2^attempt`, max 6h).
+- Commit changes and update metrics.
+
+Admin APIs:
+
+- `GET /admin/api/evolution/state`
+- `POST /admin/api/evolution/goals`
+- `POST /admin/api/evolution/tick`
+
+Example:
+
+```bash
+curl -s http://localhost:3000/admin/api/evolution/goals \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "增加一个插件系统，支持动态加载工具模块",
+    "commitMessage": "feat: add dynamic plugin loader"
+  }'
+```
+
+Optional env:
+
+- `EVOLUTION_TICK_MS` (default `30000`)
+- `EVOLUTION_MAX_FIX_ATTEMPTS` (default `2`)
+- `EVOLUTION_MAX_RETRY_ATTEMPTS` (default `6`)
+- `EVOLUTION_RETRY_BASE_MS` (default `600000`)
+- `EVOLUTION_RETRY_MAX_MS` (default `21600000`)
+- `EVOLUTION_ENABLE_HARD_ROLLBACK` (default `false`)
+
 ## Skills (extensible)
 
 Create a skill under `skills/<name>/SKILL.md`. Optionally add `skills/<name>/handler.js` exporting `execute(input, context)`.

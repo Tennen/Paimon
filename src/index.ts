@@ -15,6 +15,7 @@ import { CallbackDispatcher } from "./callback/callbackDispatcher";
 import { EnvConfigStore } from "./config/envConfigStore";
 import { SchedulerService } from "./scheduler/schedulerService";
 import { AdminIngressAdapter } from "./ingress/admin";
+import { EvolutionEngine } from "./evolution/evolutionEngine";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -39,12 +40,13 @@ const orchestrator = new Orchestrator(
 const sessionManager = new SessionManager(orchestrator);
 const envStore = new EnvConfigStore();
 const scheduler = new SchedulerService(sessionManager);
+const evolutionEngine = new EvolutionEngine();
 
 new HttpIngressAdapter().register(app, sessionManager);
 new HANotifyIngressAdapter().register(app, sessionManager);
 new WeComIngressAdapter().register(app, sessionManager);
 new WeComBridgeIngressAdapter().register(app, sessionManager);
-new AdminIngressAdapter(envStore, scheduler).register(app, sessionManager);
+new AdminIngressAdapter(envStore, scheduler, evolutionEngine).register(app, sessionManager);
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -55,6 +57,8 @@ async function startServer() {
     console.log("Skill dependencies check completed");
     scheduler.start();
     console.log(`Scheduler started (tick=${scheduler.getTickMs()}ms)`);
+    evolutionEngine.start();
+    console.log(`Evolution engine started (tick=${evolutionEngine.getTickMs()}ms)`);
 
     app.listen(port, () => {
       console.log(`Ingress listening on :${port}`);
