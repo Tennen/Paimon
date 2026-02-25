@@ -277,9 +277,9 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
-    app.post("/admin/api/repo/sync-build", async (_req: Request, res: ExResponse) => {
+    app.post("/admin/api/repo/pull", async (_req: Request, res: ExResponse) => {
       try {
-        const result = await syncRepoAndBuild();
+        const result = await pullRepoWithRebase();
         res.json({
           ok: true,
           ...result
@@ -287,7 +287,22 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(500).json({
           ok: false,
-          error: (error as Error).message ?? "sync-build failed"
+          error: (error as Error).message ?? "repo pull failed"
+        });
+      }
+    });
+
+    app.post("/admin/api/repo/build", async (_req: Request, res: ExResponse) => {
+      try {
+        const result = await buildProject();
+        res.json({
+          ok: true,
+          ...result
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "repo build failed"
         });
       }
     });
@@ -1262,11 +1277,10 @@ async function restartPm2(): Promise<string> {
   return `${stdout ?? ""}${stderr ?? ""}`.trim();
 }
 
-async function syncRepoAndBuild(): Promise<{
+async function pullRepoWithRebase(): Promise<{
   cwd: string;
   pullCommand: string;
   pullOutput: string;
-  buildOutput: string;
 }> {
   const cwd = process.cwd();
   const gprResult = await runCommandWithOutput("zsh -lic 'gpr'");
@@ -1294,16 +1308,25 @@ async function syncRepoAndBuild(): Promise<{
       .join("\n");
   }
 
+  return {
+    cwd,
+    pullCommand,
+    pullOutput
+  };
+}
+
+async function buildProject(): Promise<{
+  cwd: string;
+  buildOutput: string;
+}> {
+  const cwd = process.cwd();
   const buildResult = await runCommandWithOutput("npm run build");
   if (!buildResult.ok) {
     const buildOutput = joinCommandOutput(buildResult);
     throw new Error(`npm run build failed:\n${buildOutput || buildResult.error || "unknown error"}`);
   }
-
   return {
     cwd,
-    pullCommand,
-    pullOutput,
     buildOutput: joinCommandOutput(buildResult)
   };
 }

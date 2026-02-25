@@ -28,7 +28,8 @@ type SystemSectionProps = {
   planningTimeoutDraft: string;
   savingModel: boolean;
   restarting: boolean;
-  syncingRepoBuild: boolean;
+  pullingRepo: boolean;
+  buildingRepo: boolean;
   onModelSelect: (value: string) => void;
   onModelDraftChange: (value: string) => void;
   onPlanningModelSelect: (value: string) => void;
@@ -37,7 +38,8 @@ type SystemSectionProps = {
   onRefreshModels: () => void;
   onSaveModel: (restartAfterSave: boolean) => void;
   onRestartPm2: () => void;
-  onSyncRepoBuild: () => void;
+  onPullRepo: () => void;
+  onBuildRepo: () => void;
 };
 
 export function SystemSection(props: SystemSectionProps) {
@@ -134,15 +136,13 @@ export function SystemSection(props: SystemSectionProps) {
             {props.savingModel ? "处理中..." : "保存并重启"}
           </Button>
           <Button type="button" variant="destructive" disabled={props.restarting} onClick={props.onRestartPm2}>
-            {props.restarting ? "重启中..." : "pm2 restart 0"}
+            {props.restarting ? "重启中..." : "重启应用进程（pm2）"}
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={props.syncingRepoBuild}
-            onClick={props.onSyncRepoBuild}
-          >
-            {props.syncingRepoBuild ? "执行中..." : "gpr + npm run build"}
+          <Button type="button" variant="outline" disabled={props.pullingRepo} onClick={props.onPullRepo}>
+            {props.pullingRepo ? "同步中..." : "同步远端代码（gpr）"}
+          </Button>
+          <Button type="button" variant="secondary" disabled={props.buildingRepo} onClick={props.onBuildRepo}>
+            {props.buildingRepo ? "构建中..." : "执行项目构建（npm run build）"}
           </Button>
         </div>
 

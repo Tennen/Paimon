@@ -37,7 +37,8 @@ export default function App() {
 
   const [savingModel, setSavingModel] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [syncingRepoBuild, setSyncingRepoBuild] = useState(false);
+  const [pullingRepo, setPullingRepo] = useState(false);
+  const [buildingRepo, setBuildingRepo] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState("");
   const [savingUser, setSavingUser] = useState(false);
@@ -246,7 +247,7 @@ export default function App() {
         method: "POST",
         body: "{}"
       });
-      setNotice({ type: "success", title: "pm2 restart 0 执行完成", text: payload.output });
+      setNotice({ type: "success", title: "应用进程重启完成", text: payload.output });
     } catch (error) {
       notifyError("pm2 重启失败", error);
     } finally {
@@ -254,29 +255,63 @@ export default function App() {
     }
   }
 
-  async function handleSyncRepoBuild(): Promise<void> {
-    setSyncingRepoBuild(true);
+  async function handlePullRepo(): Promise<void> {
+    setPullingRepo(true);
     try {
       const payload = await request<{
         ok: boolean;
         cwd: string;
         pullCommand: string;
         pullOutput: string;
-        buildOutput: string;
-      }>("/admin/api/repo/sync-build", {
+      }>("/admin/api/repo/pull", {
         method: "POST",
         body: "{}"
       });
 
       setNotice({
         type: "success",
-        title: `代码同步并构建完成 (${payload.pullCommand})`,
-        text: [payload.pullOutput, payload.buildOutput].filter(Boolean).join("\n\n")
+        title: "远端代码同步完成",
+        text: [
+          `执行命令: ${payload.pullCommand}`,
+          `工作目录: ${payload.cwd}`,
+          payload.pullOutput
+        ]
+          .filter(Boolean)
+          .join("\n\n")
       });
     } catch (error) {
-      notifyError("拉取代码并构建失败", error);
+      notifyError("同步远端代码失败", error);
     } finally {
-      setSyncingRepoBuild(false);
+      setPullingRepo(false);
+    }
+  }
+
+  async function handleBuildRepo(): Promise<void> {
+    setBuildingRepo(true);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        cwd: string;
+        buildOutput: string;
+      }>("/admin/api/repo/build", {
+        method: "POST",
+        body: "{}"
+      });
+
+      setNotice({
+        type: "success",
+        title: "项目构建完成",
+        text: [
+          `工作目录: ${payload.cwd}`,
+          payload.buildOutput
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      });
+    } catch (error) {
+      notifyError("执行项目构建失败", error);
+    } finally {
+      setBuildingRepo(false);
     }
   }
 
@@ -642,7 +677,8 @@ export default function App() {
           planningTimeoutDraft={planningTimeoutDraft}
           savingModel={savingModel}
           restarting={restarting}
-          syncingRepoBuild={syncingRepoBuild}
+          pullingRepo={pullingRepo}
+          buildingRepo={buildingRepo}
           onModelSelect={setModelDraft}
           onModelDraftChange={setModelDraft}
           onPlanningModelSelect={setPlanningModelDraft}
@@ -651,7 +687,8 @@ export default function App() {
           onRefreshModels={() => void loadModels()}
           onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
           onRestartPm2={() => void handleRestartPm2()}
-          onSyncRepoBuild={() => void handleSyncRepoBuild()}
+          onPullRepo={() => void handlePullRepo()}
+          onBuildRepo={() => void handleBuildRepo()}
         />
       ) : null}
 
