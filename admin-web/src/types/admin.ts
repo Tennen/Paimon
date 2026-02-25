@@ -88,11 +88,24 @@ export type MarketSecuritySearchItem = {
 
 export type EvolutionGoalStatus = "pending" | "running" | "waiting_retry" | "succeeded" | "failed";
 
+export type EvolutionGoalEvent = {
+  at: string;
+  stage: string;
+  message: string;
+  important: boolean;
+};
+
+export type EvolutionRawLine = {
+  at: string;
+  line: string;
+};
+
 export type EvolutionGoal = {
   id: string;
   goal: string;
   commitMessage: string;
   status: EvolutionGoalStatus;
+  stage: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -105,6 +118,8 @@ export type EvolutionGoal = {
     steps: string[];
     currentStep: number;
   };
+  events: EvolutionGoalEvent[];
+  rawTail: EvolutionRawLine[];
 };
 
 export type EvolutionGoalHistory = {

@@ -7,11 +7,24 @@ export type EvolutionGoalStatus =
 
 export type RetryTaskType = "plan" | "step" | "fix" | "structure";
 
+export type EvolutionGoalEvent = {
+  at: string;
+  stage: string;
+  message: string;
+  important: boolean;
+};
+
+export type EvolutionRawLine = {
+  at: string;
+  line: string;
+};
+
 export type EvolutionGoal = {
   id: string;
   goal: string;
   commitMessage: string;
   status: EvolutionGoalStatus;
+  stage: string;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -26,9 +39,10 @@ export type EvolutionGoal = {
   lastError?: string;
   lastCodexOutput?: string;
   structureIssues?: string[];
+  events: EvolutionGoalEvent[];
+  rawTail: EvolutionRawLine[];
   git: {
     stableTagEnsured: boolean;
-    branchName?: string;
     startedFromRef?: string;
     selfEvolutionDiffFile?: string;
   };

@@ -154,13 +154,23 @@ function buildStatusResponse(snapshot, goalId) {
     if (!target) {
       return `未找到 Goal: ${goalId}`;
     }
+
+    const eventsText = formatEvents(target.events, 8);
+    const rawTailText = formatRawTail(target.rawTail, 8);
     return [
       `Goal: ${target.id}`,
       `状态: ${target.status || "unknown"}`,
+      `阶段: ${target.stage || "-"}`,
       `步骤: ${toIntValue(target.plan && target.plan.currentStep)}/${Array.isArray(target.plan && target.plan.steps) ? target.plan.steps.length : 0}`,
       `重试次数: ${toIntValue(target.retries)}`,
       `最近错误: ${target.lastError || "-"}`,
-      `更新时间: ${target.updatedAt || "-"}`
+      `更新时间: ${target.updatedAt || "-"}`,
+      "",
+      "关键节点:",
+      ...(eventsText.length > 0 ? eventsText : ["- (暂无事件)"]),
+      "",
+      "最近输出:",
+      ...(rawTailText.length > 0 ? rawTailText : ["- (暂无输出)"])
     ].join("\n");
   }
 
@@ -170,14 +180,21 @@ function buildStatusResponse(snapshot, goalId) {
     .slice(0, 5)
     .map((item) => {
       const summary = trimText(String(item.goal || ""), 32);
-      return `- ${item.id} [${item.status || "unknown"}] step ${toIntValue(item.plan && item.plan.currentStep)}/${Array.isArray(item.plan && item.plan.steps) ? item.plan.steps.length : 0} ${summary}`;
+      return `- ${item.id} [${item.status || "unknown"}] stage=${item.stage || "-"} step ${toIntValue(item.plan && item.plan.currentStep)}/${Array.isArray(item.plan && item.plan.steps) ? item.plan.steps.length : 0} ${summary}`;
     });
+
+  const currentGoal = state.currentGoalId
+    ? goals.find((item) => item && item.id === state.currentGoalId)
+    : null;
+  const currentEvents = currentGoal ? formatEvents(currentGoal.events, 4) : [];
 
   return [
     `引擎状态: ${state.status || "unknown"}`,
     `当前任务: ${state.currentGoalId || "-"}`,
+    `当前阶段: ${currentGoal && currentGoal.stage ? currentGoal.stage : "-"}`,
     `队列重试: ${retryItems.length}`,
     `总 Goals: ${toIntValue(metrics.totalGoals)}, 失败: ${toIntValue(metrics.totalFailures)}, 总重试: ${toIntValue(metrics.totalRetries)}`,
+    ...(currentEvents.length > 0 ? ["当前任务关键节点:", ...currentEvents] : []),
     "最近 Goals:",
     ...(recent.length > 0 ? recent : ["- (empty)"])
   ].join("\n");
@@ -226,6 +243,25 @@ function trimText(text, maxLength) {
     return value;
   }
   return `${value.slice(0, maxLength)}...`;
+}
+
+function formatEvents(events, maxCount) {
+  const list = Array.isArray(events) ? events : [];
+  return list.slice(-Math.max(1, maxCount)).map((event) => {
+    const at = event && event.at ? event.at : "-";
+    const stage = event && event.stage ? event.stage : "event";
+    const message = event && event.message ? trimText(String(event.message), 220) : "";
+    return `- [${at}] ${stage}: ${message}`;
+  });
+}
+
+function formatRawTail(rawTail, maxCount) {
+  const list = Array.isArray(rawTail) ? rawTail : [];
+  return list.slice(-Math.max(1, maxCount)).map((item) => {
+    const at = item && item.at ? item.at : "-";
+    const line = item && item.line ? trimText(String(item.line), 220) : "";
+    return `- [${at}] ${line}`;
+  });
 }
 
 function toIntValue(value) {

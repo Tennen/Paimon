@@ -2,6 +2,8 @@ import fs from "fs";
 import path from "path";
 import {
   EvolutionGoal,
+  EvolutionGoalEvent,
+  EvolutionRawLine,
   EvolutionMetrics,
   EvolutionState,
   RetryQueueState
@@ -20,6 +22,9 @@ type CreateGoalInput = {
   goal: string;
   commitMessage: string;
 };
+
+const MAX_GOAL_EVENTS = 80;
+const MAX_GOAL_RAW_LINES = 120;
 
 export class EvolutionStateStore {
   private readonly paths: EvolutionStorePaths;
@@ -78,6 +83,7 @@ export class EvolutionStateStore {
       goal: input.goal,
       commitMessage: input.commitMessage,
       status: "pending",
+      stage: "queued",
       createdAt: now,
       updatedAt: now,
       plan: {
@@ -86,6 +92,15 @@ export class EvolutionStateStore {
       },
       fixAttempts: 0,
       retries: 0,
+      events: [
+        {
+          at: now,
+          stage: "goal",
+          message: "Goal 已创建，等待调度",
+          important: true
+        }
+      ],
+      rawTail: [],
       git: {
         stableTagEnsured: false
       }
@@ -224,6 +239,7 @@ function normalizeGoal(raw: unknown): EvolutionGoal | null {
     goal: goal.goal,
     commitMessage: goal.commitMessage,
     status,
+    stage: normalizeGoalStage(goal.stage, status),
     createdAt: normalizeIso(goal.createdAt),
     updatedAt: normalizeIso(goal.updatedAt),
     ...(typeof goal.startedAt === "string" ? { startedAt: normalizeIso(goal.startedAt) } : {}),
@@ -246,11 +262,20 @@ function normalizeGoal(raw: unknown): EvolutionGoal | null {
             .slice(0, 40)
         }
       : {}),
+    events: Array.isArray(goal.events)
+      ? goal.events
+          .map((item) => normalizeGoalEvent(item))
+          .filter((item): item is EvolutionGoalEvent => Boolean(item))
+          .slice(-MAX_GOAL_EVENTS)
+      : [],
+    rawTail: Array.isArray(goal.rawTail)
+      ? goal.rawTail
+          .map((item) => normalizeGoalRawLine(item))
+          .filter((item): item is EvolutionRawLine => Boolean(item))
+          .slice(-MAX_GOAL_RAW_LINES)
+      : [],
     git: {
       stableTagEnsured: goal.git?.stableTagEnsured === true,
-      ...(typeof goal.git?.branchName === "string" && goal.git.branchName
-        ? { branchName: goal.git.branchName }
-        : {}),
       ...(typeof goal.git?.startedFromRef === "string" && goal.git.startedFromRef
         ? { startedFromRef: goal.git.startedFromRef }
         : {}),
@@ -369,6 +394,51 @@ function normalizeGoalStatus(raw: unknown): EvolutionGoal["status"] {
   if (raw === "succeeded") return "succeeded";
   if (raw === "failed") return "failed";
   return "pending";
+}
+
+function normalizeGoalStage(raw: unknown, status: EvolutionGoal["status"]): string {
+  if (typeof raw === "string" && raw.trim()) {
+    return raw.trim().slice(0, 80);
+  }
+  if (status === "pending") return "queued";
+  if (status === "running") return "running";
+  if (status === "waiting_retry") return "waiting_retry";
+  if (status === "succeeded") return "succeeded";
+  return "failed";
+}
+
+function normalizeGoalEvent(raw: unknown): EvolutionGoalEvent | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const value = raw as Partial<EvolutionGoalEvent>;
+  if (typeof value.stage !== "string" || typeof value.message !== "string") {
+    return null;
+  }
+  return {
+    at: normalizeIso(value.at),
+    stage: value.stage.trim().slice(0, 80) || "event",
+    message: value.message.slice(0, 500),
+    important: value.important === true
+  };
+}
+
+function normalizeGoalRawLine(raw: unknown): EvolutionRawLine | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const value = raw as Partial<EvolutionRawLine>;
+  if (typeof value.line !== "string") {
+    return null;
+  }
+  const line = value.line.trim();
+  if (!line) {
+    return null;
+  }
+  return {
+    at: normalizeIso(value.at),
+    line: line.slice(0, 600)
+  };
 }
 
 function normalizeIso(raw: unknown): string {

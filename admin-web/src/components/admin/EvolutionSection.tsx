@@ -116,6 +116,7 @@ export function EvolutionSection(props: EvolutionSectionProps) {
               <div>状态: <Badge variant={props.evolutionSnapshot?.state.status === "running" ? "default" : "secondary"}>{props.evolutionSnapshot?.state.status ?? "-"}</Badge></div>
               <div>tickMs: <span className="mono">{props.evolutionSnapshot?.tickMs ?? "-"}</span></div>
               <div>当前任务: <span className="mono">{props.currentEvolutionGoal?.id ?? "-"}</span></div>
+              <div>当前阶段: <span className="mono">{props.currentEvolutionGoal?.stage ?? "-"}</span></div>
               <div>重试队列: <span className="mono">{props.evolutionSnapshot?.retryQueue.items.length ?? 0}</span></div>
               <div>总 Goals: <span className="mono">{props.evolutionSnapshot?.metrics.totalGoals ?? 0}</span></div>
               <div>总失败: <span className="mono">{props.evolutionSnapshot?.metrics.totalFailures ?? 0}</span></div>
@@ -146,6 +147,7 @@ export function EvolutionSection(props: EvolutionSectionProps) {
               <TableRow>
                 <TableHead>Goal ID</TableHead>
                 <TableHead>状态</TableHead>
+                <TableHead>阶段</TableHead>
                 <TableHead>步骤</TableHead>
                 <TableHead>重试</TableHead>
                 <TableHead>下一次重试</TableHead>
@@ -155,7 +157,7 @@ export function EvolutionSection(props: EvolutionSectionProps) {
             <TableBody>
               {props.sortedEvolutionGoals.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-muted-foreground">
+                  <TableCell colSpan={7} className="text-muted-foreground">
                     暂无 Goal
                   </TableCell>
                 </TableRow>
@@ -172,6 +174,9 @@ export function EvolutionSection(props: EvolutionSectionProps) {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">
+                      <span className="mono">{goal.stage || "-"}</span>
+                    </TableCell>
+                    <TableCell className="text-xs">
                       {goal.plan.currentStep}/{goal.plan.steps.length}
                     </TableCell>
                     <TableCell className="text-xs">{goal.retries}</TableCell>
@@ -182,6 +187,61 @@ export function EvolutionSection(props: EvolutionSectionProps) {
               )}
             </TableBody>
           </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Current Goal Trace</CardTitle>
+          <CardDescription>关键事件与最近输出（实时可观测）</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!props.currentEvolutionGoal ? (
+            <div className="text-sm text-muted-foreground">当前没有运行中的 Goal。</div>
+          ) : (
+            <>
+              <div className="text-xs text-muted-foreground">
+                <span className="mono">{props.currentEvolutionGoal.id}</span>
+                {" · "}
+                stage=<span className="mono">{props.currentEvolutionGoal.stage || "-"}</span>
+              </div>
+              <div className="space-y-1">
+                <div className="text-xs font-medium">关键节点</div>
+                {(props.currentEvolutionGoal.events || []).length === 0 ? (
+                  <div className="text-xs text-muted-foreground">暂无事件</div>
+                ) : (
+                  <div className="space-y-1">
+                    {(props.currentEvolutionGoal.events || []).slice(-10).map((event) => (
+                      <div key={`${event.at}-${event.stage}-${event.message}`} className="text-xs">
+                        <span className="text-muted-foreground">[{formatDateTime(event.at)}]</span>
+                        {" "}
+                        <span className="mono">{event.stage}</span>
+                        {": "}
+                        {event.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <Separator />
+              <div className="space-y-1">
+                <div className="text-xs font-medium">最近输出</div>
+                {(props.currentEvolutionGoal.rawTail || []).length === 0 ? (
+                  <div className="text-xs text-muted-foreground">暂无输出</div>
+                ) : (
+                  <div className="space-y-1">
+                    {(props.currentEvolutionGoal.rawTail || []).slice(-14).map((item) => (
+                      <div key={`${item.at}-${item.line}`} className="mono text-xs">
+                        <span className="text-muted-foreground">[{formatDateTime(item.at)}]</span>
+                        {" "}
+                        {item.line}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

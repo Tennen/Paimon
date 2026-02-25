@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { jsonrepair } from "jsonrepair";
-import { CodexAdapter } from "./codexAdapter";
+import { CodexAdapter, CodexRunEvent, CodexRunResult } from "./codexAdapter";
 import { EvolutionStateStore } from "./stateStore";
 import { TestRunner } from "./testRunner";
 import {
@@ -38,6 +38,8 @@ type CommandResult = {
 };
 
 const SELF_EVOLUTION_FILE = "src/evolution/evolutionEngine.ts";
+const MAX_GOAL_EVENTS = 80;
+const MAX_GOAL_RAW_LINES = 120;
 
 export class EvolutionEngine {
   private readonly store: EvolutionStateStore;
@@ -202,21 +204,34 @@ export class EvolutionEngine {
     if (retryItem) {
       this.removeRetryItem(retryQueue, retryItem.id);
       goal.nextRetryAt = undefined;
+      goal.stage = "retrying";
     }
 
     goal.status = "running";
+    goal.stage = "running";
     goal.startedAt = goal.startedAt ?? new Date().toISOString();
     goal.updatedAt = new Date().toISOString();
     state.status = "running";
     state.currentGoalId = goal.id;
     state.updatedAt = new Date().toISOString();
     this.store.saveEvolutionState(state);
+    if (retryItem) {
+      this.pushGoalEvent(goal.id, "retry", `重试任务恢复: ${retryItem.taskType}${Number.isInteger(retryItem.stepIndex) ? `#${retryItem.stepIndex}` : ""}`, true);
+    }
+    this.pushGoalEvent(goal.id, "engine", "开始处理 Goal", true);
 
     try {
+      this.setGoalStage(goal.id, "prepare", "准备 Git 安全检查");
       await this.ensureGitSafety(goal);
-      this.store.saveEvolutionState(state);
+      this.updateGoal(goal.id, (latest) => {
+        latest.git = {
+          ...latest.git,
+          ...goal.git
+        };
+      });
 
       if (goal.plan.steps.length === 0) {
+        this.setGoalStage(goal.id, "plan", "开始生成执行计划");
         const planned = await this.generatePlan(
           goal,
           retryItem?.taskType === "plan" ? retryItem.attempts : 0
@@ -232,6 +247,7 @@ export class EvolutionEngine {
 
       while (goal.plan.currentStep < goal.plan.steps.length) {
         const stepIndex = goal.plan.currentStep;
+        this.setGoalStage(goal.id, `step_${stepIndex + 1}`, `执行步骤 ${stepIndex + 1}/${goal.plan.steps.length}`);
         const stepResult = await this.executePlanStep(
           goal,
           stepIndex,
@@ -245,8 +261,9 @@ export class EvolutionEngine {
           return;
         }
         goal.plan.currentStep += 1;
-        goal.updatedAt = new Date().toISOString();
-        this.store.saveEvolutionState(state);
+        this.updateGoal(goal.id, (latest) => {
+          latest.plan.currentStep = goal.plan.currentStep;
+        });
       }
 
       const checked = await this.runChecksAndRepair(
@@ -273,6 +290,7 @@ export class EvolutionEngine {
         return;
       }
 
+      this.setGoalStage(goal.id, "commit", "准备提交变更");
       const committed = await this.commitGoal(goal);
       if (!committed.ok) {
         await this.failGoal(goal.id, committed.error || "commit failed");
@@ -287,35 +305,28 @@ export class EvolutionEngine {
 
   private async ensureGitSafety(goal: EvolutionGoal): Promise<void> {
     if (!goal.git.stableTagEnsured) {
-      const hasStable = await this.runCommand("git", ["rev-parse", "--verify", "stable"]);
+      const hasStable = await this.runCommand("git", ["rev-parse", "--verify", "stable"], 120000, goal.id);
       if (!hasStable.ok) {
-        const tagged = await this.runCommand("git", ["tag", "stable"]);
+        const tagged = await this.runCommand("git", ["tag", "stable"], 120000, goal.id);
         if (!tagged.ok) {
           throw new Error(`failed to create stable tag: ${tagged.error || tagged.stderr || tagged.stdout}`);
         }
+        this.pushGoalEvent(goal.id, "git", "已创建 stable 标签", true);
       }
       goal.git.stableTagEnsured = true;
+      this.pushGoalEvent(goal.id, "git", "stable 标签检查完成", false);
     }
 
-    if (goal.git.branchName) {
+    if (goal.git.startedFromRef) {
       return;
     }
 
-    const baseRefResult = await this.runCommand("git", ["rev-parse", "--short", "HEAD"]);
+    const baseRefResult = await this.runCommand("git", ["rev-parse", "--short", "HEAD"], 120000, goal.id);
     if (!baseRefResult.ok) {
       throw new Error(`failed to resolve HEAD: ${baseRefResult.error || baseRefResult.stderr || baseRefResult.stdout}`);
     }
     goal.git.startedFromRef = baseRefResult.stdout.trim();
-
-    const branchName = `evolution_run_${goal.id.replace(/[^a-z0-9]+/gi, "_").slice(0, 24)}`;
-    const checkoutNew = await this.runCommand("git", ["checkout", "-b", branchName]);
-    if (!checkoutNew.ok) {
-      const checkoutExisting = await this.runCommand("git", ["checkout", branchName]);
-      if (!checkoutExisting.ok) {
-        throw new Error(`failed to switch branch ${branchName}: ${checkoutExisting.error || checkoutExisting.stderr || checkoutExisting.stdout}`);
-      }
-    }
-    goal.git.branchName = branchName;
+    this.pushGoalEvent(goal.id, "git", `基线提交: ${goal.git.startedFromRef || "unknown"}`, false);
   }
 
   private async generatePlan(goal: EvolutionGoal, previousRetryAttempts = 0): Promise<{ ok: boolean; retryScheduled?: boolean; error?: string }> {
@@ -332,9 +343,11 @@ export class EvolutionEngine {
       "- 覆盖实现、测试/检查、必要文档更新"
     ].join("\n");
 
-    const result = await this.codex.run({
+    const result = await this.runCodexWithTrace(goal, {
+      stage: "plan",
       taskId: `${goal.id}-plan`,
-      prompt: planPrompt
+      prompt: planPrompt,
+      startedMessage: "开始生成计划"
     });
 
     if (!result.ok) {
@@ -357,13 +370,16 @@ export class EvolutionEngine {
     goal.plan.steps = steps;
     goal.plan.currentStep = Math.min(goal.plan.currentStep, steps.length);
     goal.updatedAt = new Date().toISOString();
+    goal.stage = "plan_ready";
     goal.lastCodexOutput = trimForState(result.output, 4000);
+    this.pushGoalEvent(goal.id, "plan", `计划生成完成，共 ${steps.length} 步`, true);
 
     const state = this.store.readEvolutionState();
     const latest = state.goals.find((item) => item.id === goal.id);
     if (latest) {
       latest.plan.steps = goal.plan.steps.slice();
       latest.plan.currentStep = goal.plan.currentStep;
+      latest.stage = goal.stage;
       latest.updatedAt = goal.updatedAt;
       latest.lastCodexOutput = goal.lastCodexOutput;
       this.store.saveEvolutionState(state);
@@ -389,9 +405,11 @@ export class EvolutionEngine {
       "- 不要输出解释，只需完成代码修改"
     ].join("\n");
 
-    const result = await this.codex.run({
+    const result = await this.runCodexWithTrace(goal, {
+      stage: `step_${stepIndex + 1}`,
       taskId: `${goal.id}-step-${stepIndex + 1}`,
-      prompt
+      prompt,
+      startedMessage: `开始执行步骤 ${stepIndex + 1}`
     });
 
     if (!result.ok) {
@@ -407,10 +425,13 @@ export class EvolutionEngine {
 
     goal.lastCodexOutput = trimForState(result.output, 4000);
     goal.updatedAt = new Date().toISOString();
+    goal.stage = `step_${stepIndex + 1}_done`;
+    this.pushGoalEvent(goal.id, "step", `步骤 ${stepIndex + 1} 执行完成`, true);
 
     const state = this.store.readEvolutionState();
     const latest = state.goals.find((item) => item.id === goal.id);
     if (latest) {
+      latest.stage = goal.stage;
       latest.lastCodexOutput = goal.lastCodexOutput;
       latest.updatedAt = goal.updatedAt;
       this.store.saveEvolutionState(state);
@@ -422,10 +443,14 @@ export class EvolutionEngine {
     goal: EvolutionGoal,
     previousRetryAttempts = 0
   ): Promise<{ ok: boolean; retryScheduled?: boolean; error?: string }> {
+    this.setGoalStage(goal.id, "checks", "执行自动检查");
     let testResult = await this.testRunner.run();
     if (testResult.ok) {
+      this.pushGoalEvent(goal.id, "checks", "检查通过，无需修复", true);
       return { ok: true };
     }
+
+    this.pushGoalEvent(goal.id, "checks", `检查失败，准备自动修复: ${trimForState(testResult.summary, 220)}`, true);
 
     for (let attempt = goal.fixAttempts; attempt < this.options.maxFixAttempts; attempt += 1) {
       const prompt = [
@@ -439,9 +464,12 @@ export class EvolutionEngine {
         "- 修复后保持原有功能"
       ].join("\n");
 
-      const result = await this.codex.run({
+      this.setGoalStage(goal.id, "fix", `执行自动修复 ${attempt + 1}/${this.options.maxFixAttempts}`);
+      const result = await this.runCodexWithTrace(goal, {
+        stage: `fix_${attempt + 1}`,
         taskId: `${goal.id}-fix-${attempt + 1}`,
-        prompt
+        prompt,
+        startedMessage: `开始修复尝试 ${attempt + 1}`
       });
 
       if (!result.ok) {
@@ -459,9 +487,12 @@ export class EvolutionEngine {
       const latest = state.goals.find((item) => item.id === goal.id);
       goal.fixAttempts = attempt + 1;
       goal.updatedAt = new Date().toISOString();
+      goal.stage = `fix_${attempt + 1}_done`;
       goal.lastCodexOutput = trimForState(result.output, 4000);
+      this.pushGoalEvent(goal.id, "fix", `修复尝试 ${attempt + 1} 完成，重新跑检查`, true);
       if (latest) {
         latest.fixAttempts = goal.fixAttempts;
+        latest.stage = goal.stage;
         latest.updatedAt = goal.updatedAt;
         latest.lastCodexOutput = goal.lastCodexOutput;
         this.store.saveEvolutionState(state);
@@ -469,8 +500,11 @@ export class EvolutionEngine {
 
       testResult = await this.testRunner.run();
       if (testResult.ok) {
+        this.pushGoalEvent(goal.id, "checks", `修复后检查通过（尝试 ${attempt + 1}）`, true);
         return { ok: true };
       }
+
+      this.pushGoalEvent(goal.id, "checks", `检查仍未通过: ${trimForState(testResult.summary, 220)}`, true);
     }
 
     return { ok: false, error: testResult.summary || "checks failed after auto-fix" };
@@ -480,6 +514,7 @@ export class EvolutionEngine {
     goal: EvolutionGoal,
     previousRetryAttempts = 0
   ): Promise<{ ok: boolean; retryScheduled?: boolean; error?: string }> {
+    this.setGoalStage(goal.id, "structure", "执行结构审查");
     const prompt = [
       "请审查当前仓库是否有结构重复或明显架构问题。",
       "只输出 JSON：",
@@ -487,9 +522,11 @@ export class EvolutionEngine {
       "如果没有问题，issues 返回空数组。"
     ].join("\n");
 
-    const result = await this.codex.run({
+    const result = await this.runCodexWithTrace(goal, {
+      stage: "structure",
       taskId: `${goal.id}-structure`,
-      prompt
+      prompt,
+      startedMessage: "开始结构审查"
     });
 
     if (!result.ok) {
@@ -512,9 +549,12 @@ export class EvolutionEngine {
     const state = this.store.readEvolutionState();
     const latest = state.goals.find((item) => item.id === goal.id);
     goal.structureIssues = issues;
+    goal.stage = "structure_done";
     goal.updatedAt = new Date().toISOString();
+    this.pushGoalEvent(goal.id, "structure", issues.length > 0 ? `发现 ${issues.length} 个结构问题` : "未发现结构问题", true);
     if (latest) {
       latest.structureIssues = goal.structureIssues;
+      latest.stage = goal.stage;
       latest.updatedAt = goal.updatedAt;
       this.store.saveEvolutionState(state);
     }
@@ -523,7 +563,8 @@ export class EvolutionEngine {
   }
 
   private async commitGoal(goal: EvolutionGoal): Promise<{ ok: boolean; error?: string }> {
-    const changed = await this.runCommand("git", ["status", "--porcelain"]);
+    this.setGoalStage(goal.id, "commit", "检查工作区改动");
+    const changed = await this.runCommand("git", ["status", "--porcelain"], 120000, goal.id);
     if (!changed.ok) {
       return { ok: false, error: changed.error || changed.stderr || changed.stdout };
     }
@@ -534,10 +575,11 @@ export class EvolutionEngine {
       .filter(Boolean);
 
     if (changedLines.length === 0) {
+      this.pushGoalEvent(goal.id, "commit", "无代码改动，跳过提交", true);
       return { ok: true };
     }
 
-    const changedFiles = await this.runCommand("git", ["diff", "--name-only"]);
+    const changedFiles = await this.runCommand("git", ["diff", "--name-only"], 120000, goal.id);
     if (!changedFiles.ok) {
       return { ok: false, error: changedFiles.error || changedFiles.stderr || changedFiles.stdout };
     }
@@ -545,7 +587,7 @@ export class EvolutionEngine {
     const touchedSelf = fileList.includes(SELF_EVOLUTION_FILE);
 
     if (touchedSelf) {
-      const diffResult = await this.runCommand("git", ["diff", "--", SELF_EVOLUTION_FILE]);
+      const diffResult = await this.runCommand("git", ["diff", "--", SELF_EVOLUTION_FILE], 120000, goal.id);
       if (diffResult.ok && diffResult.stdout.trim()) {
         const paths = this.store.getPaths();
         const diffFile = path.join(paths.stateDir, `self-evolution-${goal.id}.diff`);
@@ -559,8 +601,9 @@ export class EvolutionEngine {
           this.store.saveEvolutionState(state);
         }
       }
+      this.pushGoalEvent(goal.id, "commit", `检测到自修改，diff 已保存: ${SELF_EVOLUTION_FILE}`, true);
 
-      const addSelf = await this.runCommand("git", ["add", SELF_EVOLUTION_FILE]);
+      const addSelf = await this.runCommand("git", ["add", SELF_EVOLUTION_FILE], 120000, goal.id);
       if (!addSelf.ok) {
         return { ok: false, error: addSelf.error || addSelf.stderr || addSelf.stdout };
       }
@@ -569,15 +612,17 @@ export class EvolutionEngine {
         "--allow-empty",
         "-m",
         `chore(evolution): self-update for ${goal.id}`
-      ]);
+      ], 120000, goal.id);
       if (!selfCommit.ok) {
         return { ok: false, error: selfCommit.error || selfCommit.stderr || selfCommit.stdout };
       }
+      this.pushGoalEvent(goal.id, "commit", "自修改已提交，开始自检", true);
 
       const selfCheck = await this.testRunner.run();
       if (!selfCheck.ok) {
         if (this.options.rollbackOnFailure) {
-          await this.runCommand("git", ["reset", "--hard", "HEAD~1"]);
+          await this.runCommand("git", ["reset", "--hard", "HEAD~1"], 120000, goal.id);
+          this.pushGoalEvent(goal.id, "rollback", "自修改自检失败，已执行 rollback HEAD~1", true);
         }
         return {
           ok: false,
@@ -586,15 +631,16 @@ export class EvolutionEngine {
       }
     }
 
-    const addAll = await this.runCommand("git", ["add", "-A"]);
+    const addAll = await this.runCommand("git", ["add", "-A"], 120000, goal.id);
     if (!addAll.ok) {
       return { ok: false, error: addAll.error || addAll.stderr || addAll.stdout };
     }
 
-    const commit = await this.runCommand("git", ["commit", "--allow-empty", "-m", goal.commitMessage]);
+    const commit = await this.runCommand("git", ["commit", "--allow-empty", "-m", goal.commitMessage], 120000, goal.id);
     if (!commit.ok) {
       return { ok: false, error: commit.error || commit.stderr || commit.stdout };
     }
+    this.pushGoalEvent(goal.id, "commit", `变更已提交: ${goal.commitMessage}`, true);
 
     return { ok: true };
   }
@@ -606,10 +652,12 @@ export class EvolutionEngine {
       return;
     }
     goal.status = "succeeded";
+    goal.stage = "succeeded";
     goal.completedAt = new Date().toISOString();
     goal.updatedAt = goal.completedAt;
     goal.nextRetryAt = undefined;
     goal.lastError = undefined;
+    appendGoalEvent(goal, "engine", "Goal 执行成功", true);
 
     const historyEntry: EvolutionGoalHistory = {
       id: goal.id,
@@ -648,10 +696,12 @@ export class EvolutionEngine {
     }
 
     goal.status = "failed";
+    goal.stage = "failed";
     goal.completedAt = new Date().toISOString();
     goal.updatedAt = goal.completedAt;
     goal.lastError = trimForState(errorMessage, 1600);
     goal.nextRetryAt = undefined;
+    appendGoalEvent(goal, "error", goal.lastError || "Goal 执行失败", true);
 
     const historyEntry: EvolutionGoalHistory = {
       id: goal.id,
@@ -683,7 +733,8 @@ export class EvolutionEngine {
     this.clearRetryItemsForGoal(goal.id);
 
     if (this.options.rollbackOnFailure) {
-      await this.runCommand("git", ["reset", "--hard", "stable"]);
+      await this.runCommand("git", ["reset", "--hard", "stable"], 120000, goal.id);
+      this.pushGoalEvent(goal.id, "rollback", "执行失败后已回滚到 stable", true);
     }
   }
 
@@ -709,10 +760,12 @@ export class EvolutionEngine {
     }
 
     goal.status = "waiting_retry";
+    goal.stage = "waiting_retry";
     goal.retries += 1;
     goal.nextRetryAt = retryAt;
     goal.lastError = trimForState(errorMessage, 1000);
     goal.updatedAt = new Date().toISOString();
+    appendGoalEvent(goal, "retry", `触发重试(${taskType})，将在 ${retryAt} 重试`, true);
     state.status = "idle";
     state.currentGoalId = null;
     state.updatedAt = goal.updatedAt;
@@ -771,7 +824,112 @@ export class EvolutionEngine {
     this.store.saveRetryQueue(retryState);
   }
 
-  private async runCommand(command: string, args: string[], timeoutMs = 120000): Promise<CommandResult> {
+  private async runCodexWithTrace(
+    goal: EvolutionGoal,
+    input: {
+      stage: string;
+      taskId: string;
+      prompt: string;
+      startedMessage: string;
+    }
+  ): Promise<CodexRunResult> {
+    this.setGoalStage(goal.id, input.stage, input.startedMessage, true);
+    goal.stage = input.stage;
+
+    return this.codex.run({
+      taskId: input.taskId,
+      prompt: input.prompt,
+      onEvent: (event) => {
+        this.handleCodexEvent(goal.id, input.taskId, event);
+      }
+    });
+  }
+
+  private handleCodexEvent(goalId: string, taskId: string, event: CodexRunEvent): void {
+    if (event.type === "started") {
+      this.pushGoalEvent(goalId, "codex", `codex 任务已启动: ${taskId}`, true);
+      return;
+    }
+
+    if (event.type === "stdout" || event.type === "stderr") {
+      const line = event.line.trim();
+      if (!line) {
+        return;
+      }
+      this.pushGoalRawLine(goalId, `[codex ${event.type}] ${line}`);
+
+      const parsed = parseCodexProgressLine(line);
+      if (parsed) {
+        this.pushGoalEvent(goalId, "codex", parsed, false);
+        return;
+      }
+
+      if (event.type === "stderr" && line.toLowerCase().includes("error")) {
+        this.pushGoalEvent(goalId, "error", trimForState(line, 260), true);
+      }
+      return;
+    }
+
+    if (event.type === "timeout") {
+      this.pushGoalEvent(goalId, "error", `codex 执行超时 (${event.timeoutMs}ms): ${taskId}`, true);
+      return;
+    }
+
+    if (event.type === "error") {
+      this.pushGoalEvent(goalId, "error", event.message, true);
+      return;
+    }
+
+    if (event.type === "closed") {
+      this.pushGoalEvent(
+        goalId,
+        "codex",
+        event.ok
+          ? `codex 任务完成: ${taskId}`
+          : `codex 任务失败: ${taskId}, code=${event.code ?? "null"}${event.signal ? `, signal=${event.signal}` : ""}`,
+        true
+      );
+    }
+  }
+
+  private setGoalStage(goalId: string, stage: string, message?: string, important = false): void {
+    this.updateGoal(goalId, (goal) => {
+      goal.stage = trimForState(String(stage || "").trim() || "running", 80);
+      if (message) {
+        appendGoalEvent(goal, goal.stage, message, important);
+      }
+    });
+  }
+
+  private pushGoalEvent(goalId: string, stage: string, message: string, important = false): void {
+    this.updateGoal(goalId, (goal) => {
+      appendGoalEvent(goal, stage, message, important);
+    });
+  }
+
+  private pushGoalRawLine(goalId: string, line: string): void {
+    this.updateGoal(goalId, (goal) => {
+      appendGoalRawLine(goal, line);
+    });
+  }
+
+  private updateGoal(goalId: string, updater: (goal: EvolutionGoal) => void): void {
+    const state = this.store.readEvolutionState();
+    const goal = state.goals.find((item) => item.id === goalId);
+    if (!goal) {
+      return;
+    }
+    updater(goal);
+    goal.updatedAt = new Date().toISOString();
+    state.updatedAt = goal.updatedAt;
+    this.store.saveEvolutionState(state);
+  }
+
+  private async runCommand(command: string, args: string[], timeoutMs = 120000, goalId?: string): Promise<CommandResult> {
+    if (goalId) {
+      this.pushGoalEvent(goalId, "cmd", `${command} ${args.map((item) => safePreview(item)).join(" ")}`, true);
+    }
+
     return new Promise((resolve) => {
       const child = spawn(command, args, {
         cwd: process.cwd(),
@@ -786,6 +944,17 @@ export class EvolutionEngine {
         if (finished) return;
         finished = true;
         child.kill("SIGKILL");
+        if (goalId) {
+          this.pushGoalEvent(goalId, "error", `${command} 超时 (${timeoutMs}ms)`, true);
+          const stdoutTail = trimForState(stdout, 600).trim();
+          const stderrTail = trimForState(stderr, 600).trim();
+          if (stdoutTail) {
+            this.pushGoalRawLine(goalId, `[${command} stdout] ${stdoutTail}`);
+          }
+          if (stderrTail) {
+            this.pushGoalRawLine(goalId, `[${command} stderr] ${stderrTail}`);
+          }
+        }
         resolve({
           ok: false,
           stdout: trimForState(stdout, 3000),
@@ -808,6 +977,9 @@ export class EvolutionEngine {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
+        if (goalId) {
+          this.pushGoalEvent(goalId, "error", `${command} 启动失败: ${(error as Error).message}`, true);
+        }
         resolve({
           ok: false,
           stdout: trimForState(stdout, 3000),
@@ -822,6 +994,27 @@ export class EvolutionEngine {
         if (finished) return;
         finished = true;
         clearTimeout(timer);
+        if (goalId) {
+          const stdoutTail = tailLines(stdout, 4);
+          const stderrTail = tailLines(stderr, 4);
+          for (const line of stdoutTail) {
+            this.pushGoalRawLine(goalId, `[${command} stdout] ${line}`);
+          }
+          for (const line of stderrTail) {
+            this.pushGoalRawLine(goalId, `[${command} stderr] ${line}`);
+          }
+
+          if (code === 0) {
+            this.pushGoalEvent(goalId, "cmd", `${command} 执行成功`, false);
+          } else {
+            this.pushGoalEvent(
+              goalId,
+              "error",
+              `${command} 执行失败: code=${typeof code === "number" ? code : "null"}${signal ? `, signal=${signal}` : ""}`,
+              true
+            );
+          }
+        }
         resolve({
           ok: code === 0,
           stdout: trimForState(stdout, 3000),
@@ -929,6 +1122,100 @@ function tailToText(lines: string[]): string {
     return "";
   }
   return lines.slice(-8).join("\n");
+}
+
+function appendGoalEvent(goal: EvolutionGoal, stage: string, message: string, important = false): void {
+  const text = String(message ?? "").trim();
+  if (!text) {
+    return;
+  }
+  const stageText = String(stage ?? "").trim() || "event";
+  goal.events.push({
+    at: new Date().toISOString(),
+    stage: stageText.slice(0, 80),
+    message: text.slice(0, 500),
+    important: !!important
+  });
+  if (goal.events.length > MAX_GOAL_EVENTS) {
+    goal.events.splice(0, goal.events.length - MAX_GOAL_EVENTS);
+  }
+}
+
+function appendGoalRawLine(goal: EvolutionGoal, line: string): void {
+  const text = String(line ?? "").trim();
+  if (!text) {
+    return;
+  }
+  goal.rawTail.push({
+    at: new Date().toISOString(),
+    line: text.slice(0, 600)
+  });
+  if (goal.rawTail.length > MAX_GOAL_RAW_LINES) {
+    goal.rawTail.splice(0, goal.rawTail.length - MAX_GOAL_RAW_LINES);
+  }
+}
+
+function parseCodexProgressLine(line: string): string | null {
+  const text = String(line ?? "").trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return null;
+  }
+  let parsed: Record<string, unknown> | null = null;
+  try {
+    const payload = JSON.parse(text);
+    parsed = isRecord(payload) ? payload : null;
+  } catch {
+    parsed = null;
+  }
+  if (!parsed) {
+    return null;
+  }
+
+  const type = typeof parsed.type === "string" ? parsed.type : "";
+  if (!type) {
+    return null;
+  }
+
+  if (type === "thread.started") {
+    const threadId = typeof parsed.thread_id === "string" ? parsed.thread_id : "";
+    return threadId ? `thread started (${threadId})` : "thread started";
+  }
+  if (type === "turn.started") return "turn started";
+  if (type === "turn.completed") return "turn completed";
+  if (type === "turn.failed") {
+    const error = isRecord(parsed.error) && typeof parsed.error.message === "string"
+      ? parsed.error.message
+      : "turn failed";
+    return `turn failed: ${error}`;
+  }
+  if (type === "error") {
+    return `error: ${typeof parsed.message === "string" ? parsed.message : "unknown error"}`;
+  }
+  if (type.startsWith("agent_message") || type.includes("completed")) {
+    return type;
+  }
+  return null;
+}
+
+function tailLines(text: string, maxLines: number): string[] {
+  const clipped = String(text ?? "").trim();
+  if (!clipped) {
+    return [];
+  }
+  return clipped
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-Math.max(1, maxLines))
+    .map((line) => line.slice(0, 500));
+}
+
+function safePreview(text: string): string {
+  const value = String(text ?? "");
+  if (/^[a-zA-Z0-9._/\-]+$/.test(value)) {
+    return value;
+  }
+  return JSON.stringify(value);
 }
 
 function roundMetric(total: number, count: number): number {
