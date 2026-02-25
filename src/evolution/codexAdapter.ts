@@ -6,6 +6,8 @@ export type CodexRunRequest = {
   taskId: string;
   prompt: string;
   timeoutMs?: number;
+  model?: string;
+  reasoningEffort?: string;
   onEvent?: (event: CodexRunEvent) => void;
 };
 
@@ -55,6 +57,8 @@ type CodexAdapterOptions = {
   outputDir: string;
   timeoutMs: number;
   maxRawLines: number;
+  model: string;
+  reasoningEffort: string;
 };
 
 export class CodexAdapter {
@@ -67,7 +71,9 @@ export class CodexAdapter {
       rootDir,
       outputDir,
       timeoutMs: options?.timeoutMs ?? parseInt(process.env.EVOLUTION_CODEX_TIMEOUT_MS ?? "900000", 10),
-      maxRawLines: options?.maxRawLines ?? 120
+      maxRawLines: options?.maxRawLines ?? 120,
+      model: String(options?.model ?? "").trim(),
+      reasoningEffort: String(options?.reasoningEffort ?? "").trim().toLowerCase()
     };
     if (!fs.existsSync(this.options.outputDir)) {
       fs.mkdirSync(this.options.outputDir, { recursive: true });
@@ -96,6 +102,14 @@ export class CodexAdapter {
       outputFile,
       request.prompt
     ];
+    const model = resolveCodexModel(request.model, this.options.model);
+    if (model) {
+      args.splice(args.length - 1, 0, "--model", model);
+    }
+    const reasoningEffort = resolveCodexReasoningEffort(request.reasoningEffort, this.options.reasoningEffort);
+    if (reasoningEffort) {
+      args.splice(args.length - 1, 0, "--config", `model_reasoning_effort=${formatTomlString(reasoningEffort)}`);
+    }
 
     return new Promise((resolve) => {
       emitCodexEvent(request.onEvent, {
@@ -340,4 +354,39 @@ function emitCodexEvent(listener: CodexRunRequest["onEvent"], event: CodexRunEve
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function resolveCodexModel(...candidates: Array<string | undefined>): string {
+  const fromOptions = candidates.find((item) => typeof item === "string" && item.trim().length > 0);
+  if (fromOptions) {
+    return fromOptions.trim();
+  }
+  const fromEnv = String(process.env.EVOLUTION_CODEX_MODEL ?? process.env.CODEX_MODEL ?? "").trim();
+  return fromEnv;
+}
+
+function resolveCodexReasoningEffort(...candidates: Array<string | undefined>): string {
+  for (const candidate of candidates) {
+    const normalized = normalizeReasoningEffort(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return normalizeReasoningEffort(
+    process.env.EVOLUTION_CODEX_REASONING_EFFORT
+      ?? process.env.CODEX_MODEL_REASONING_EFFORT
+      ?? process.env.CODEX_REASONING_EFFORT
+  );
+}
+
+function normalizeReasoningEffort(value: unknown): string {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (!text) {
+    return "";
+  }
+  return text;
+}
+
+function formatTomlString(value: string): string {
+  return JSON.stringify(value);
 }

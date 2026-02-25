@@ -35,10 +35,13 @@ export default function App() {
   const [modelDraft, setModelDraft] = useState("");
   const [planningModelDraft, setPlanningModelDraft] = useState("");
   const [planningTimeoutDraft, setPlanningTimeoutDraft] = useState("");
+  const [codexModelDraft, setCodexModelDraft] = useState("");
+  const [codexReasoningEffortDraft, setCodexReasoningEffortDraft] = useState("");
 
   const [notice, setNotice] = useState<Notice>(null);
 
   const [savingModel, setSavingModel] = useState(false);
+  const [savingCodexConfig, setSavingCodexConfig] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [pullingRepo, setPullingRepo] = useState(false);
   const [buildingRepo, setBuildingRepo] = useState(false);
@@ -171,6 +174,8 @@ export default function App() {
     setModelDraft(payload.model || "");
     setPlanningModelDraft(payload.planningModel || "");
     setPlanningTimeoutDraft(payload.planningTimeoutMs || "");
+    setCodexModelDraft(payload.codexModel || "");
+    setCodexReasoningEffortDraft(payload.codexReasoningEffort || "");
   }
 
   async function loadModels(): Promise<void> {
@@ -285,6 +290,38 @@ export default function App() {
       notifyError("pm2 重启失败", error);
     } finally {
       setRestarting(false);
+    }
+  }
+
+  async function handleSaveCodexConfig(): Promise<void> {
+    const model = codexModelDraft.trim();
+    const reasoningEffort = codexReasoningEffortDraft.trim().toLowerCase();
+    if (reasoningEffort) {
+      const allowedValues = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+      if (!allowedValues.has(reasoningEffort)) {
+        setNotice({ type: "error", title: "Codex Reasoning Effort 仅支持 minimal/low/medium/high/xhigh" });
+        return;
+      }
+    }
+
+    setSavingCodexConfig(true);
+    try {
+      await request<{ ok: boolean }>("/admin/api/config/codex", {
+        method: "POST",
+        body: JSON.stringify({
+          model,
+          reasoningEffort
+        })
+      });
+      await loadConfig();
+      setNotice({
+        type: "success",
+        title: "Codex 配置已保存"
+      });
+    } catch (error) {
+      notifyError("保存 Codex 配置失败", error);
+    } finally {
+      setSavingCodexConfig(false);
     }
   }
 
@@ -901,7 +938,10 @@ export default function App() {
           modelDraft={modelDraft}
           planningModelDraft={planningModelDraft}
           planningTimeoutDraft={planningTimeoutDraft}
+          codexModelDraft={codexModelDraft}
+          codexReasoningEffortDraft={codexReasoningEffortDraft}
           savingModel={savingModel}
+          savingCodexConfig={savingCodexConfig}
           restarting={restarting}
           pullingRepo={pullingRepo}
           buildingRepo={buildingRepo}
@@ -910,8 +950,11 @@ export default function App() {
           onPlanningModelSelect={setPlanningModelDraft}
           onPlanningModelDraftChange={setPlanningModelDraft}
           onPlanningTimeoutDraftChange={setPlanningTimeoutDraft}
+          onCodexModelDraftChange={setCodexModelDraft}
+          onCodexReasoningEffortDraftChange={setCodexReasoningEffortDraft}
           onRefreshModels={() => void loadModels()}
           onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
+          onSaveCodexConfig={() => void handleSaveCodexConfig()}
           onRestartPm2={() => void handleRestartPm2()}
           onPullRepo={() => void handlePullRepo()}
           onBuildRepo={() => void handleBuildRepo()}

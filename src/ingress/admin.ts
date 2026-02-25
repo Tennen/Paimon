@@ -121,6 +121,8 @@ const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   }
 };
 
+const CODEX_REASONING_EFFORT_OPTIONS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
+
 export class AdminIngressAdapter implements IngressAdapter {
   private readonly envStore: EnvConfigStore;
   private readonly scheduler: SchedulerService;
@@ -154,6 +156,8 @@ export class AdminIngressAdapter implements IngressAdapter {
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
         planningTimeoutMs: getEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS"),
+        codexModel: getCodexModel(envPath),
+        codexReasoningEffort: getCodexReasoningEffort(envPath),
         envPath,
         taskStorePath: this.scheduler.getStorePath(),
         userStorePath: this.scheduler.getUserStorePath(),
@@ -303,6 +307,95 @@ export class AdminIngressAdapter implements IngressAdapter {
           model,
           planningModel: effectivePlanningModel,
           planningTimeoutMs: effectivePlanningTimeoutMs,
+          restarted: false,
+          error: (error as Error).message ?? "pm2 restart failed"
+        });
+      }
+    });
+
+    app.post("/admin/api/config/codex", async (req: Request, res: ExResponse) => {
+      const body = (req.body ?? {}) as {
+        model?: unknown;
+        codexModel?: unknown;
+        reasoningEffort?: unknown;
+        codexReasoningEffort?: unknown;
+        restart?: unknown;
+      };
+      const envPath = this.envStore.getPath();
+
+      const hasModel = "model" in body || "codexModel" in body;
+      const hasReasoningEffort = "reasoningEffort" in body || "codexReasoningEffort" in body;
+      if (!hasModel && !hasReasoningEffort) {
+        res.status(400).json({ error: "model or reasoningEffort is required" });
+        return;
+      }
+
+      const modelRaw = "codexModel" in body ? body.codexModel : body.model;
+      const model = typeof modelRaw === "string" ? modelRaw.trim() : null;
+      if (hasModel && model === null) {
+        res.status(400).json({ error: "model must be a string" });
+        return;
+      }
+
+      const reasoningEffortRaw = "codexReasoningEffort" in body
+        ? body.codexReasoningEffort
+        : body.reasoningEffort;
+      const normalizedReasoningEffort = normalizeCodexReasoningEffort(reasoningEffortRaw);
+      if (hasReasoningEffort && normalizedReasoningEffort === null) {
+        res.status(400).json({
+          error: "reasoningEffort must be one of: minimal, low, medium, high, xhigh, or empty"
+        });
+        return;
+      }
+
+      try {
+        if (hasModel) {
+          if (model) {
+            setEnvValue(envPath, "EVOLUTION_CODEX_MODEL", model);
+          } else {
+            unsetEnvValue(envPath, "EVOLUTION_CODEX_MODEL");
+          }
+        }
+
+        if (hasReasoningEffort && normalizedReasoningEffort !== null) {
+          if (normalizedReasoningEffort) {
+            setEnvValue(envPath, "EVOLUTION_CODEX_REASONING_EFFORT", normalizedReasoningEffort);
+          } else {
+            unsetEnvValue(envPath, "EVOLUTION_CODEX_REASONING_EFFORT");
+          }
+        }
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message ?? "failed to save codex config" });
+        return;
+      }
+
+      const codexModel = getCodexModel(envPath);
+      const codexReasoningEffort = getCodexReasoningEffort(envPath);
+      const restart = parseOptionalBoolean(body.restart) ?? false;
+      if (!restart) {
+        res.json({
+          ok: true,
+          codexModel,
+          codexReasoningEffort,
+          restarted: false
+        });
+        return;
+      }
+
+      try {
+        const output = await restartPm2();
+        res.json({
+          ok: true,
+          codexModel,
+          codexReasoningEffort,
+          restarted: true,
+          output
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          codexModel,
+          codexReasoningEffort,
           restarted: false,
           error: (error as Error).message ?? "pm2 restart failed"
         });
@@ -1692,6 +1785,42 @@ function getEnvValue(envPath: string, key: string): string {
   return values[key] ?? process.env[key] ?? "";
 }
 
+function getCodexModel(envPath: string): string {
+  const values = readEnvValues(envPath);
+  const candidates = [
+    values.EVOLUTION_CODEX_MODEL,
+    values.CODEX_MODEL,
+    process.env.EVOLUTION_CODEX_MODEL,
+    process.env.CODEX_MODEL
+  ];
+  for (const candidate of candidates) {
+    const text = String(candidate ?? "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function getCodexReasoningEffort(envPath: string): string {
+  const values = readEnvValues(envPath);
+  const candidates = [
+    values.EVOLUTION_CODEX_REASONING_EFFORT,
+    values.CODEX_MODEL_REASONING_EFFORT,
+    values.CODEX_REASONING_EFFORT,
+    process.env.EVOLUTION_CODEX_REASONING_EFFORT,
+    process.env.CODEX_MODEL_REASONING_EFFORT,
+    process.env.CODEX_REASONING_EFFORT
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeCodexReasoningEffort(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return "";
+}
+
 function setEnvValue(envPath: string, key: string, value: string): void {
   const text = value.trim();
   if (!text) {
@@ -1781,6 +1910,23 @@ function normalizeOptionalIntegerString(value: unknown): string | null {
   }
 
   return String(Math.floor(parsed));
+}
+
+function normalizeCodexReasoningEffort(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const text = value.trim().toLowerCase();
+  if (!text) {
+    return "";
+  }
+  if (!CODEX_REASONING_EFFORT_OPTIONS.has(text)) {
+    return null;
+  }
+  return text;
 }
 
 async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] }> {

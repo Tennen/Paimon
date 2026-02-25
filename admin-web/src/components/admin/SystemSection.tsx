@@ -26,7 +26,10 @@ type SystemSectionProps = {
   modelDraft: string;
   planningModelDraft: string;
   planningTimeoutDraft: string;
+  codexModelDraft: string;
+  codexReasoningEffortDraft: string;
   savingModel: boolean;
+  savingCodexConfig: boolean;
   restarting: boolean;
   pullingRepo: boolean;
   buildingRepo: boolean;
@@ -35,8 +38,11 @@ type SystemSectionProps = {
   onPlanningModelSelect: (value: string) => void;
   onPlanningModelDraftChange: (value: string) => void;
   onPlanningTimeoutDraftChange: (value: string) => void;
+  onCodexModelDraftChange: (value: string) => void;
+  onCodexReasoningEffortDraftChange: (value: string) => void;
   onRefreshModels: () => void;
   onSaveModel: (restartAfterSave: boolean) => void;
+  onSaveCodexConfig: () => void;
   onRestartPm2: () => void;
   onPullRepo: () => void;
   onBuildRepo: () => void;
@@ -123,6 +129,35 @@ export function SystemSection(props: SystemSectionProps) {
               placeholder="留空则沿用 LLM_TIMEOUT_MS"
             />
           </div>
+
+          <div className="space-y-2">
+            <Label>Codex 模型（可选）</Label>
+            <Input
+              value={props.codexModelDraft}
+              onChange={(event) => props.onCodexModelDraftChange(event.target.value)}
+              placeholder="留空则使用 Codex 默认模型"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label>Codex Reasoning Effort（可选）</Label>
+            <Select
+              value={props.codexReasoningEffortDraft || "__empty__"}
+              onValueChange={(value) => props.onCodexReasoningEffortDraftChange(value === "__empty__" ? "" : value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="留空则使用 Codex 默认值" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__empty__">默认（不覆盖）</SelectItem>
+                <SelectItem value="minimal">minimal</SelectItem>
+                <SelectItem value="low">low</SelectItem>
+                <SelectItem value="medium">medium</SelectItem>
+                <SelectItem value="high">high</SelectItem>
+                <SelectItem value="xhigh">xhigh</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -134,6 +169,9 @@ export function SystemSection(props: SystemSectionProps) {
           </Button>
           <Button type="button" disabled={props.savingModel} variant="secondary" onClick={() => props.onSaveModel(true)}>
             {props.savingModel ? "处理中..." : "保存并重启"}
+          </Button>
+          <Button type="button" variant="secondary" disabled={props.savingCodexConfig} onClick={props.onSaveCodexConfig}>
+            {props.savingCodexConfig ? "保存中..." : "保存 Codex 配置"}
           </Button>
           <Button type="button" variant="destructive" disabled={props.restarting} onClick={props.onRestartPm2}>
             {props.restarting ? "重启中..." : "重启应用进程（pm2）"}
@@ -153,6 +191,8 @@ export function SystemSection(props: SystemSectionProps) {
           <div className="mono">planningModel: {props.config?.planningModel || "(follow OLLAMA_MODEL)"}</div>
           <div className="mono">timezone: {props.config?.timezone ?? "-"}</div>
           <div className="mono">planningTimeoutMs: {props.config?.planningTimeoutMs || "(follow LLM_TIMEOUT_MS)"}</div>
+          <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
+          <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
           <div className="mono">taskStore: {props.config?.taskStorePath ?? "-"}</div>
           <div className="mono">tickMs: {props.config?.tickMs ?? "-"}</div>
           <div className="mono md:col-span-2">userStore: {props.config?.userStorePath ?? "-"}</div>
