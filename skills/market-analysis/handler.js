@@ -756,7 +756,6 @@ function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
     "你是市场分析解释器。",
     "只能解释给定 signalResult，不得更改信号，不得新增决策，不得改变风险等级。",
     "输出简短中文总结，最多 6 句话。",
-    "",
     "输入数据(JSON):",
     JSON.stringify({
       signalResult: signalResult || null,
