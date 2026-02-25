@@ -37,6 +37,8 @@ type CommandResult = {
   error?: string;
 };
 
+export type CommitMessageSource = "user" | "generated" | "fallback";
+
 const SELF_EVOLUTION_FILE = "src/evolution/evolutionEngine.ts";
 const MAX_GOAL_EVENTS = 80;
 const MAX_GOAL_RAW_LINES = 120;
@@ -100,12 +102,14 @@ export class EvolutionEngine {
       if (!goal) {
         throw new Error("goal is required");
       }
-      const commitMessage = normalizeCommitMessage(input.commitMessage, goal);
+      const commitMessageProvidedByUser = typeof input.commitMessage === "string";
+      const commitMessage = commitMessageProvidedByUser ? input.commitMessage ?? "" : "";
       const id = createGoalId();
       const created = this.store.appendGoal({
         id,
         goal,
-        commitMessage
+        commitMessage,
+        ...(commitMessageProvidedByUser ? { commitMessageProvidedByUser: true } : {})
       });
       this.store.bumpMetricsForNewGoal();
       return created;
@@ -294,6 +298,13 @@ export class EvolutionEngine {
       const committed = await this.commitGoal(goal);
       if (!committed.ok) {
         await this.failGoal(goal.id, committed.error || "commit failed");
+        return;
+      }
+
+      this.setGoalStage(goal.id, "push", "准备推送远端");
+      const pushed = await this.pushGoal(goal);
+      if (!pushed.ok) {
+        await this.failGoal(goal.id, pushed.error || "push failed");
         return;
       }
 
@@ -636,13 +647,191 @@ export class EvolutionEngine {
       return { ok: false, error: addAll.error || addAll.stderr || addAll.stdout };
     }
 
-    const commit = await this.runCommand("git", ["commit", "--allow-empty", "-m", goal.commitMessage], 120000, goal.id);
+    const commitMessage = await this.resolveCommitMessage(goal);
+    goal.commitMessage = commitMessage;
+    this.updateGoal(goal.id, (latest) => {
+      latest.commitMessage = commitMessage;
+    });
+
+    const commit = await this.runCommand("git", ["commit", "--allow-empty", "-m", commitMessage], 120000, goal.id);
     if (!commit.ok) {
       return { ok: false, error: commit.error || commit.stderr || commit.stdout };
     }
-    this.pushGoalEvent(goal.id, "commit", `变更已提交: ${goal.commitMessage}`, true);
+    this.pushGoalEvent(goal.id, "commit", `变更已提交: ${commitMessage}`, true);
 
     return { ok: true };
+  }
+
+  private async pushGoal(goal: EvolutionGoal): Promise<{ ok: boolean; error?: string }> {
+    const target = await this.resolvePushTarget(goal.id);
+    if (!target.ok) {
+      this.updateGoal(goal.id, (latest) => {
+        latest.git.push = {
+          ...(latest.git.push ?? {}),
+          lastError: trimForState(target.error, 800)
+        };
+      });
+      this.pushGoalEvent(goal.id, "push", `推送目标解析失败: ${trimForState(target.error, 220)}`, true);
+      return { ok: false, error: target.error };
+    }
+
+    const headResult = await this.runCommand("git", ["rev-parse", "HEAD"], 120000, goal.id);
+    if (!headResult.ok) {
+      const error = headResult.error || headResult.stderr || headResult.stdout || "failed to resolve HEAD";
+      this.updateGoal(goal.id, (latest) => {
+        latest.git.push = {
+          ...(latest.git.push ?? {}),
+          remote: target.remote,
+          branch: target.branch,
+          lastError: trimForState(error, 800)
+        };
+      });
+      return { ok: false, error };
+    }
+    const commit = headResult.stdout.trim();
+
+    const pushResult = await this.runCommand("git", ["push", target.remote, `HEAD:${target.branch}`], 120000, goal.id);
+    if (!pushResult.ok) {
+      const error = pushResult.error || pushResult.stderr || pushResult.stdout || "git push failed";
+      this.updateGoal(goal.id, (latest) => {
+        latest.git.push = {
+          ...(latest.git.push ?? {}),
+          remote: target.remote,
+          branch: target.branch,
+          commit,
+          lastError: trimForState(error, 800)
+        };
+      });
+      this.pushGoalEvent(goal.id, "push", `推送失败: ${trimForState(error, 220)}`, true);
+      return { ok: false, error };
+    }
+
+    const pushedAt = new Date().toISOString();
+    this.updateGoal(goal.id, (latest) => {
+      latest.git.push = {
+        ...(latest.git.push ?? {}),
+        remote: target.remote,
+        branch: target.branch,
+        commit,
+        pushedAt,
+        lastError: undefined
+      };
+    });
+    this.pushGoalEvent(goal.id, "push", `推送成功: ${target.remote} ${target.branch} (${commit.slice(0, 12)})`, true);
+    return { ok: true };
+  }
+
+  private async resolvePushTarget(goalId: string): Promise<{ ok: true; remote: string; branch: string } | { ok: false; error: string }> {
+    const envRemote = normalizeOptionalName(process.env.EVOLUTION_GIT_PUSH_REMOTE);
+    const envBranch = normalizeOptionalName(process.env.EVOLUTION_GIT_PUSH_BRANCH);
+
+    const upstreamResult = await this.runCommand(
+      "git",
+      ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+      120000,
+      goalId
+    );
+    const upstreamParsed = upstreamResult.ok ? parseUpstreamRef(upstreamResult.stdout.trim()) : null;
+    if (!upstreamResult.ok) {
+      this.pushGoalEvent(
+        goalId,
+        "push",
+        `读取 upstream 失败: ${trimForState(upstreamResult.error || upstreamResult.stderr || upstreamResult.stdout, 200)}`,
+        true
+      );
+    }
+    return resolvePushTargetFromInputs({
+      envRemote,
+      envBranch,
+      upstreamRef: upstreamParsed ? `${upstreamParsed.remote}/${upstreamParsed.branch}` : ""
+    });
+  }
+
+  private async resolveCommitMessage(goal: EvolutionGoal): Promise<string> {
+    const stagedFilesResult = await this.runCommand("git", ["diff", "--cached", "--name-only"], 120000, goal.id);
+    const stagedFiles = stagedFilesResult.ok
+      ? stagedFilesResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      : [];
+    if (!stagedFilesResult.ok) {
+      this.pushGoalEvent(
+        goal.id,
+        "commit",
+        `读取 staged 文件失败，将使用 fallback: ${trimForState(stagedFilesResult.error || stagedFilesResult.stderr || stagedFilesResult.stdout, 200)}`,
+        true
+      );
+    }
+
+    const stagedDiffResult = await this.runCommand("git", ["diff", "--cached", "--", "."], 120000, goal.id);
+    const stagedDiff = stagedDiffResult.ok ? stagedDiffResult.stdout : "";
+    if (!stagedDiffResult.ok) {
+      this.pushGoalEvent(
+        goal.id,
+        "commit",
+        `读取 staged diff 失败，将使用 fallback: ${trimForState(stagedDiffResult.error || stagedDiffResult.stderr || stagedDiffResult.stdout, 200)}`,
+        true
+      );
+    }
+
+    const generated = await this.generateCommitMessageWithCodex(goal, stagedFiles, stagedDiff);
+    const fallback = buildDeterministicCommitMessage(goal.goal, stagedFiles, stagedDiff);
+    const selected = selectCommitMessage({
+      commitMessageProvidedByUser: goal.commitMessageProvidedByUser === true,
+      userCommitMessage: goal.commitMessage,
+      generatedCommitMessage: generated,
+      fallbackCommitMessage: fallback
+    });
+    if (selected.source === "user") {
+      this.pushGoalEvent(goal.id, "commit", `使用用户提供的 commit message: ${selected.message}`, true);
+    } else if (selected.source === "generated") {
+      this.pushGoalEvent(goal.id, "commit", `自动生成 commit message: ${selected.message}`, true);
+    } else {
+      this.pushGoalEvent(goal.id, "commit", `commit message 生成失败，使用 fallback: ${selected.message}`, true);
+    }
+    return selected.message;
+  }
+
+  private async generateCommitMessageWithCodex(
+    goal: EvolutionGoal,
+    stagedFiles: string[],
+    stagedDiff: string
+  ): Promise<string> {
+    const filesPreview = stagedFiles.length > 0 ? stagedFiles.slice(0, 60).join("\n") : "(none)";
+    const diffPreview = clipForPrompt(stagedDiff, 12000);
+    const prompt = [
+      "你是资深 Git 提交信息生成助手。",
+      "请仅基于给定 staged diff 生成一行 commit message。",
+      "约束：",
+      "- 只输出最终 commit message，不要 markdown，不要解释",
+      "- 使用英文，单行，不超过 72 字符",
+      "- 优先使用 Conventional Commits（feat/fix/chore/refactor/test/docs）",
+      "",
+      `GOAL: ${goal.goal}`,
+      "",
+      "STAGED FILES:",
+      filesPreview,
+      "",
+      "STAGED DIFF:",
+      diffPreview || "(empty)"
+    ].join("\n");
+
+    const result = await this.runCodexWithTrace(goal, {
+      stage: "commit_message",
+      taskId: `${goal.id}-commit-message`,
+      prompt,
+      startedMessage: "开始基于 staged diff 生成 commit message"
+    });
+
+    if (!result.ok) {
+      this.pushGoalEvent(
+        goal.id,
+        "commit",
+        `codex 生成 commit message 失败: ${trimForState(result.error || "unknown error", 180)}`,
+        true
+      );
+      return "";
+    }
+
+    return normalizeGeneratedCommitMessage(result.output);
   }
 
   private async markGoalSucceeded(goalId: string): Promise<void> {
@@ -1031,19 +1220,149 @@ function createGoalId(): string {
   return `goal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function normalizeCommitMessage(raw: string | undefined, goal: string): string {
-  const text = String(raw ?? "").trim();
-  if (text) {
-    return text.slice(0, 120);
-  }
-  return `feat(evolution): ${goal.slice(0, 88)}`;
-}
-
 function buildRetryTaskId(goalId: string, taskType: RetryTaskType, stepIndex?: number): string {
   if (Number.isInteger(stepIndex)) {
     return `${goalId}:${taskType}:${stepIndex}`;
   }
   return `${goalId}:${taskType}`;
+}
+
+function normalizeGeneratedCommitMessage(raw: string): string {
+  const text = stripCodeFence(String(raw ?? "").trim());
+  const firstLine = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine) {
+    return "";
+  }
+  const cleaned = firstLine
+    .replace(/^["'`]+/, "")
+    .replace(/["'`]+$/, "")
+    .trim();
+  if (!cleaned) {
+    return "";
+  }
+  return cleaned.slice(0, 120);
+}
+
+function normalizeOptionalName(value: string | undefined): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+function parseUpstreamRef(value: string): { remote: string; branch: string } | null {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const slash = text.indexOf("/");
+  if (slash <= 0 || slash === text.length - 1) {
+    return null;
+  }
+  const remote = text.slice(0, slash).trim();
+  const branch = text.slice(slash + 1).trim();
+  if (!remote || !branch) {
+    return null;
+  }
+  return { remote, branch };
+}
+
+export function resolvePushTargetFromInputs(input: {
+  envRemote?: string;
+  envBranch?: string;
+  upstreamRef?: string;
+}): { ok: true; remote: string; branch: string } | { ok: false; error: string } {
+  const envRemote = normalizeOptionalName(input.envRemote);
+  const envBranch = normalizeOptionalName(input.envBranch);
+  if (envRemote && envBranch) {
+    return { ok: true, remote: envRemote, branch: envBranch };
+  }
+
+  const upstream = parseUpstreamRef(normalizeOptionalName(input.upstreamRef));
+  const remote = envRemote || upstream?.remote || "";
+  const branch = envBranch || upstream?.branch || "";
+  if (!remote || !branch) {
+    const missing: string[] = [];
+    if (!remote) missing.push("remote");
+    if (!branch) missing.push("branch");
+    return {
+      ok: false,
+      error: `missing push ${missing.join(" and ")}; set EVOLUTION_GIT_PUSH_REMOTE/EVOLUTION_GIT_PUSH_BRANCH or configure git upstream`
+    };
+  }
+  return { ok: true, remote, branch };
+}
+
+function clipForPrompt(text: string, maxLength: number): string {
+  const value = String(text ?? "");
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const head = value.slice(0, Math.floor(maxLength * 0.55));
+  const tail = value.slice(value.length - Math.floor(maxLength * 0.45));
+  return `${head}\n...\n${tail}`;
+}
+
+export function buildDeterministicCommitMessage(goal: string, files: string[], diff: string): string {
+  const goalPart = normalizeGoalForMessage(goal);
+  const filePart = files.length === 0
+    ? "workspace"
+    : files.length === 1
+      ? simplifyPathForMessage(files[0])
+      : `${files.length} files`;
+  const fingerprint = hashStable(`${goal}\n${files.join("\n")}\n${diff}`).slice(0, 8);
+  return `chore(evolution): ${goalPart} (${filePart}) [${fingerprint}]`.slice(0, 120);
+}
+
+export function selectCommitMessage(input: {
+  commitMessageProvidedByUser: boolean;
+  userCommitMessage: string;
+  generatedCommitMessage: string;
+  fallbackCommitMessage: string;
+}): { source: CommitMessageSource; message: string } {
+  if (input.commitMessageProvidedByUser) {
+    return { source: "user", message: input.userCommitMessage };
+  }
+  if (input.generatedCommitMessage) {
+    return { source: "generated", message: input.generatedCommitMessage };
+  }
+  return { source: "fallback", message: input.fallbackCommitMessage };
+}
+
+function normalizeGoalForMessage(goal: string): string {
+  const compact = String(goal ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[^\w\-./ ]+/g, "");
+  if (!compact) {
+    return "apply updates";
+  }
+  return compact.slice(0, 48);
+}
+
+function simplifyPathForMessage(file: string): string {
+  const text = String(file ?? "").trim();
+  if (!text) {
+    return "workspace";
+  }
+  const parts = text.split("/").filter(Boolean);
+  if (parts.length === 0) {
+    return "workspace";
+  }
+  return parts.slice(-2).join("/").slice(0, 28);
+}
+
+function hashStable(text: string): string {
+  const value = String(text ?? "");
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {
