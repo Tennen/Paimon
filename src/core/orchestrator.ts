@@ -228,8 +228,8 @@ export class Orchestrator {
     const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
 
     const runtimeContext: LLMRuntimeContext = {
-      now: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      isoTime: new Date().toISOString(),
+      userTimezone: "Asia/Shanghai",
       // small model may confuse with memory, so we pass an empty string
       // memory,
       skills_context: skillsContext,
@@ -300,8 +300,8 @@ export class Orchestrator {
     const toolContext = filterToolContextForSkill(detail, fullToolContext, forceTools);
 
     const runtimeContext: Record<string, unknown> = {
-      now: new Date().toISOString(),
-      timezone: "Asia/Shanghai",
+      isoTime: new Date().toISOString(),
+      userTimezone: "Asia/Shanghai",
       // small model may confuse with extra context
       // memory,
       // action_history: actionHistory,

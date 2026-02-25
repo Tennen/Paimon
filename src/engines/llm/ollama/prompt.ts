@@ -64,7 +64,7 @@ function getSkillSelectionInstructions(): string[] {
   return [
     "=== Step 1: Skill Selection ===",
     "Your task is to analyze the user's request and decide how to respond.",
-    "Read the user prompt sections in order: CURRENT_STEP -> USER_REQUEST -> STEP_GOAL -> CONTEXT_JSON.",
+    "Read the user prompt sections in order: USER_REQUEST -> CONTEXT_JSON.",
     "Use CONTEXT_JSON.skills_context as the source of available skills.",
     "",
     "Output format:",
@@ -82,9 +82,9 @@ function getSkillPlanningInstructions(): string[] {
   return [
     "=== Step 2: Skill Planning ===",
     "You have selected a skill. Plan the tool execution.",
-    "Read the user prompt sections in order: CURRENT_STEP -> USER_REQUEST -> STEP_GOAL -> CONTEXT_JSON.",
+    "Read the user prompt sections in order: USER_REQUEST -> CONTEXT_JSON.",
     "Understand skill intent from CONTEXT_JSON.selected_skill.detail.",
-    "Choose a tool/op only from CONTEXT_JSON.tools_schema.",
+    "Use the tool/op from CONTEXT_JSON.tools_schema.",
     "Use CONTEXT_JSON.tools_context runtime data to fill args (entity_id/device names/etc).",
     "",
     "Output format:",
@@ -99,13 +99,14 @@ function getSkillPlanningInstructions(): string[] {
     "Requirements:",
     "- Do not invent tool names or operations outside CONTEXT_JSON.tools_schema",
     "- success_response/failure_response should be specific to the operation",
+    "- Do not overthinking"
   ];
 }
 
 function buildCurrentTimeBlock(context: Record<string, unknown>): Record<string, string> {
   return {
-    now: typeof context.now === "string" ? context.now : "",
-    timezone: typeof context.timezone === "string" ? context.timezone : ""
+    isoTime: typeof context.isoTime === "string" ? context.isoTime : "",
+    userTimezone: typeof context.userTimezone === "string" ? context.userTimezone : ""
   };
 }
 
@@ -189,7 +190,7 @@ function buildPlanningRuntimeContext(context: Record<string, unknown>): Record<s
     base.memory = context.memory;
   }
 
-  const others = omitKeys(context, ["now", "timezone", "memory", "tools_context", "skill_detail", "next_step_context"]);
+  const others = omitKeys(context, ["isoTime", "userTimezone", "memory", "tools_context", "skill_detail", "next_step_context"]);
   if (Object.keys(others).length > 0) {
     base.other_context = others;
   }
