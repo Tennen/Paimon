@@ -38,6 +38,8 @@ export default function App() {
   const [modelDraft, setModelDraft] = useState("");
   const [planningModelDraft, setPlanningModelDraft] = useState("");
   const [planningTimeoutDraft, setPlanningTimeoutDraft] = useState("");
+  const [thinkingBudgetEnabledDraft, setThinkingBudgetEnabledDraft] = useState(false);
+  const [thinkingBudgetDraft, setThinkingBudgetDraft] = useState("");
   const [codexModelDraft, setCodexModelDraft] = useState("");
   const [codexReasoningEffortDraft, setCodexReasoningEffortDraft] = useState("");
 
@@ -179,6 +181,8 @@ export default function App() {
     setModelDraft(payload.model || "");
     setPlanningModelDraft(payload.planningModel || "");
     setPlanningTimeoutDraft(payload.planningTimeoutMs || "");
+    setThinkingBudgetEnabledDraft(payload.thinkingBudgetEnabled === true);
+    setThinkingBudgetDraft(payload.thinkingBudget || "");
     setCodexModelDraft(payload.codexModel || "");
     setCodexReasoningEffortDraft(payload.codexReasoningEffort || "");
   }
@@ -260,6 +264,18 @@ export default function App() {
         return;
       }
     }
+    const thinkingBudget = thinkingBudgetDraft.trim();
+    if (thinkingBudget) {
+      const parsed = Number(thinkingBudget);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "Thinking Budget 必须是正整数（tokens）" });
+        return;
+      }
+    }
+    if (thinkingBudgetEnabledDraft && !thinkingBudget) {
+      setNotice({ type: "error", title: "开启 Thinking Budget 时必须设置预算值" });
+      return;
+    }
 
     setSavingModel(true);
     try {
@@ -269,6 +285,8 @@ export default function App() {
           model,
           planningModel,
           planningTimeoutMs,
+          thinkingBudgetEnabled: thinkingBudgetEnabledDraft,
+          thinkingBudget,
           restart: restartAfterSave
         })
       });
@@ -1002,6 +1020,8 @@ export default function App() {
           modelDraft={modelDraft}
           planningModelDraft={planningModelDraft}
           planningTimeoutDraft={planningTimeoutDraft}
+          thinkingBudgetEnabledDraft={thinkingBudgetEnabledDraft}
+          thinkingBudgetDraft={thinkingBudgetDraft}
           codexModelDraft={codexModelDraft}
           codexReasoningEffortDraft={codexReasoningEffortDraft}
           savingModel={savingModel}
@@ -1014,6 +1034,8 @@ export default function App() {
           onPlanningModelSelect={setPlanningModelDraft}
           onPlanningModelDraftChange={setPlanningModelDraft}
           onPlanningTimeoutDraftChange={setPlanningTimeoutDraft}
+          onThinkingBudgetEnabledDraftChange={setThinkingBudgetEnabledDraft}
+          onThinkingBudgetDraftChange={setThinkingBudgetDraft}
           onCodexModelDraftChange={setCodexModelDraft}
           onCodexReasoningEffortDraftChange={setCodexReasoningEffortDraft}
           onRefreshModels={() => void loadModels()}

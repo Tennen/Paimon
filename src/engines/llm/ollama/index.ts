@@ -11,6 +11,9 @@ export type OllamaLLMOptions = {
   planningTimeoutMs: number;
   maxRetries: number;
   strictJson: boolean;
+  thinkingBudgetEnabled: boolean;
+  thinkingBudget: number;
+  thinkingMaxNewTokens: number;
 };
 
 export class OllamaLLMEngine implements LLMEngine {
@@ -35,7 +38,10 @@ export class OllamaLLMEngine implements LLMEngine {
       timeoutMs: options?.timeoutMs ?? defaultTimeoutMs,
       planningTimeoutMs: options?.planningTimeoutMs ?? parseInt(process.env.LLM_PLANNING_TIMEOUT_MS ?? String(defaultTimeoutMs), 10),
       maxRetries: options?.maxRetries ?? parseInt(process.env.LLM_MAX_RETRIES ?? "2", 10),
-      strictJson: options?.strictJson ?? (process.env.LLM_STRICT_JSON ?? "true") === "true"
+      strictJson: options?.strictJson ?? (process.env.LLM_STRICT_JSON ?? "true") === "true",
+      thinkingBudgetEnabled: options?.thinkingBudgetEnabled ?? parseEnvBoolean(process.env.LLM_THINKING_BUDGET_ENABLED, false),
+      thinkingBudget: options?.thinkingBudget ?? parseEnvPositiveInteger(process.env.LLM_THINKING_BUDGET, 1024),
+      thinkingMaxNewTokens: options?.thinkingMaxNewTokens ?? parseEnvPositiveInteger(process.env.LLM_THINKING_MAX_NEW_TOKENS, 32768)
     };
   }
 
@@ -118,6 +124,11 @@ export class OllamaLLMEngine implements LLMEngine {
           model,
           timeoutMs: this.options.planningTimeoutMs,
           options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
+          thinkingBudget: {
+            enabled: this.options.thinkingBudgetEnabled,
+            budgetTokens: this.options.thinkingBudget,
+            maxNewTokens: this.options.thinkingMaxNewTokens
+          },
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt }
@@ -157,4 +168,22 @@ export class OllamaLLMEngine implements LLMEngine {
       fallback
     };
   }
+}
+
+function parseEnvPositiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.floor(value);
+}
+
+function parseEnvBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (typeof raw !== "string") {
+    return fallback;
+  }
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
 }

@@ -2,6 +2,8 @@ export type AdminConfig = {
   model: string;
   planningModel: string;
   planningTimeoutMs: string;
+  thinkingBudgetEnabled: boolean;
+  thinkingBudget: string;
   codexModel: string;
   codexReasoningEffort: string;
   envPath: string;

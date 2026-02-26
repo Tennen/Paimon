@@ -16,6 +16,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { AdminConfig } from "@/types/admin";
 
 type SystemSectionProps = {
@@ -26,6 +27,8 @@ type SystemSectionProps = {
   modelDraft: string;
   planningModelDraft: string;
   planningTimeoutDraft: string;
+  thinkingBudgetEnabledDraft: boolean;
+  thinkingBudgetDraft: string;
   codexModelDraft: string;
   codexReasoningEffortDraft: string;
   savingModel: boolean;
@@ -38,6 +41,8 @@ type SystemSectionProps = {
   onPlanningModelSelect: (value: string) => void;
   onPlanningModelDraftChange: (value: string) => void;
   onPlanningTimeoutDraftChange: (value: string) => void;
+  onThinkingBudgetEnabledDraftChange: (value: boolean) => void;
+  onThinkingBudgetDraftChange: (value: string) => void;
   onCodexModelDraftChange: (value: string) => void;
   onCodexReasoningEffortDraftChange: (value: string) => void;
   onRefreshModels: () => void;
@@ -131,6 +136,30 @@ export function SystemSection(props: SystemSectionProps) {
           </div>
 
           <div className="space-y-2">
+            <Label>Qwen Thinking Budget 开关</Label>
+            <div className="flex min-h-10 items-center gap-3 rounded-md border px-3">
+              <Switch
+                checked={props.thinkingBudgetEnabledDraft}
+                onCheckedChange={props.onThinkingBudgetEnabledDraftChange}
+              />
+              <span className="text-sm text-muted-foreground">
+                {props.thinkingBudgetEnabledDraft ? "已开启：按预算截断思考后续写" : "已关闭：按常规方式调用 LLM"}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Thinking Budget（tokens，可选）</Label>
+            <Input
+              type="number"
+              min={1}
+              value={props.thinkingBudgetDraft}
+              onChange={(event) => props.onThinkingBudgetDraftChange(event.target.value)}
+              placeholder="建议 >= 1024，留空则使用默认值"
+            />
+          </div>
+
+          <div className="space-y-2">
             <Label>Codex 模型（可选）</Label>
             <Input
               value={props.codexModelDraft}
@@ -191,6 +220,8 @@ export function SystemSection(props: SystemSectionProps) {
           <div className="mono">planningModel: {props.config?.planningModel || "(follow OLLAMA_MODEL)"}</div>
           <div className="mono">timezone: {props.config?.timezone ?? "-"}</div>
           <div className="mono">planningTimeoutMs: {props.config?.planningTimeoutMs || "(follow LLM_TIMEOUT_MS)"}</div>
+          <div className="mono">thinkingBudgetEnabled: {props.config?.thinkingBudgetEnabled ? "true" : "false"}</div>
+          <div className="mono">thinkingBudget: {props.config?.thinkingBudget || "(default 1024)"}</div>
           <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
           <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
           <div className="mono">taskStore: {props.config?.taskStorePath ?? "-"}</div>
