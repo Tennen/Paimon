@@ -4,6 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
+import { WeComMediaDownloader } from "../endpoints/wecom/mediaDownloader";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: true,
@@ -13,9 +14,11 @@ const xmlParser = new XMLParser({
 
 export class WeComIngressAdapter implements IngressAdapter {
   private readonly token: string;
+  private readonly mediaDownloader: WeComMediaDownloader;
 
-  constructor(token?: string) {
+  constructor(token?: string, mediaDownloader?: WeComMediaDownloader) {
     this.token = token ?? process.env.WECOM_TOKEN ?? "";
+    this.mediaDownloader = mediaDownloader ?? new WeComMediaDownloader();
   }
 
   register(app: Express, sessionManager: SessionManager): void {
@@ -70,31 +73,60 @@ export class WeComIngressAdapter implements IngressAdapter {
         return;
       }
 
-      const msgType = String(parsed.MsgType ?? "");
-      if (msgType !== "text") {
+      const msgType = String(parsed.MsgType ?? "").trim().toLowerCase();
+      const isText = msgType === "text";
+      const isVoice = msgType === "voice";
+      if (!isText && !isVoice) {
         res.status(200).send("success");
         return;
       }
 
       const content = String(parsed.Content ?? "").trim();
+      const recognition = String(parsed.Recognition ?? "").trim();
       const fromUser = String(parsed.FromUserName ?? "");
       const toUser = String(parsed.ToUserName ?? "");
       const msgId = String(parsed.MsgId ?? parsed.MsgID ?? "");
+      const mediaId = String(parsed.MediaId ?? "").trim();
 
-      if (!fromUser || !content) {
+      if (!fromUser || (isText && !content)) {
         res.status(400).send("missing fields");
         return;
+      }
+
+      let audioPath: string | undefined;
+      const fallbackVoiceText = recognition;
+
+      if (isVoice) {
+        if (!mediaId) {
+          const reply = buildTextReply(fromUser, toUser, "收到语音但缺少 media_id，无法识别。");
+          res.type("application/xml").send(reply);
+          return;
+        }
+
+        try {
+          audioPath = await this.mediaDownloader.downloadVoice(mediaId, msgId || `${fromUser}-${Date.now()}`);
+        } catch (error) {
+          console.error(`[wecom] voice media download failed: ${mediaId}`, error);
+          if (!fallbackVoiceText) {
+            const reply = buildTextReply(fromUser, toUser, "语音下载失败，请稍后重试。");
+            res.type("application/xml").send(reply);
+            return;
+          }
+        }
       }
 
       const envelope: Envelope = {
         requestId: msgId || `${fromUser}-${Date.now()}`,
         source: "wecom",
         sessionId: fromUser,
-        kind: "text",
-        text: content,
+        kind: isVoice ? "audio" : "text",
+        text: isVoice ? (audioPath ? undefined : fallbackVoiceText || undefined) : content,
+        audioPath,
         meta: {
           ingress_message_id: msgId || undefined,
-          callback_to_user: fromUser
+          callback_to_user: fromUser,
+          wecom_msg_type: msgType,
+          wecom_media_id: mediaId || undefined
         },
         receivedAt: new Date().toISOString()
       };

@@ -74,7 +74,32 @@ export WECOM_CORP_ID="YOUR_CORP_ID" # app message sender (local)
 export WECOM_APP_SECRET="YOUR_APP_SECRET" # app message sender (local)
 export WECOM_AGENT_ID="YOUR_AGENT_ID" # app message sender (local)
 export WECOM_CONTEXT_LIMIT="1000" # max in-memory contexts
+export WECOM_AUDIO_DIR="data/wecom-audio" # local voice file directory
+export WECOM_MEDIA_USE_BRIDGE="true" # prefer bridge proxy for media download
 ```
+
+Set STT env vars:
+
+```bash
+export STT_PROVIDER="fast-whisper" # fast-whisper | mock
+export STT_FAST_WHISPER_AUTO_INSTALL="true" # auto pip install on startup
+export STT_FAST_WHISPER_PYTHON="python3"
+export STT_FAST_WHISPER_MODEL="small"
+export STT_FAST_WHISPER_DEVICE="auto"
+export STT_FAST_WHISPER_COMPUTE_TYPE="int8"
+export STT_FAST_WHISPER_LANGUAGE="zh" # optional
+export STT_FAST_WHISPER_BEAM_SIZE="1"
+export STT_FAST_WHISPER_VAD_FILTER="true"
+export STT_FAST_WHISPER_TIMEOUT_MS="180000"
+```
+
+`STT_PROVIDER=fast-whisper` 时，服务启动会在 `sttRuntime.init()` 阶段检查 `faster_whisper` Python 包；如果缺失且 `STT_FAST_WHISPER_AUTO_INSTALL=true`，会自动执行：
+
+```bash
+python3 -m pip install --disable-pip-version-check faster-whisper
+```
+
+如果你想关闭自动安装，可设置 `STT_FAST_WHISPER_AUTO_INSTALL=false`，然后自行安装上述依赖。
 
 HA entity allowlist is pulled from Home Assistant periodically via WebSocket (by `HA_BASE_URL` + `HA_TOKEN`), and filtered to those exposed to Assist (`options.conversation.should_expose = true`).
 Because some camera entities lack `unique_id` and don’t appear in the entity registry, we also supplement `camera.*` from REST `/api/states`.
@@ -100,6 +125,12 @@ curl -s http://localhost:3000/sessions
 ## WeCom ingress
 
 WeCom will POST XML to `/ingress/wecom` in plaintext mode. The adapter validates `signature` or `msg_signature` using `WECOM_TOKEN`, builds an `Envelope`, and returns a text reply.
+
+For `voice` messages, the service will:
+
+1. Download media by `MediaId` and save it under `WECOM_AUDIO_DIR` (default `data/wecom-audio`).
+2. Run STT through the configured provider (`fast-whisper` by default).
+3. Feed transcription text into orchestration and reply as normal.
 
 ## Camera snapshot describe
 

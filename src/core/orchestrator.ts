@@ -1,5 +1,4 @@
 import { Envelope, Image, Response, ToolExecution } from "../types";
-import { mockSTT } from "../mockSTT";
 import { policyCheck } from "../policy";
 import { ToolRouter } from "./toolRouter";
 import { writeAudit } from "../auditLogger";
@@ -10,6 +9,7 @@ import { getSkillHandlerToolName } from "../skills/toolNaming";
 import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
 import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../callback/callbackDispatcher";
+import { sttRuntime } from "../stt";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -47,7 +47,7 @@ export class Orchestrator {
       return cached;
     }
 
-    const text = await mockSTT(envelope.text, envelope.audioPath);
+    const text = await sttRuntime.transcribe(envelope);
     const memory = this.memoryStore.read(envelope.sessionId);
 
     try {
@@ -448,9 +448,19 @@ export class Orchestrator {
   }
 
   private appendMemory(envelope: Envelope, text: string, response: Response): void {
-    const memoryText = text || (envelope.kind === "image" ? "[image]" : "");
+    const memoryText = text || inferNonTextMemoryMarker(envelope.kind);
     this.memoryStore.append(envelope.sessionId, formatMemoryEntry(memoryText, response));
   }
+}
+
+function inferNonTextMemoryMarker(kind: string): string {
+  if (kind === "image") {
+    return "[image]";
+  }
+  if (kind === "audio" || kind === "voice") {
+    return "[audio]";
+  }
+  return "";
 }
 
 function formatMemoryEntry(userText: string, response: Response): string {

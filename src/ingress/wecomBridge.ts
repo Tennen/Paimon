@@ -4,18 +4,21 @@ import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 import { WeComSender } from "../endpoints/wecom/sender";
+import { WeComMediaDownloader } from "../endpoints/wecom/mediaDownloader";
 
 export class WeComBridgeIngressAdapter implements IngressAdapter {
   private readonly streamUrl: string;
   private readonly token: string;
   private readonly sender: WeComSender;
+  private readonly mediaDownloader: WeComMediaDownloader;
   private readonly contextLimit: number;
   private readonly contextMap = new Map<string, WeComContext>();
 
-  constructor(streamUrl?: string, token?: string) {
+  constructor(streamUrl?: string, token?: string, mediaDownloader?: WeComMediaDownloader) {
     this.streamUrl = streamUrl ?? process.env.WECOM_BRIDGE_URL ?? "";
     this.token = token ?? process.env.WECOM_BRIDGE_TOKEN ?? "";
     this.sender = new WeComSender();
+    this.mediaDownloader = mediaDownloader ?? new WeComMediaDownloader();
     this.contextLimit = Number(process.env.WECOM_CONTEXT_LIMIT ?? "1000");
   }
 
@@ -30,18 +33,41 @@ export class WeComBridgeIngressAdapter implements IngressAdapter {
     void connectSse(url, this.token, async (payload) => {
       log(`message received: ${payload.messageId} session=${payload.sessionId}`);
       this.upsertContext(payload.sessionId, payload.fromUser);
-      const isImage = payload.msgType === "image";
+      const msgType = (payload.msgType ?? "text").trim().toLowerCase();
+      const isImage = msgType === "image";
+      const isVoice = msgType === "voice";
+      let audioPath: string | undefined;
+      if (isVoice && payload.mediaId) {
+        try {
+          audioPath = await this.mediaDownloader.downloadVoice(payload.mediaId, payload.messageId);
+        } catch (error) {
+          log(`voice media download failed: ${(error as Error).message}`);
+        }
+      }
+
+      const fallbackVoiceText = (payload.text ?? "").trim();
+      if (isVoice && !audioPath && !fallbackVoiceText) {
+        try {
+          await this.sender.sendText(payload.fromUser, "语音下载失败，请稍后重试。");
+        } catch (error) {
+          log(`voice media fallback reply failed: ${(error as Error).message}`);
+        }
+        return;
+      }
+
       const envelope: Envelope = {
         requestId: payload.messageId,
         source: "wecom",
         sessionId: payload.sessionId,
-        kind: isImage ? "image" : "text",
-        text: isImage ? undefined : payload.text,
+        kind: isImage ? "image" : isVoice ? "audio" : "text",
+        text: isImage ? undefined : isVoice ? (audioPath ? undefined : fallbackVoiceText || undefined) : payload.text,
+        audioPath,
         meta: {
           ingress_message_id: payload.messageId,
           callback_to_user: payload.fromUser,
           wecom_media_id: payload.mediaId,
-          wecom_pic_url: payload.picUrl
+          wecom_pic_url: payload.picUrl,
+          wecom_msg_type: msgType
         },
         receivedAt: payload.receivedAt
       };

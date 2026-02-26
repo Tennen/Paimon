@@ -18,6 +18,7 @@ import { AdminIngressAdapter } from "./ingress/admin";
 import { EvolutionEngine } from "./evolution/evolutionEngine";
 import { EvolutionCodexConfigService } from "./evolution/codexConfigService";
 import { EvolutionOperatorService } from "./evolution/operatorService";
+import { sttRuntime } from "./stt";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -59,6 +60,9 @@ async function startServer() {
     console.log("Checking and installing skill dependencies...");
     await skillManager.ensureSkillsInstalled();
     console.log("Skill dependencies check completed");
+    console.log("Initializing STT runtime...");
+    await sttRuntime.init();
+    console.log(`STT runtime ready: provider=${sttRuntime.getProviderName()}`);
     scheduler.start();
     console.log(`Scheduler started (tick=${scheduler.getTickMs()}ms)`);
     evolutionEngine.start();

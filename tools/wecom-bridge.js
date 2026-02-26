@@ -189,6 +189,45 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/proxy/media/get") {
+    if (BRIDGE_TOKEN) {
+      const auth = req.headers.authorization || "";
+      if (auth !== `Bearer ${BRIDGE_TOKEN}`) {
+        res.writeHead(401);
+        res.end("unauthorized");
+        return;
+      }
+    }
+
+    const body = await readBody(req);
+    if (!body) {
+      res.writeHead(400);
+      res.end("missing body");
+      return;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      res.writeHead(400);
+      res.end("invalid json");
+      return;
+    }
+
+    try {
+      const data = await proxyGetMedia(payload);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+      return;
+    } catch (err) {
+      res.writeHead(500);
+      console.log("wecom post media get failed", err);
+      res.end(`media get failed: ${(err && err.message) || "unknown"}`);
+      return;
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/wecom") {
     const { signature, msg_signature, timestamp, nonce, echostr } = Object.fromEntries(url.searchParams);
     const provided = msg_signature || signature || "";
@@ -366,6 +405,38 @@ async function proxyUploadMedia(payload) {
   return data;
 }
 
+async function proxyGetMedia(payload) {
+  if (!payload || !payload.access_token || !payload.media_id) {
+    throw new Error("missing access_token/media_id");
+  }
+
+  const query = new URLSearchParams({
+    access_token: payload.access_token,
+    media_id: payload.media_id
+  });
+  const url = `https://qyapi.weixin.qq.com/cgi-bin/media/get?${query.toString()}`;
+  const res = await fetch(url, { method: "GET" });
+
+  if (!res.ok) {
+    throw new Error(`media get http ${res.status}`);
+  }
+
+  const contentType = String(res.headers.get("content-type") || "application/octet-stream");
+  if (contentType.includes("application/json")) {
+    const errorData = await res.json();
+    throw new Error(`media get error ${errorData.errcode || "unknown"} ${errorData.errmsg || ""}`.trim());
+  }
+
+  const disposition = String(res.headers.get("content-disposition") || "");
+  const filename = parseFilenameFromDisposition(disposition) || `${payload.media_id}.dat`;
+  const buf = Buffer.from(await res.arrayBuffer());
+  return {
+    base64: buf.toString("base64"),
+    filename,
+    content_type: contentType
+  };
+}
+
 function broadcast(payload) {
   const id = nextEventId++;
   const item = { id, payload };
@@ -449,6 +520,24 @@ function parseXml(xml) {
   } catch {
     return null;
   }
+}
+
+function parseFilenameFromDisposition(disposition) {
+  if (!disposition) return "";
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match && utf8Match[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].trim());
+    } catch {
+      return utf8Match[1].trim();
+    }
+  }
+
+  const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+  if (plainMatch && plainMatch[1]) {
+    return plainMatch[1].trim();
+  }
+  return "";
 }
 
 function decryptWeCom(encrypted, aesKey, receiveId) {

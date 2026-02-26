@@ -43,11 +43,11 @@ type sseClient struct {
 }
 
 type bridgeState struct {
-	mu           sync.Mutex
-	nextEventID  int64
-	buffer       []sseEvent
-	bufferCap    int
-	clients      map[*sseClient]struct{}
+	mu          sync.Mutex
+	nextEventID int64
+	buffer      []sseEvent
+	bufferCap   int
+	clients     map[*sseClient]struct{}
 }
 
 type wecomXML struct {
@@ -74,9 +74,9 @@ type wecomMessage struct {
 }
 
 const (
-	defaultPort          = 8080
-	defaultBufferSize    = 200
-	maxBodyBytes   int64 = 10 * 1024 * 1024
+	defaultPort             = 8080
+	defaultBufferSize       = 200
+	maxBodyBytes      int64 = 10 * 1024 * 1024
 )
 
 func main() {
@@ -103,6 +103,9 @@ func main() {
 	})
 	mux.HandleFunc("/proxy/media/upload", func(w http.ResponseWriter, r *http.Request) {
 		handleProxyUpload(w, r, cfg)
+	})
+	mux.HandleFunc("/proxy/media/get", func(w http.ResponseWriter, r *http.Request) {
+		handleProxyMediaGet(w, r, cfg)
 	})
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
@@ -574,6 +577,87 @@ func handleProxyUpload(w http.ResponseWriter, r *http.Request, cfg bridgeConfig)
 	_, _ = w.Write(respData)
 }
 
+func handleProxyMediaGet(w http.ResponseWriter, r *http.Request, cfg bridgeConfig) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !checkBridgeAuth(w, r, cfg) {
+		return
+	}
+
+	body, err := readBody(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("missing body"))
+		return
+	}
+	var payload struct {
+		AccessToken string `json:"access_token"`
+		MediaID     string `json:"media_id"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("invalid json"))
+		return
+	}
+	if payload.AccessToken == "" || payload.MediaID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("missing access_token/media_id"))
+		return
+	}
+
+	query := url.Values{}
+	query.Set("access_token", payload.AccessToken)
+	query.Set("media_id", payload.MediaID)
+	endpoint := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/media/get?%s", query.Encode())
+
+	client := http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(endpoint)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("media get failed"))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(fmt.Sprintf("media get http %d", resp.StatusCode)))
+		return
+	}
+
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	respData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("media get read failed"))
+		return
+	}
+
+	if strings.Contains(strings.ToLower(contentType), "application/json") {
+		var apiErr struct {
+			ErrCode int    `json:"errcode"`
+			ErrMsg  string `json:"errmsg"`
+		}
+		_ = json.Unmarshal(respData, &apiErr)
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(fmt.Sprintf("media get error %d %s", apiErr.ErrCode, apiErr.ErrMsg)))
+		return
+	}
+
+	filename := parseFilenameFromDisposition(resp.Header.Get("Content-Disposition"))
+	if filename == "" {
+		filename = fmt.Sprintf("%s.dat", payload.MediaID)
+	}
+	result := map[string]any{
+		"base64":       base64.StdEncoding.EncodeToString(respData),
+		"filename":     filename,
+		"content_type": firstNonEmpty(contentType, "application/octet-stream"),
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(result)
+}
+
 func checkBridgeAuth(w http.ResponseWriter, r *http.Request, cfg bridgeConfig) bool {
 	if cfg.BridgeToken == "" {
 		return true
@@ -714,6 +798,36 @@ func firstNonEmpty(values ...string) string {
 		if strings.TrimSpace(v) != "" {
 			return v
 		}
+	}
+	return ""
+}
+
+func parseFilenameFromDisposition(disposition string) string {
+	trimmed := strings.TrimSpace(disposition)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if idx := strings.Index(lower, "filename*=utf-8''"); idx >= 0 {
+		start := idx + len("filename*=utf-8''")
+		rest := strings.TrimSpace(trimmed[start:])
+		if semi := strings.Index(rest, ";"); semi >= 0 {
+			rest = rest[:semi]
+		}
+		rest = strings.Trim(rest, "\"'")
+		if decoded, err := url.QueryUnescape(rest); err == nil {
+			return decoded
+		}
+		return rest
+	}
+
+	if idx := strings.Index(lower, "filename="); idx >= 0 {
+		start := idx + len("filename=")
+		rest := strings.TrimSpace(trimmed[start:])
+		if semi := strings.Index(rest, ";"); semi >= 0 {
+			rest = rest[:semi]
+		}
+		return strings.Trim(strings.TrimSpace(rest), "\"'")
 	}
 	return ""
 }

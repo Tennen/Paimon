@@ -68,6 +68,7 @@ sudo systemctl start wecom-bridge
 - `POST /proxy/gettoken` (forward gettoken to WeCom)
 - `POST /proxy/send` (forward send message to WeCom)
 - `POST /proxy/media/upload` (forward media upload to WeCom, expects base64)
+- `POST /proxy/media/get` (forward media get from WeCom, returns base64)
 
 ## Security
 
