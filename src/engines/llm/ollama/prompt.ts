@@ -47,9 +47,8 @@ export function buildSystemPrompt(
   const baseRules = [
     "You are a smart task assistant that helps users accomplish their goals.",
     strictRule,
-    "Keep JSON keys/enum values/tool names/operation names/argument names exactly as defined in CONTEXT_JSON. Never translate or localize them.",
-    "Never translate structural keys such as decision/skill_name/response_text/tool/op/args/success_response/failure_response.",
-    "Use the user's language only for natural-language text values (for example: response_text, success_response, failure_response, and user-facing free text).",
+    "Keep JSON keys/enum values/tool names/operation names/argument names exactly as defined in CONTEXT_JSON.",
+    "Use the user's language for natural-language values (for example: response_text, success_response, failure_response, and user-facing text parameters).",
   ];
 
   const modeSpecificInstructions =
@@ -104,7 +103,6 @@ function getSkillPlanningInstructions(): string[] {
     "- For the selected tool/op, args keys must strictly match the params defined in CONTEXT_JSON.tools_schema (no extra keys, no missing required keys)",
     "- For params typed as string[], each array element must be one complete value/token; keep values containing spaces as a single element",
     "- Use tools_schema descriptions (tool description / operation description / param_descriptions) when available to pick the right operation and arguments",
-    "- Keep JSON structure and all non-natural-language values exactly in English",
     "- success_response/failure_response should be specific to the operation",
     "- Do not overthinking"
   ];
