@@ -309,6 +309,8 @@ LLM can call `skill.invoke` with `{ name, input }`.
 
 `market-analysis` skill is built in and supports deterministic A-share/ETF/fund analysis.
 
+When LLM explanation is enabled, the input `signalResult` sent to LLM includes both 股票代码+名称 via `assetSignals[].code` and `assetSignals[].name`.
+
 Direct commands:
 
 ```bash

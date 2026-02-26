@@ -470,6 +470,10 @@ function calculateMetrics(snapshot) {
 function executeRuleEngine(input) {
   const phase = input.phase;
   const portfolio = input.portfolio;
+  const marketData = input.marketData;
+  const marketAssets = marketData && typeof marketData === "object" && marketData.assets && typeof marketData.assets === "object"
+    ? marketData.assets
+    : {};
   const featureLayer = input.featureLayer;
 
   const benchmarkCode = chooseBenchmarkCode(featureLayer.indices);
@@ -479,10 +483,13 @@ function executeRuleEngine(input) {
 
   const assetSignals = [];
   for (const holding of portfolio.funds) {
+    const marketAsset = marketAssets[holding.code] || null;
+    const name = normalizeAssetName(holding.name) || normalizeAssetName(marketAsset && marketAsset.name);
     const metrics = featureLayer.assets[holding.code] || null;
     if (!metrics) {
       assetSignals.push({
         code: holding.code,
+        name,
         signal: "DATA_MISSING",
         metrics: {
           ma5: null,
@@ -507,6 +514,7 @@ function executeRuleEngine(input) {
 
     assetSignals.push({
       code: holding.code,
+      name,
       signal,
       metrics: {
         ma5: metrics.ma5,
@@ -1071,6 +1079,7 @@ function normalizePortfolio(input) {
     }
 
     const code = normalizeCode(item.code);
+    const name = normalizeAssetName(item.name);
     const quantity = toNumber(item.quantity);
     const avgCost = toNumber(item.avgCost);
 
@@ -1080,6 +1089,7 @@ function normalizePortfolio(input) {
 
     funds.push({
       code,
+      name,
       quantity: round(quantity, 4),
       avgCost: round(avgCost, 4)
     });
@@ -1341,6 +1351,13 @@ function normalizeCode(raw) {
     return digits.slice(-6);
   }
   return digits.padStart(6, "0");
+}
+
+function normalizeAssetName(raw) {
+  if (raw === null || raw === undefined) {
+    return "";
+  }
+  return String(raw).trim();
 }
 
 function movingAverage(values, period) {
