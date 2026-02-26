@@ -102,6 +102,7 @@ function getSkillPlanningInstructions(): string[] {
     "Requirements:",
     "- Do not invent tool names or operations outside CONTEXT_JSON.tools_schema",
     "- For the selected tool/op, args keys must strictly match the params defined in CONTEXT_JSON.tools_schema (no extra keys, no missing required keys)",
+    "- For params typed as string[], each array element must be one complete value/token; keep values containing spaces as a single element",
     "- Use tools_schema descriptions (tool description / operation description / param_descriptions) when available to pick the right operation and arguments",
     "- Keep JSON structure and all non-natural-language values exactly in English",
     "- success_response/failure_response should be specific to the operation",
