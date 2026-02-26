@@ -310,6 +310,8 @@ LLM can call `skill.invoke` with `{ name, input }`.
 `market-analysis` skill is built in and supports deterministic A-share/ETF/fund analysis.
 
 When LLM explanation is enabled, the input `signalResult` sent to LLM includes both 股票代码+名称 via `assetSignals[].code` and `assetSignals[].name`.
+For `analysisEngine: gpt_plugin`, the returned `summary` explicitly cites the data basis behind each signal conclusion (including benchmark context, per-asset code/name/signal, key available metrics, and missing data when unavailable).
+To keep `chatgpt-bridge` stable, the prompt is still assembled with the existing string-array + `join(\"\")` pattern and does not introduce extra newline characters.
 
 Direct commands:
 

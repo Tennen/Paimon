@@ -3,6 +3,8 @@ import path from "node:path";
 
 const market = require("../skills/market-analysis/handler.js") as { execute: (input: string) => Promise<{ text: string }> };
 const portfolioPath = path.resolve(process.cwd(), "data/market-analysis/portfolio.json");
+const configPath = path.resolve(process.cwd(), "data/market-analysis/config.json");
+const bridge = require("../skills/chatgpt-bridge/handler.js") as { execute: (input: string) => Promise<{ text: string } | string> };
 const chatRequests: Array<Record<string, unknown>> = [];
 
 function assert(condition: unknown, message: string): void {
@@ -63,11 +65,23 @@ function mockFetch(
 
 async function main(): Promise<void> {
   const originalPortfolio = fs.readFileSync(portfolioPath, "utf8");
+  const originalConfig = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : "";
   const originalFetch = globalThis.fetch;
+  const originalBridgeExecute = bridge.execute;
   const originalLlmModel = process.env.MARKET_ANALYSIS_LLM_MODEL;
   const originalLlmEnabled = process.env.MARKET_ANALYSIS_LLM_ENABLED;
 
   try {
+    const localConfig = {
+      version: 1,
+      analysisEngine: "local",
+      gptPlugin: {
+        timeoutMs: 20000,
+        fallbackToLocal: true
+      }
+    };
+    fs.writeFileSync(configPath, `${JSON.stringify(localConfig, null, 2)}\n`, "utf8");
+
     const before = await market.execute("/market portfolio");
     assert(before.text.includes("Market Analysis 持仓配置"), "读取持仓失败: 缺少标题");
 
@@ -120,6 +134,35 @@ async function main(): Promise<void> {
     });
     assert(!invalidSignal, "LLM 请求错误: signalResult.assetSignals 每项都应包含字符串 name");
 
+    let capturedBridgePrompt = "";
+    const gptPluginConfig = {
+      version: 1,
+      analysisEngine: "gpt_plugin",
+      gptPlugin: {
+        timeoutMs: 20000,
+        fallbackToLocal: true
+      }
+    };
+    fs.writeFileSync(configPath, `${JSON.stringify(gptPluginConfig, null, 2)}\n`, "utf8");
+
+    bridge.execute = async (input: string) => {
+      capturedBridgePrompt = String(input || "");
+      return { text: "mock gpt plugin summary" };
+    };
+
+    const middayWithPlugin = await market.execute("/market midday");
+    assert(middayWithPlugin.text.includes("解释:"), "midday(gpt_plugin) 文本结构错误: 缺少解释");
+    assert(capturedBridgePrompt.length > 0, "gpt_plugin 未收到 prompt");
+    assert(
+      /数据描述|输入数据依据/.test(capturedBridgePrompt),
+      "gpt_plugin prompt 约束缺失: 未包含数据描述要求"
+    );
+    assert(
+      /关键数值|关键数据/.test(capturedBridgePrompt),
+      "gpt_plugin prompt 约束缺失: 未包含关键数值要求"
+    );
+    assert(!capturedBridgePrompt.includes("\n"), "gpt_plugin prompt 不应包含换行符");
+
     const status = await market.execute("/market status");
     assert(status.text.includes("Market Analysis 最近状态"), "status 文本错误: 缺少标题");
     assert(status.text.includes("阶段:") && status.text.includes("快照文件:"), "status 文本错误: 缺少关键字段");
@@ -127,7 +170,13 @@ async function main(): Promise<void> {
     console.log("market-smoke passed");
   } finally {
     fs.writeFileSync(portfolioPath, originalPortfolio, "utf8");
+    if (originalConfig) {
+      fs.writeFileSync(configPath, originalConfig, "utf8");
+    } else if (fs.existsSync(configPath)) {
+      fs.unlinkSync(configPath);
+    }
     globalThis.fetch = originalFetch;
+    bridge.execute = originalBridgeExecute;
     if (originalLlmModel === undefined) {
       delete process.env.MARKET_ANALYSIS_LLM_MODEL;
     } else {
