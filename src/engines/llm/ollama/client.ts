@@ -34,8 +34,10 @@ export type OllamaChatRequest = {
 };
 
 type OllamaChatRawResponse = {
-  message?: { content?: string };
+  message?: { content?: string; thinking?: string; reasoning?: string };
   response?: string;
+  thinking?: string;
+  reasoning?: string;
   done?: boolean;
   done_reason?: string;
 };
@@ -59,6 +61,9 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
 
   if (!thinkingEnabled || budget === null) {
     const single = await executeOllamaChat(request, request.messages, request.options);
+    if (!hasText(single.content)) {
+      throw new Error("Ollama response missing content");
+    }
     return single.content;
   }
 
@@ -69,25 +74,19 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
     { ...(request.options ?? {}), num_predict: budget }
   );
   if (firstPass.doneReason !== "length") {
+    if (!hasText(firstPass.content)) {
+      throw new Error("Ollama response missing content");
+    }
     return firstPass.content;
   }
 
-  // If no open think block was observed, fall back to a normal full generation.
-  if (!hasOpenThinkBlock(firstPass.content)) {
-    const secondPassFallback = await executeOllamaChat(
-      request,
-      request.messages,
-      resolveSecondPassOptions(request.options, thinkingConfig?.maxNewTokens)
-    );
-    return secondPassFallback.content;
-  }
-
-  // Pass 2: append early-stop prompt and continue generation.
+  // Pass 2: budget reached on pass 1, append early-stop prompt and continue.
+  const firstPassText = hasText(firstPass.content) ? firstPass.content : "";
   const secondPassMessages: OllamaMessage[] = [
     ...request.messages,
     {
       role: "assistant",
-      content: `${firstPass.content}${thinkingConfig?.earlyStoppingPrompt ?? DEFAULT_EARLY_STOPPING_PROMPT}`
+      content: `${firstPassText}${thinkingConfig?.earlyStoppingPrompt ?? DEFAULT_EARLY_STOPPING_PROMPT}`
     },
     {
       role: "user",
@@ -100,6 +99,9 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
     secondPassMessages,
     resolveSecondPassOptions(request.options, thinkingConfig?.maxNewTokens)
   );
+  if (!hasText(secondPass.content)) {
+    throw new Error("Ollama response missing content");
+  }
   return secondPass.content;
 }
 
@@ -136,10 +138,7 @@ async function executeOllamaChat(
 
     const data = (await res.json()) as OllamaChatRawResponse;
 
-    const content = data.message?.content ?? data.response;
-    if (!content) {
-      throw new Error("Ollama response missing content");
-    }
+    const content = extractAssistantText(data);
 
     return {
       content,
@@ -151,9 +150,30 @@ async function executeOllamaChat(
   }
 }
 
-function hasOpenThinkBlock(content: string): boolean {
-  const text = String(content ?? "");
-  return text.includes("<think>") && !text.includes("</think>");
+function hasText(content: string): boolean {
+  return String(content ?? "").trim().length > 0;
+}
+
+function extractAssistantText(data: OllamaChatRawResponse): string {
+  const contentCandidates = [data.message?.content, data.response];
+  for (const candidate of contentCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  const thinkingCandidates = [
+    data.message?.thinking,
+    data.message?.reasoning,
+    data.thinking,
+    data.reasoning
+  ];
+  for (const candidate of thinkingCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return `<think>\n${candidate.trim()}\n`;
+    }
+  }
+  return "";
 }
 
 function isQwenModel(model: string): boolean {
