@@ -51,6 +51,7 @@ export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
     };
 
     const content = data.message?.content ?? data.response;
+    console.log(data);
     if (!content) {
       throw new Error("Ollama response missing content");
     }
