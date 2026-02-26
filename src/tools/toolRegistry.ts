@@ -10,10 +10,18 @@ export type ToolHandler = {
   followupContext?: (op: string, args: Record<string, unknown>) => Partial<LLMRuntimeContext> | null;
 };
 
+export type ToolOperationSchema = {
+  op: string;
+  description?: string;
+  params: Record<string, string>;
+  param_descriptions?: Record<string, string>;
+};
+
 export type ToolSchemaItem = {
   name: string;
+  description?: string;
   resource?: string;
-  operations: Array<{ op: string; params: Record<string, string> }>;
+  operations: ToolOperationSchema[];
   keywords?: string[];
 };
 

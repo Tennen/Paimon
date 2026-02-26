@@ -89,12 +89,18 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
     },
     {
       name: "skill",
+      description: "Invoke a registered skill by name and input text.",
       operations: [
         {
           op: "execute",
+          description: "Execute one skill.",
           params: {
             name: "string",
             input: "string"
+          },
+          param_descriptions: {
+            name: "Registered skill name.",
+            input: "User request forwarded to that skill."
           }
         }
       ]
@@ -116,11 +122,16 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
       },
       {
         name: toolName,
+        description: `Execute skill handler for ${skill.name}.`,
         operations: [
           {
             op: "execute",
+            description: "Execute the bound skill handler with user input.",
             params: {
               input: "string"
+            },
+            param_descriptions: {
+              input: "User request forwarded to the bound skill handler."
             }
           }
         ],

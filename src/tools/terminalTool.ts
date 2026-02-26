@@ -11,13 +11,7 @@ export class TerminalCommandTool {
       }
 
       try {
-        const rawArgs = args.args;
-        const argsList = Array.isArray(rawArgs)
-          ? rawArgs.map((value) => String(value))
-          : typeof rawArgs === "string"
-            ? parseArgs(rawArgs)
-            : [];
-        const output = await runCommand(command, argsList);
+        const output = await runCommand(command);
         return { ok: true, output: { text: output } };
       } catch (error) {
         return { ok: false, error: (error as Error).message };
@@ -38,13 +32,17 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
     },
     {
       name: "terminal",
+      description: "Run local terminal commands on this machine.",
       resource: "system",
       operations: [
         {
           op: "exec",
+          description: "Execute one command line. Put executable and all flags/arguments together in args.command.",
           params: {
-            command: "string",
-            args: "string[]"
+            command: "string"
+          },
+          param_descriptions: {
+            command: "Full command line, for example: remindctl today --json"
           }
         }
       ]
@@ -111,7 +109,7 @@ function parseArgs(input: string): string[] {
   return args;
 }
 
-function runCommand(cmd: string, args: string[]): Promise<string> {
+function runCommand(cmd: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const parsed = parseArgs(cmd.trim());
     const baseCommand = parsed.shift();
@@ -119,7 +117,7 @@ function runCommand(cmd: string, args: string[]): Promise<string> {
       reject(new Error("Missing command"));
       return;
     }
-    const finalArgs = parsed.concat(args);
+    const finalArgs = parsed;
 
     execFile(baseCommand, finalArgs, { timeout: 15000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
