@@ -21,7 +21,7 @@ export class OllamaLLMEngine implements LLMEngine {
     top_k: 20,
     min_p: 0,
     num_predict: 32768,
-    presence_penalty: 1
+    presence_penalty: 0
   } as const;
 
   constructor(options?: Partial<OllamaLLMOptions>) {
