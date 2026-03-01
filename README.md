@@ -347,16 +347,41 @@ Commit message rule:
 
 ## Skills (extensible)
 
-Create a skill under `skills/<name>/SKILL.md`. Optionally add `skills/<name>/handler.js` exporting `execute(input, context)`.
+Create a skill under `skills/<name>/SKILL.md`.
+
+Layering rules:
+
+- Keep integration adapters flat under `src/integrations/<domain>/`.
+- Keep all LLM-callable tool implementations in `src/runtime-tools/` (one tool per file, self-register).
+- Keep `src/skills/` focused on skill metadata management.
 
 Example structure:
 
 ```
 skills/my-skill/SKILL.md
-skills/my-skill/handler.js
+src/integrations/my-integration/client.ts
+src/runtime-tools/mySkillTool.ts
 ```
 
-LLM can call `skill.invoke` with `{ name, input }`.
+In `SKILL.md`, define runtime contract fields:
+
+- `runtime_tool`
+- `runtime_action`
+- `runtime_params`
+
+And describe LLM output JSON as:
+
+```json
+{
+  "tool": "runtime_tool_name",
+  "action": "runtime_action_name",
+  "params": {
+    "key": "value"
+  }
+}
+```
+
+Runtime parser accepts both `action/params` and legacy `op/args`, then routes to the registered tool.
 
 ## Market Analysis Capability
 

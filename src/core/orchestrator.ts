@@ -5,7 +5,6 @@ import { writeAudit } from "../auditLogger";
 import { LLMRuntimeContext, LLMPlanMeta } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
-import { getSkillHandlerToolName } from "../skills/toolNaming";
 import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../runtime-tools/toolRegistry";
 import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
@@ -278,7 +277,7 @@ export class Orchestrator {
     preferToolResult?: boolean;
   }> {
     const selectedSkill = this.skillManager.get(skillName);
-    const handlerToolName = selectedSkill?.hasHandler ? getSkillHandlerToolName(skillName) : undefined;
+    const runtimeToolName = selectedSkill?.runtimeTool;
 
     // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
@@ -292,8 +291,8 @@ export class Orchestrator {
     if (skillName && skillContext?.[skillName]?.terminal) {
       forceTools.push("terminal");
     }
-    if (handlerToolName) {
-      forceTools.push(handlerToolName);
+    if (runtimeToolName) {
+      forceTools.push(runtimeToolName);
     }
 
     const fullToolContext = this.toolRegistry.buildRuntimeContext();
@@ -308,6 +307,13 @@ export class Orchestrator {
       // skills_context: skillContext,
       tools_context: toolContext,
       skill_detail: detail,
+      skill_runtime_contract: selectedSkill?.runtimeTool
+        ? {
+            tool: selectedSkill.runtimeTool,
+            action: selectedSkill.runtimeAction ?? "execute",
+            params: selectedSkill.runtimeParams ?? ["input"]
+          }
+        : null
     };
 
     const plan = await this.llmEngine.planToolExecution(text, runtimeContext);
@@ -527,13 +533,24 @@ function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?
 function buildSkillsContext(
   skillManager: SkillManager,
   onlyNames?: string[],
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> = {}
-): Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null {
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> = {}
+): Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> | null {
   const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
   const entries = skills.map((skill) => {
     const command = skill.metadata?.command ?? skill.command;
     const keywords = skill.metadata?.keywords ?? skill.keywords;
-    return [skill.name, { description: skill.description, command, terminal: skill.terminal, has_handler: skill.hasHandler, ...(keywords ? { keywords } : {}) }] as const;
+    return [
+      skill.name,
+      {
+        description: skill.description,
+        command,
+        terminal: skill.terminal,
+        ...(skill.runtimeTool ? { runtime_tool: skill.runtimeTool } : {}),
+        ...(skill.runtimeAction ? { runtime_action: skill.runtimeAction } : {}),
+        ...(skill.runtimeParams && skill.runtimeParams.length > 0 ? { runtime_params: skill.runtimeParams } : {}),
+        ...(keywords ? { keywords } : {})
+      }
+    ] as const;
   });
   const extraEntries = Object.entries(extraSkills).filter(([name]) => !onlyNames || onlyNames.includes(name));
   const merged = Object.fromEntries([...entries, ...extraEntries]);
@@ -543,15 +560,16 @@ function buildSkillsContext(
 
 function buildExtraSkillsContext(
   toolRegistry: ToolRegistry
-): Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> {
-  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> = {};
+): Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> {
+  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> = {};
   const haSchema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
   if (haSchema) {
     extra.homeassistant = {
       description: "Control and query Home Assistant devices (services, state, snapshots).",
       command: "homeassistant",
       terminal: false,
-      has_handler: false,
+      runtime_tool: "homeassistant",
+      runtime_action: "call_service",
       ...(haSchema.keywords ? { keywords: haSchema.keywords } : {})
     };
   }
@@ -561,7 +579,7 @@ function buildExtraSkillsContext(
 function getSkillDetail(
   name: string,
   skillManager: SkillManager,
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }>,
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }>,
   toolRegistry: ToolRegistry
 ): string {
   if (extraSkills[name] && name === "homeassistant") {

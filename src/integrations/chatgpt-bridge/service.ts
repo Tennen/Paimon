@@ -1,3 +1,4 @@
+// @ts-nocheck
 const { setTimeout: sleep } = require("timers/promises");
 
 const CHATGPT_URL = process.env.CHATGPT_URL || "https://chatgpt.com/";
@@ -22,12 +23,12 @@ let browserPromise = null;
 let pagePromise = null;
 let serialQueue = Promise.resolve();
 
-module.exports.directCommands = ["/gpt"];
-module.exports.directAsync = true;
-module.exports.directAcceptedText = "收到，已交给 ChatGPT 处理中，完成后会回传结果。";
-module.exports.directAcceptedDelayMs = toInt(process.env.CHATGPT_ACCEPTED_DELAY_MS, 20000);
+export const directCommands = ["/gpt"];
+export const directAsync = true;
+export const directAcceptedText = "收到，已交给 ChatGPT 处理中，完成后会回传结果。";
+export const directAcceptedDelayMs = toInt(process.env.CHATGPT_ACCEPTED_DELAY_MS, 20000);
 
-module.exports.execute = async function execute(input) {
+export async function execute(input) {
   const message = String(input || "").trim();
   if (!message) {
     return { text: "请输入要询问 ChatGPT 的内容。" };
@@ -47,7 +48,7 @@ module.exports.execute = async function execute(input) {
     () => undefined
   );
   return task;
-};
+}
 
 async function runChatgptRequest(command) {
   let lastError = null;

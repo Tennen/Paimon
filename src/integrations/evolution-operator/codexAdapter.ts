@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { ensureDir, resolveDataPath } from "../storage/persistence";
+import { ensureDir, resolveDataPath } from "../../storage/persistence";
 
 export type CodexRunRequest = {
   taskId: string;

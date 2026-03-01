@@ -24,9 +24,9 @@ import {
   UpdateScheduledTaskInput
 } from "../scheduler/schedulerService";
 import { ScheduledTask } from "../scheduler/taskStore";
-import { EvolutionEngine } from "../evolution/evolutionEngine";
-import { EvolutionCodexConfigService } from "../evolution/codexConfigService";
-import { EvolutionOperatorService } from "../evolution/operatorService";
+import { EvolutionEngine } from "../integrations/evolution-operator/evolutionEngine";
+import { EvolutionCodexConfigService } from "../integrations/evolution-operator/codexConfigService";
+import { EvolutionOperatorService } from "../integrations/evolution-operator/service";
 
 const execAsync = promisify(exec);
 

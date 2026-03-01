@@ -140,7 +140,7 @@ export class ToolRegistry {
 }
 
 export function loadTools(registry: ToolRegistry, deps: ToolDependencies): void {
-  const toolsDir = path.resolve(__dirname, "../tools");
+  const toolsDir = path.resolve(__dirname);
   if (!fs.existsSync(toolsDir)) {
     return;
   }

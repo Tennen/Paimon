@@ -15,9 +15,9 @@ import { CallbackDispatcher } from "./integrations/wecom/callbackDispatcher";
 import { EnvConfigStore } from "./config/envConfigStore";
 import { SchedulerService } from "./scheduler/schedulerService";
 import { AdminIngressAdapter } from "./ingress/admin";
-import { EvolutionEngine } from "./evolution/evolutionEngine";
-import { EvolutionCodexConfigService } from "./evolution/codexConfigService";
-import { EvolutionOperatorService } from "./evolution/operatorService";
+import { EvolutionEngine } from "./integrations/evolution-operator/evolutionEngine";
+import { EvolutionCodexConfigService } from "./integrations/evolution-operator/codexConfigService";
+import { EvolutionOperatorService } from "./integrations/evolution-operator/service";
 import { sttRuntime } from "./engines/stt";
 
 const app = express();

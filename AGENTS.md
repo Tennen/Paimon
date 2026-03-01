@@ -12,12 +12,14 @@ This file defines hard constraints for coding agents working in this repository.
 - `src/integrations/`
   - External system adapters only (Home Assistant, WeCom, etc.).
   - Encapsulate HTTP/WebSocket protocol details.
-  - No orchestration/business workflow state.
+  - Default: no orchestration/business workflow state.
+  - Exception: `src/integrations/evolution-operator/` hosts evolution runtime orchestration and state machine.
+  - Keep integrations flat by domain (`src/integrations/<domain>/`), no `integrations/tools` layer.
 
 - `src/runtime-tools/`
-  - Tool definitions exposed to orchestration/LLM.
-  - Register schemas/handlers; orchestrate integration calls.
-  - Must not own persistence policy.
+  - Independent tool definitions exposed to orchestration/LLM (for example: `terminal`, `homeassistant`).
+  - Register schemas/handlers and call integrations.
+  - Must not contain skill-specific orchestration logic or persistence policy.
 
 - `src/core/`
   - Orchestration and tool routing.
@@ -28,16 +30,34 @@ This file defines hard constraints for coding agents working in this repository.
   - Callers should use `registerStore`, `getStore`, `setStore`.
   - Business modules must not depend on file paths.
 
-- `src/evolution/`, `src/scheduler/`, `src/memory/`
-  - Domain services/state models.
+- `src/integrations/evolution-operator/`, `src/scheduler/`, `src/memory/`
+  - Evolution operator domain runtime lives under integration layer.
   - Persistence access only through `src/storage/persistence.ts`.
 
 ## Directory Rules
 
 - New external platform clients go under `src/integrations/<platform>/`.
-- New LLM-callable tools go under `src/runtime-tools/`.
+- New integration modules stay flat under `src/integrations/<domain>/`.
+- New independent LLM-callable tools go under `src/runtime-tools/`.
 - Standalone operational scripts go under repo root `tools/` (not `src/`).
 - New cross-cutting infrastructure modules go under `src/<infra-domain>/` and must be reusable.
+
+## Skill Rules
+
+- `skills/<name>/` keeps declarative spec only (`SKILL.md`).
+- Do not add runtime logic in `skills/<name>/handler.js`.
+- `src/skills/` should only keep `skillManager` and related metadata loading.
+- Runtime tool implementation/registration must live in:
+  - `src/runtime-tools/*Tool.ts` (one tool per file, self-register to `ToolRegistry`)
+  - `src/integrations/<domain>/` for external API adapters
+- Every executable skill should declare in `SKILL.md` frontmatter:
+  - `runtime_tool`
+  - `runtime_action`
+  - `runtime_params`
+- Planner output contract should use JSON:
+  - `tool`
+  - `action`
+  - `params`
 
 ## Persistence Rules
 

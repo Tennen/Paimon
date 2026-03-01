@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const market = require("../skills/market-analysis/handler.js") as { execute: (input: string) => Promise<{ text: string }> };
+const market = require("../src/integrations/market-analysis/service") as { execute: (input: string) => Promise<{ text: string }> };
 const portfolioPath = path.resolve(process.cwd(), "data/market-analysis/portfolio.json");
 const configPath = path.resolve(process.cwd(), "data/market-analysis/config.json");
-const bridge = require("../skills/chatgpt-bridge/handler.js") as { execute: (input: string) => Promise<{ text: string } | string> };
+const bridge = require("../src/integrations/chatgpt-bridge/service") as { execute: (input: string) => Promise<{ text: string } | string> };
 const chatRequests: Array<Record<string, unknown>> = [];
 
 function assert(condition: unknown, message: string): void {

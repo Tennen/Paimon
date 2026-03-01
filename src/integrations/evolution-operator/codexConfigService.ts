@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
-import { EnvConfigStore } from "../config/envConfigStore";
+import { EnvConfigStore } from "../../config/envConfigStore";
 
 export type CodexConfigSnapshot = {
   codexModel: string;

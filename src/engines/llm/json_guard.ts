@@ -67,17 +67,24 @@ export function parseSkillPlanningResult(rawText: string): SkillPlanningResult {
   console.log("rawText", rawText);
   const obj = parseJsonObject(rawText);
 
-  if (typeof obj.tool !== "string" || typeof obj.op !== "string") {
-    throw new Error("Missing tool/op in LLM output");
+  const action = typeof obj.action === "string" ? obj.action : typeof obj.op === "string" ? obj.op : "";
+  const params = obj.params && typeof obj.params === "object"
+    ? obj.params as Record<string, unknown>
+    : obj.args && typeof obj.args === "object"
+      ? obj.args as Record<string, unknown>
+      : null;
+
+  if (typeof obj.tool !== "string" || !action) {
+    throw new Error("Missing tool/action in LLM output");
   }
-  if (typeof obj.args !== "object" || obj.args === null) {
-    throw new Error("Missing args in LLM output");
+  if (!params) {
+    throw new Error("Missing params in LLM output");
   }
 
   return {
     tool: obj.tool,
-    op: obj.op,
-    args: obj.args as Record<string, unknown>,
+    op: action,
+    args: params,
     success_response: typeof obj.success_response === "string" ? obj.success_response : "Task completed successfully",
     failure_response: typeof obj.failure_response === "string" ? obj.failure_response : "Tool execution failed",
   };

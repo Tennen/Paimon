@@ -9,7 +9,7 @@ import {
   ensureDir,
   resolveDataPath,
   setStore
-} from "../storage/persistence";
+} from "../../storage/persistence";
 import {
   EvolutionGoal,
   EvolutionGoalEvent,

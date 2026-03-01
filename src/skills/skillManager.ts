@@ -15,7 +15,9 @@ export type SkillInfo = {
   directAsync?: boolean;
   directAcceptedText?: string;
   directAcceptedDelayMs?: number;
-  hasHandler?: boolean;
+  runtimeTool?: string;
+  runtimeAction?: string;
+  runtimeParams?: string[];
   preferToolResult?: boolean;
   detail?: string;
   install?: string;
@@ -27,23 +29,18 @@ export type SkillInfo = {
     directAsync?: boolean;
     directAcceptedText?: string;
     directAcceptedDelayMs?: number;
+    runtimeTool?: string;
+    runtimeAction?: string;
+    runtimeParams?: string[];
     preferToolResult?: boolean;
     [key: string]: any;
   };
 };
 
-export type SkillInvokeResult = {
-  text: string;
-  data?: unknown;
-};
-
-type SkillHandler = (input: string, context: Record<string, unknown>) => Promise<SkillInvokeResult> | SkillInvokeResult;
-
 export class SkillManager {
   private readonly baseDirs: string[];
   private skills: SkillInfo[] = [];
   private skillMap = new Map<string, SkillInfo>();
-  private handlers = new Map<string, SkillHandler>();
 
   constructor(baseDir?: string) {
     const defaultDirs = [
@@ -57,7 +54,6 @@ export class SkillManager {
   refresh(): void {
     this.skills = [];
     this.skillMap.clear();
-    this.handlers.clear();
 
     for (const baseDir of this.baseDirs) {
       if (!fs.existsSync(baseDir)) {
@@ -76,15 +72,19 @@ export class SkillManager {
         const frontmetadata = extractFrontmatter(content);
         const name = frontmetadata.name ?? dirName;
         const description = frontmetadata.description ?? extractDescription(content);
-        const handlerPath = path.join(skillDir, "handler.js");
-        const handlerDeclared = fs.existsSync(handlerPath);
         const info: SkillInfo = {
           name,
           description,
           terminal: frontmetadata.terminal,
           command: frontmetadata.command,
           keywords: frontmetadata.keywords,
-          hasHandler: false,
+          directCommands: frontmetadata.directCommands,
+          directAsync: frontmetadata.directAsync,
+          directAcceptedText: frontmetadata.directAcceptedText,
+          directAcceptedDelayMs: frontmetadata.directAcceptedDelayMs,
+          runtimeTool: frontmetadata.runtimeTool,
+          runtimeAction: frontmetadata.runtimeAction,
+          runtimeParams: frontmetadata.runtimeParams,
           preferToolResult: frontmetadata.preferToolResult,
           install: frontmetadata.install,
           metadata: frontmetadata,
@@ -93,55 +93,6 @@ export class SkillManager {
         if (!this.skillMap.has(name)) {
           this.skills.push(info);
           this.skillMap.set(name, info);
-        }
-
-        if (handlerDeclared && !this.handlers.has(name)) {
-          try {
-            const mod = require(handlerPath) as {
-              execute?: SkillHandler;
-              directCommands?: unknown;
-              directAsync?: unknown;
-              directAcceptedText?: unknown;
-              directAcceptedDelayMs?: unknown;
-            };
-            if (mod.execute) {
-              this.handlers.set(name, mod.execute);
-              const existing = this.skillMap.get(name);
-              if (existing) {
-                existing.hasHandler = true;
-                const directCommands = parseDirectCommands(mod.directCommands);
-                if (directCommands.length > 0) {
-                  existing.directCommands = directCommands;
-                  if (existing.metadata) {
-                    existing.metadata.directCommands = directCommands;
-                  }
-                }
-                const directAsync = parseMaybeBoolean(mod.directAsync);
-                if (directAsync !== undefined) {
-                  existing.directAsync = directAsync;
-                  if (existing.metadata) {
-                    existing.metadata.directAsync = directAsync;
-                  }
-                }
-                const directAcceptedText = parseMaybeString(mod.directAcceptedText);
-                if (directAcceptedText) {
-                  existing.directAcceptedText = directAcceptedText;
-                  if (existing.metadata) {
-                    existing.metadata.directAcceptedText = directAcceptedText;
-                  }
-                }
-                const directAcceptedDelayMs = parseMaybeNumber(mod.directAcceptedDelayMs);
-                if (directAcceptedDelayMs !== undefined) {
-                  existing.directAcceptedDelayMs = directAcceptedDelayMs;
-                  if (existing.metadata) {
-                    existing.metadata.directAcceptedDelayMs = directAcceptedDelayMs;
-                  }
-                }
-              }
-            }
-          } catch {
-            // ignore load errors
-          }
         }
       }
     }
@@ -157,19 +108,6 @@ export class SkillManager {
 
   getDetail(name: string): string {
     return this.skillMap.get(name)?.detail ?? "";
-  }
-
-  hasHandler(name: string): boolean {
-    return this.handlers.has(name);
-  }
-
-  async invoke(name: string, input: string, context: Record<string, unknown>): Promise<SkillInvokeResult> {
-    const handler = this.handlers.get(name);
-    if (!handler) {
-      throw new Error("no handler");
-    }
-    const result = await handler(input, context);
-    return result ?? { text: "" };
   }
 
   async installSkill(skillName: string): Promise<void> {
@@ -311,6 +249,13 @@ function extractFrontmatter(content: string): {
   command?: string;
   install?: string;
   keywords?: string[];
+  directCommands?: string[];
+  directAsync?: boolean;
+  directAcceptedText?: string;
+  directAcceptedDelayMs?: number;
+  runtimeTool?: string;
+  runtimeAction?: string;
+  runtimeParams?: string[];
   preferToolResult?: boolean;
 } {
   const lines = content.split("\n");
@@ -324,6 +269,13 @@ function extractFrontmatter(content: string): {
   let command: string | undefined;
   let install: string | undefined;
   let keywords: string[] | undefined;
+  let directCommands: string[] | undefined;
+  let directAsync: boolean | undefined;
+  let directAcceptedText: string | undefined;
+  let directAcceptedDelayMs: number | undefined;
+  let runtimeTool: string | undefined;
+  let runtimeAction: string | undefined;
+  let runtimeParams: string[] | undefined;
   let preferToolResult: boolean | undefined;
 
   for (const line of fmLines) {
@@ -353,10 +305,75 @@ function extractFrontmatter(content: string): {
       if (list.length > 0) {
         keywords = keywords ? Array.from(new Set([...keywords, ...list])) : list;
       }
+    } else if (trimmed.startsWith("direct_commands:") || trimmed.startsWith("directCommands:")) {
+      const raw = trimmed.replace(/^(direct_commands|directCommands):/i, "").trim();
+      const list = parseDirectCommands(parseFrontmatterList(raw));
+      if (list.length > 0) {
+        directCommands = directCommands ? Array.from(new Set([...directCommands, ...list])) : list;
+      }
+    } else if (trimmed.startsWith("direct_async:") || trimmed.startsWith("directAsync:")) {
+      const raw = trimmed.replace(/^(direct_async|directAsync):/i, "").trim();
+      const parsed = parseFrontmatterBoolean(raw);
+      if (parsed !== undefined) {
+        directAsync = parsed;
+      }
+    } else if (trimmed.startsWith("direct_accepted_text:") || trimmed.startsWith("directAcceptedText:")) {
+      const raw = trimmed
+        .replace(/^direct_accepted_text:/i, "")
+        .replace(/^directAcceptedText:/i, "")
+        .trim();
+      const parsed = parseFrontmatterString(raw);
+      if (parsed) {
+        directAcceptedText = parsed;
+      }
+    } else if (trimmed.startsWith("direct_accepted_delay_ms:") || trimmed.startsWith("directAcceptedDelayMs:")) {
+      const raw = trimmed
+        .replace(/^direct_accepted_delay_ms:/i, "")
+        .replace(/^directAcceptedDelayMs:/i, "")
+        .trim();
+      const parsed = parseFrontmatterNumber(raw);
+      if (parsed !== undefined) {
+        directAcceptedDelayMs = parsed;
+      }
+    } else if (trimmed.startsWith("runtime_tool:") || trimmed.startsWith("runtimeTool:")) {
+      runtimeTool = parseFrontmatterString(
+        trimmed
+          .replace(/^runtime_tool:/i, "")
+          .replace(/^runtimeTool:/i, "")
+          .trim()
+      );
+    } else if (trimmed.startsWith("runtime_action:") || trimmed.startsWith("runtimeAction:")) {
+      runtimeAction = parseFrontmatterString(
+        trimmed
+          .replace(/^runtime_action:/i, "")
+          .replace(/^runtimeAction:/i, "")
+          .trim()
+      );
+    } else if (trimmed.startsWith("runtime_params:") || trimmed.startsWith("runtimeParams:")) {
+      const raw = trimmed.replace(/^(runtime_params|runtimeParams):/i, "").trim();
+      const list = parseFrontmatterList(raw);
+      if (list.length > 0) {
+        runtimeParams = list;
+      }
     }
   }
 
-  return { name, description, terminal, command, install, keywords, preferToolResult };
+  return {
+    name,
+    description,
+    terminal,
+    command,
+    install,
+    keywords,
+    directCommands,
+    directAsync,
+    directAcceptedText,
+    directAcceptedDelayMs,
+    runtimeTool,
+    runtimeAction,
+    runtimeParams,
+    preferToolResult
+  };
 }
 
 function parseFrontmatterList(raw: string): string[] {
@@ -383,10 +400,20 @@ function parseFrontmatterBoolean(raw: string): boolean | undefined {
   return undefined;
 }
 
-function parseDirectCommands(input: unknown): string[] {
-  if (!Array.isArray(input)) {
-    return [];
-  }
+function parseFrontmatterString(raw: string): string | undefined {
+  const text = raw.trim().replace(/^["']|["']$/g, "");
+  return text || undefined;
+}
+
+function parseFrontmatterNumber(raw: string): number | undefined {
+  const text = raw.trim().replace(/^["']|["']$/g, "");
+  if (!text) return undefined;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.floor(parsed);
+}
+
+function parseDirectCommands(input: string[]): string[] {
   const out: string[] = [];
   for (const item of input) {
     const text = String(item ?? "").trim().toLowerCase();
@@ -399,35 +426,6 @@ function parseDirectCommands(input: unknown): string[] {
     }
   }
   return out;
-}
-
-function parseMaybeBoolean(value: unknown): boolean | undefined {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") {
-    const text = value.trim().toLowerCase();
-    if (["true", "1", "yes", "on"].includes(text)) return true;
-    if (["false", "0", "no", "off"].includes(text)) return false;
-  }
-  return undefined;
-}
-
-function parseMaybeString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const text = value.trim();
-  return text.length > 0 ? text : undefined;
-}
-
-function parseMaybeNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Math.floor(value);
-  }
-  if (typeof value === "string") {
-    const parsed = Number(value.trim());
-    if (Number.isFinite(parsed)) {
-      return Math.floor(parsed);
-    }
-  }
-  return undefined;
 }
 
 function extractNpmInstallPackage(command: string): string | undefined {

@@ -1,9 +1,135 @@
+// @ts-nocheck
+import { ToolDependencies, ToolRegistry } from "./toolRegistry";
+import { ToolResult } from "../types";
+
 const ALLOWED_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const RESET_TOKENS = new Set(["default", "reset", "clear", "none", "空", "默认"]);
 
-module.exports.directCommands = ["/evolve", "/coding", "/codex"];
+export const directCommands = ["/evolve", "/coding", "/codex"];
 
-module.exports.execute = async function execute(input, context) {
+type EvolutionServiceBridge = {
+  getTickMs: () => number;
+  getSnapshot: () => unknown;
+  enqueueGoal: (input: { goal: string; commitMessage?: string }) => Promise<unknown>;
+  triggerNow: () => Promise<void>;
+  getCodexConfig: () => { codexModel: string; codexReasoningEffort: string; envPath: string };
+  updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) => {
+    codexModel: string;
+    codexReasoningEffort: string;
+    envPath: string;
+  };
+};
+
+export function registerTool(registry: ToolRegistry, deps: ToolDependencies): void {
+  const evolutionService = deps.evolutionService as EvolutionServiceBridge | undefined;
+
+  registry.register(
+    {
+      name: "skill.evolution-operator",
+      execute: (op, args, context) =>
+        executeInputTool(
+          op,
+          args,
+          async (input) => execute(input, buildEvolutionContext(context, evolutionService))
+        )
+    },
+    {
+      name: "skill.evolution-operator",
+      description: "Control built-in evolution runtime via chat commands.",
+      operations: [
+        {
+          op: "execute",
+          description: "Execute evolution operator command.",
+          params: {
+            input: "string"
+          }
+        }
+      ]
+    }
+  );
+
+  registerDirectCommands(registry, directCommands, {
+    tool: "skill.evolution-operator",
+    op: "execute",
+    argName: "input",
+    argMode: "full_input",
+    preferToolResult: true
+  });
+}
+
+async function executeInputTool(
+  op: string,
+  args: Record<string, unknown>,
+  runner: (input: string) => Promise<unknown>
+): Promise<ToolResult> {
+  if (op !== "execute") {
+    return { ok: false, error: `Unsupported action: ${op}` };
+  }
+  const input = String(args.input ?? "").trim();
+  if (!input) {
+    return { ok: false, error: "Missing input" };
+  }
+
+  try {
+    const output = await runner(input);
+    return { ok: true, output };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+}
+
+function buildEvolutionContext(
+  context: Record<string, unknown>,
+  evolutionService?: EvolutionServiceBridge
+): Record<string, unknown> {
+  if (!evolutionService) {
+    return context;
+  }
+
+  return {
+    ...context,
+    evolution: {
+      getTickMs: () => evolutionService.getTickMs(),
+      getSnapshot: () => evolutionService.getSnapshot(),
+      enqueueGoal: (input: { goal: string; commitMessage?: string }) => evolutionService.enqueueGoal(input),
+      triggerNow: () => evolutionService.triggerNow(),
+      getCodexConfig: () => evolutionService.getCodexConfig(),
+      updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) =>
+        evolutionService.updateCodexConfig(input)
+    }
+  };
+}
+
+function registerDirectCommands(
+  registry: ToolRegistry,
+  commands: string[],
+  route: {
+    tool: string;
+    op: string;
+    argName: string;
+    argMode: "full_input" | "rest";
+    preferToolResult?: boolean;
+    async?: boolean;
+    acceptedText?: string;
+    acceptedDelayMs?: number;
+  }
+): void {
+  for (const command of commands) {
+    registry.registerDirectToolCall({
+      command,
+      tool: route.tool,
+      op: route.op,
+      argName: route.argName,
+      argMode: route.argMode,
+      preferToolResult: route.preferToolResult ?? true,
+      async: route.async ?? false,
+      acceptedText: route.acceptedText,
+      acceptedDelayMs: route.acceptedDelayMs
+    });
+  }
+}
+
+export async function execute(input, context) {
   const api = getEvolutionApi(context);
   const raw = String(input || "").trim();
   const command = parseCommand(raw);
@@ -45,7 +171,7 @@ module.exports.execute = async function execute(input, context) {
       .filter(Boolean)
       .join("\n")
   };
-};
+}
 
 async function handleCodexCommand(command, api) {
   if (command.kind === "help") {

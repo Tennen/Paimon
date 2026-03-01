@@ -31,12 +31,12 @@ test("commit message uses generated when user input not provided", () => {
 test("commit message falls back deterministically when generated is empty", () => {
   const fallbackA = buildDeterministicCommitMessage(
     "improve evolution checks",
-    ["src/evolution/evolutionEngine.ts", "package.json"],
+    ["src/integrations/evolution-operator/evolutionEngine.ts", "package.json"],
     "diff-content"
   );
   const fallbackB = buildDeterministicCommitMessage(
     "improve evolution checks",
-    ["src/evolution/evolutionEngine.ts", "package.json"],
+    ["src/integrations/evolution-operator/evolutionEngine.ts", "package.json"],
     "diff-content"
   );
   const selected = selectCommitMessage({

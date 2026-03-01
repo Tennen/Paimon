@@ -8,15 +8,15 @@ This document explains the intended module layout and placement rules.
 src/
   core/            # Orchestrator, router, core runtime flow
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
-  integrations/    # External API adapters (ha, wecom, ...)
-  runtime-tools/   # LLM-callable tool registry and tool handlers
+  integrations/    # External API adapters (flat by domain)
+    evolution-operator/ # Evolution runtime engine + state orchestration
+  runtime-tools/   # Tool handlers and schemas (one tool per file, self-register)
   storage/         # Persistence abstraction (store registration/get/set)
-  evolution/       # Self-evolution engine and state domain
   scheduler/       # Schedule/user domain
   memory/          # Session memory domain
   engines/         # LLM engine implementations
   config/          # Runtime config services
-  skills/          # Built-in skill runtime helpers
+  skills/          # Skill metadata manager only
   callback/        # Async callback dispatch
 ```
 
@@ -24,9 +24,11 @@ Repo root:
 
 ```text
 tools/             # Standalone scripts and bridge binaries/helpers
-skills/            # Skill packages (SKILL.md + optional handler.js)
+skills/            # Skill packages (SKILL.md declarations only)
 admin-web/         # Admin frontend
 ```
+
+Note: `handler.js` is deprecated. Keep runtime execution in `src/runtime-tools/` and integrations flat under `src/integrations/`.
 
 ## Why This Refactor
 
@@ -44,7 +46,7 @@ admin-web/         # Admin frontend
 ## Placement Rules
 
 - If code consumes third-party API protocol directly -> `src/integrations/`.
-- If code exposes capability to orchestrator/LLM -> `src/runtime-tools/`.
+- If code is LLM-callable tool (including skill-bound tools) -> `src/runtime-tools/`.
 - If code only translates inbound requests to internal model -> `src/ingress/`.
 - If code stores persistent domain state -> use `src/storage/persistence.ts` API only.
 

@@ -11,7 +11,7 @@ export type LLMRuntimeContext = {
     action: { type: string; params: Record<string, unknown> };
   }>;
   tools_context?: Record<string, Record<string, unknown>> | null;
-  skills_context?: Record<string, { description?: string; command?: string; terminal?: boolean; has_handler?: boolean; keywords?: string[] }> | null;
+  skills_context?: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> | null;
   next_step_context?: Record<string, unknown> | null;
 };
 

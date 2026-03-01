@@ -8,7 +8,7 @@
     "dev:admin": "vite --config admin-web/vite.config.ts",
     "build:admin": "vite build --config admin-web/vite.config.ts",
     "build": "npm run build:admin && tsc -p tsconfig.json",
-    "test:evolution": "node --test --import tsx src/evolution/evolutionEngine.test.ts",
+    "test:evolution": "node --test --import tsx src/integrations/evolution-operator/evolutionEngine.test.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {

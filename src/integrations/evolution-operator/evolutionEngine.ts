@@ -39,7 +39,7 @@ type CommandResult = {
 
 export type CommitMessageSource = "user" | "generated" | "fallback";
 
-const SELF_EVOLUTION_FILE = "src/evolution/evolutionEngine.ts";
+const SELF_EVOLUTION_FILE = "src/integrations/evolution-operator/evolutionEngine.ts";
 const MAX_GOAL_EVENTS = 80;
 const MAX_GOAL_RAW_LINES = 120;
 

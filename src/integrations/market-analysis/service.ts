@@ -1,7 +1,9 @@
+// @ts-nocheck
 const fs = require("fs");
 const path = require("path");
+const chatgptBridge = require("../chatgpt-bridge/service");
 
-const ROOT_DIR = path.resolve(__dirname, "..", "..");
+const ROOT_DIR = process.cwd();
 const DATA_DIR = path.join(ROOT_DIR, "data", "market-analysis");
 const RUNS_DIR = path.join(DATA_DIR, "runs");
 const PORTFOLIO_FILE = path.join(DATA_DIR, "portfolio.json");
@@ -23,9 +25,9 @@ const DEFAULT_ANALYSIS_CONFIG = {
   }
 };
 
-module.exports.directCommands = ["/market"];
+export const directCommands = ["/market"];
 
-module.exports.execute = async function execute(input) {
+export async function execute(input) {
   ensureStorage();
 
   const command = parseCommand(input);
@@ -58,7 +60,7 @@ module.exports.execute = async function execute(input) {
       explanation: result.explanation
     }
   };
-};
+}
 
 function parseCommand(input) {
   const raw = String(input || "").trim();
@@ -702,23 +704,7 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
     && analysisConfig.gptPlugin.fallbackToLocal
   );
 
-  let bridgeHandler = null;
-  try {
-    bridgeHandler = require(path.join(ROOT_DIR, "skills", "chatgpt-bridge", "handler.js"));
-  } catch (error) {
-    const detail = (error && error.message) ? error.message : String(error || "unknown error");
-    if (!fallbackToLocal) {
-      throw new Error(`gpt_plugin bridge unavailable: ${detail}`);
-    }
-    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
-    return {
-      ...localFallback,
-      provider: "local",
-      fallbackFrom: "gpt_plugin",
-      fallbackReason: `gpt_plugin bridge unavailable: ${detail}`
-    };
-  }
-
+  const bridgeHandler = chatgptBridge;
   if (!bridgeHandler || typeof bridgeHandler.execute !== "function") {
     const reason = "gpt_plugin bridge execute() is missing";
     if (!fallbackToLocal) {
