@@ -6,10 +6,10 @@ import { LLMRuntimeContext, LLMPlanMeta } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
 import { getSkillHandlerToolName } from "../skills/toolNaming";
-import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
+import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../runtime-tools/toolRegistry";
 import { LLMEngine } from "../engines/llm/llm";
-import { CallbackDispatcher } from "../callback/callbackDispatcher";
-import { sttRuntime } from "../stt";
+import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
+import { sttRuntime } from "../engines/stt";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();

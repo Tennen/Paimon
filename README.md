@@ -29,6 +29,16 @@ sequenceDiagram
   Paimon-->>WeCom: (optional) Send image + caption
 ```
 
+## Directory conventions
+
+- `src/ingress`: inbound protocol adapters (`/ingress/*`, admin API, bridge stream).
+- `src/integrations`: outbound integrations (Home Assistant, WeCom clients).
+- `src/runtime-tools`: LLM-callable tools and registry.
+- `src/storage`: persistence abstraction (`registerStore/getStore/setStore`).
+- `tools/`: standalone operational scripts (not runtime modules).
+
+See `AGENTS.md` for coding constraints and `docs/PROJECT_STRUCTURE.md` for structure planning.
+
 ## Requirements
 
 - Node.js 18+

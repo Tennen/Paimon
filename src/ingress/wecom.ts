@@ -4,7 +4,7 @@ import { XMLParser } from "fast-xml-parser";
 import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
-import { WeComMediaDownloader } from "../endpoints/wecom/mediaDownloader";
+import { WeComMediaDownloader } from "../integrations/wecom/mediaDownloader";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: true,

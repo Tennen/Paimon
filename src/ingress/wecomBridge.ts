@@ -3,8 +3,8 @@ import { fetch } from "undici";
 import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
-import { WeComSender } from "../endpoints/wecom/sender";
-import { WeComMediaDownloader } from "../endpoints/wecom/mediaDownloader";
+import { WeComSender } from "../integrations/wecom/sender";
+import { WeComMediaDownloader } from "../integrations/wecom/mediaDownloader";
 
 export class WeComBridgeIngressAdapter implements IngressAdapter {
   private readonly streamUrl: string;

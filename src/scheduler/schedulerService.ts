@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope, Response } from "../types";
-import { WeComSender } from "../endpoints/wecom/sender";
+import { WeComSender } from "../integrations/wecom/sender";
 import { ScheduledTask, ScheduledTaskStore } from "./taskStore";
 import { PushUser, PushUserStore } from "./userStore";
 import { DataStoreDescriptor } from "../storage/persistence";

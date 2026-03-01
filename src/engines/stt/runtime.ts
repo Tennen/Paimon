@@ -1,17 +1,14 @@
-import { Envelope } from "../types";
+import { Envelope } from "../../types";
 import { FastWhisperSTTProvider } from "./fastWhisperProvider";
-import { MockSTTProvider } from "./mockProvider";
 import { STTInput, STTProvider } from "./types";
 
 const DEFAULT_STT_PROVIDER = "fast-whisper";
 
 export class STTRuntime {
   private provider: STTProvider;
-  private readonly fallbackProvider: STTProvider;
 
-  constructor(provider?: STTProvider, fallbackProvider?: STTProvider) {
+  constructor(provider?: STTProvider) {
     this.provider = provider ?? createSTTProviderFromEnv();
-    this.fallbackProvider = fallbackProvider ?? new MockSTTProvider();
   }
 
   getProviderName(): string {
@@ -27,10 +24,6 @@ export class STTRuntime {
       await this.provider.ensureReady();
     } catch (error) {
       console.error(`[stt] provider ${this.provider.name} init failed:`, error);
-      if (this.provider.name !== this.fallbackProvider.name) {
-        this.provider = this.fallbackProvider;
-        console.warn(`[stt] fallback to provider: ${this.provider.name}`);
-      }
     }
   }
 
@@ -52,18 +45,6 @@ export class STTRuntime {
       return normalized || "(stt empty)";
     } catch (error) {
       console.error(`[stt] provider ${this.provider.name} transcribe failed:`, error);
-      if (this.provider.name !== this.fallbackProvider.name) {
-        try {
-          const fallback = await this.fallbackProvider.transcribe(input);
-          const normalized = normalizeText(fallback);
-          if (normalized) {
-            return normalized;
-          }
-        } catch (fallbackError) {
-          console.error("[stt] fallback provider failed:", fallbackError);
-        }
-      }
-
       return "(stt failed)";
     }
   }
@@ -71,9 +52,6 @@ export class STTRuntime {
 
 export function createSTTProviderFromEnv(): STTProvider {
   const providerName = normalizeProviderName(process.env.STT_PROVIDER);
-  if (providerName === "mock") {
-    return new MockSTTProvider();
-  }
   if (providerName === "fast-whisper") {
     return new FastWhisperSTTProvider();
   }

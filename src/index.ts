@@ -10,15 +10,15 @@ import { WeComIngressAdapter } from "./ingress/wecom";
 import { WeComBridgeIngressAdapter } from "./ingress/wecomBridge";
 import { MemoryStore } from "./memory/memoryStore";
 import { SkillManager } from "./skills/skillManager";
-import { ToolRegistry, loadTools } from "./tools/toolRegistry";
-import { CallbackDispatcher } from "./callback/callbackDispatcher";
+import { ToolRegistry, loadTools } from "./runtime-tools/toolRegistry";
+import { CallbackDispatcher } from "./integrations/wecom/callbackDispatcher";
 import { EnvConfigStore } from "./config/envConfigStore";
 import { SchedulerService } from "./scheduler/schedulerService";
 import { AdminIngressAdapter } from "./ingress/admin";
 import { EvolutionEngine } from "./evolution/evolutionEngine";
 import { EvolutionCodexConfigService } from "./evolution/codexConfigService";
 import { EvolutionOperatorService } from "./evolution/operatorService";
-import { sttRuntime } from "./stt";
+import { sttRuntime } from "./engines/stt";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));

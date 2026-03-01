@@ -1,5 +1,5 @@
 import { ToolResult } from "../types";
-import { ToolRegistry } from "../tools/toolRegistry";
+import { ToolRegistry } from "../runtime-tools/toolRegistry";
 
 export class ToolRouter {
   private readonly registry: ToolRegistry;
