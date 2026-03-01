@@ -429,10 +429,10 @@ export function MarketSection(props: MarketSectionProps) {
         <Separator />
 
         <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-3">
-          <div className="mono">portfolio: {props.marketConfig?.portfolioPath ?? "-"}</div>
-          <div className="mono">config: {props.marketConfig?.configPath ?? "-"}</div>
-          <div className="mono">state: {props.marketConfig?.statePath ?? "-"}</div>
-          <div className="mono">runs: {props.marketConfig?.runsDir ?? "-"}</div>
+          <div className="mono">portfolio store: {props.marketConfig?.portfolioStore?.name ?? "-"}</div>
+          <div className="mono">config store: {props.marketConfig?.configStore?.name ?? "-"}</div>
+          <div className="mono">state store: {props.marketConfig?.stateStore?.name ?? "-"}</div>
+          <div className="mono">runs store: {props.marketConfig?.runsStore ?? "-"}</div>
         </div>
 
         <Table>

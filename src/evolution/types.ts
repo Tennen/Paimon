@@ -109,10 +109,15 @@ export type EvolutionSnapshot = {
   state: EvolutionState;
   retryQueue: RetryQueueState;
   metrics: EvolutionMetrics;
-  paths: {
-    stateFile: string;
-    retryQueueFile: string;
-    metricsFile: string;
-    codexOutputDir: string;
+  storage: {
+    stores: {
+      state: { name: string; driver: string };
+      retryQueue: { name: string; driver: string };
+      metrics: { name: string; driver: string };
+    };
+    artifacts: {
+      workspaceDir: string;
+      codexOutputDir: string;
+    };
   };
 };

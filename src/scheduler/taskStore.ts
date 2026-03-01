@@ -1,5 +1,10 @@
-import fs from "fs";
-import path from "path";
+import {
+  DATA_STORE,
+  DataStoreDescriptor,
+  getStore,
+  registerStore,
+  setStore
+} from "../storage/persistence";
 
 export type ScheduledTask = {
   id: string;
@@ -22,15 +27,15 @@ type TaskFile = {
 };
 
 export class ScheduledTaskStore {
-  private readonly filePath: string;
+  private readonly storeName = DATA_STORE.SCHEDULER_TASKS;
+  private readonly store: DataStoreDescriptor;
 
-  constructor(filePath?: string) {
-    this.filePath = path.resolve(process.cwd(), filePath ?? process.env.SCHEDULE_TASKS_FILE ?? "data/scheduled-tasks.json");
-    this.ensureFile();
+  constructor() {
+    this.store = registerStore(this.storeName, () => ({ version: 1, tasks: [] }));
   }
 
-  getPath(): string {
-    return this.filePath;
+  getStore(): DataStoreDescriptor {
+    return this.store;
   }
 
   list(): ScheduledTask[] {
@@ -45,33 +50,14 @@ export class ScheduledTaskStore {
     this.write(payload);
   }
 
-  private ensureFile(): void {
-    const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    if (!fs.existsSync(this.filePath)) {
-      this.write({ version: 1, tasks: [] });
-    }
-  }
-
   private read(): TaskFile {
-    this.ensureFile();
-    const raw = fs.readFileSync(this.filePath, "utf-8").trim();
-    if (!raw) {
-      return { version: 1, tasks: [] };
-    }
-    try {
-      const parsed = JSON.parse(raw) as Partial<TaskFile>;
-      const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter(isScheduledTask) : [];
-      return { version: 1, tasks };
-    } catch {
-      return { version: 1, tasks: [] };
-    }
+    const parsed = getStore<Partial<TaskFile>>(this.storeName);
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks.filter(isScheduledTask) : [];
+    return { version: 1, tasks };
   }
 
   private write(payload: TaskFile): void {
-    fs.writeFileSync(this.filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+    setStore(this.storeName, payload);
   }
 }
 

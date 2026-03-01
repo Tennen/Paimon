@@ -4,6 +4,7 @@ import { Envelope, Response } from "../types";
 import { WeComSender } from "../endpoints/wecom/sender";
 import { ScheduledTask, ScheduledTaskStore } from "./taskStore";
 import { PushUser, PushUserStore } from "./userStore";
+import { DataStoreDescriptor } from "../storage/persistence";
 
 export type CreatePushUserInput = {
   name: string;
@@ -80,12 +81,12 @@ export class SchedulerService {
     this.timer = null;
   }
 
-  getStorePath(): string {
-    return this.store.getPath();
+  getTaskStore(): DataStoreDescriptor {
+    return this.store.getStore();
   }
 
-  getUserStorePath(): string {
-    return this.userStore.getPath();
+  getUserStore(): DataStoreDescriptor {
+    return this.userStore.getStore();
   }
 
   getTickMs(): number {

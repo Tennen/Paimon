@@ -1,5 +1,10 @@
-import fs from "fs";
-import path from "path";
+import {
+  DATA_STORE,
+  DataStoreDescriptor,
+  getStore,
+  registerStore,
+  setStore
+} from "../storage/persistence";
 
 export type PushUser = {
   id: string;
@@ -16,15 +21,15 @@ type UserFile = {
 };
 
 export class PushUserStore {
-  private readonly filePath: string;
+  private readonly storeName = DATA_STORE.SCHEDULER_USERS;
+  private readonly store: DataStoreDescriptor;
 
-  constructor(filePath?: string) {
-    this.filePath = path.resolve(process.cwd(), filePath ?? process.env.PUSH_USERS_FILE ?? "data/push-users.json");
-    this.ensureFile();
+  constructor() {
+    this.store = registerStore(this.storeName, () => ({ version: 1, users: [] }));
   }
 
-  getPath(): string {
-    return this.filePath;
+  getStore(): DataStoreDescriptor {
+    return this.store;
   }
 
   list(): PushUser[] {
@@ -39,33 +44,14 @@ export class PushUserStore {
     this.write(payload);
   }
 
-  private ensureFile(): void {
-    const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    if (!fs.existsSync(this.filePath)) {
-      this.write({ version: 1, users: [] });
-    }
-  }
-
   private read(): UserFile {
-    this.ensureFile();
-    const raw = fs.readFileSync(this.filePath, "utf-8").trim();
-    if (!raw) {
-      return { version: 1, users: [] };
-    }
-    try {
-      const parsed = JSON.parse(raw) as Partial<UserFile>;
-      const users = Array.isArray(parsed.users) ? parsed.users.filter(isPushUser) : [];
-      return { version: 1, users };
-    } catch {
-      return { version: 1, users: [] };
-    }
+    const parsed = getStore<Partial<UserFile>>(this.storeName);
+    const users = Array.isArray(parsed.users) ? parsed.users.filter(isPushUser) : [];
+    return { version: 1, users };
   }
 
   private write(payload: UserFile): void {
-    fs.writeFileSync(this.filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
+    setStore(this.storeName, payload);
   }
 }
 

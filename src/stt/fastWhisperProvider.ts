@@ -37,7 +37,7 @@ export class FastWhisperSTTProvider implements STTProvider {
       scriptPath:
         config?.scriptPath ??
         process.env.STT_FAST_WHISPER_SCRIPT ??
-        path.resolve(process.cwd(), "scripts", "fast-whisper-transcribe.py"),
+        path.resolve(process.cwd(), "tools", "fast-whisper-transcribe.py"),
       model: config?.model ?? process.env.STT_FAST_WHISPER_MODEL ?? "small",
       device: config?.device ?? process.env.STT_FAST_WHISPER_DEVICE ?? "auto",
       computeType: config?.computeType ?? process.env.STT_FAST_WHISPER_COMPUTE_TYPE ?? "int8",

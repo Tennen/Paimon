@@ -224,9 +224,11 @@ export function SystemSection(props: SystemSectionProps) {
           <div className="mono">thinkingBudget: {props.config?.thinkingBudget || "(default 1024)"}</div>
           <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
           <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
-          <div className="mono">taskStore: {props.config?.taskStorePath ?? "-"}</div>
+          <div className="mono">taskStore: {props.config?.taskStore?.name ?? "-"}</div>
           <div className="mono">tickMs: {props.config?.tickMs ?? "-"}</div>
-          <div className="mono md:col-span-2">userStore: {props.config?.userStorePath ?? "-"}</div>
+          <div className="mono md:col-span-2">
+            userStore: {props.config?.userStore?.name ?? "-"} ({props.config?.userStore?.driver ?? "-"})
+          </div>
         </div>
       </CardContent>
     </Card>

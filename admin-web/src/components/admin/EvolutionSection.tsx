@@ -127,10 +127,10 @@ export function EvolutionSection(props: EvolutionSectionProps) {
             </div>
             <Separator />
             <div className="space-y-1 text-xs text-muted-foreground">
-              <div className="mono">state: {props.evolutionSnapshot?.paths.stateFile ?? "-"}</div>
-              <div className="mono">retry_queue: {props.evolutionSnapshot?.paths.retryQueueFile ?? "-"}</div>
-              <div className="mono">metrics: {props.evolutionSnapshot?.paths.metricsFile ?? "-"}</div>
-              <div className="mono">codex: {props.evolutionSnapshot?.paths.codexOutputDir ?? "-"}</div>
+              <div className="mono">state store: {props.evolutionSnapshot?.storage.stores.state.name ?? "-"}</div>
+              <div className="mono">retry store: {props.evolutionSnapshot?.storage.stores.retryQueue.name ?? "-"}</div>
+              <div className="mono">metrics store: {props.evolutionSnapshot?.storage.stores.metrics.name ?? "-"}</div>
+              <div className="mono">codex dir: {props.evolutionSnapshot?.storage.artifacts.codexOutputDir ?? "-"}</div>
             </div>
           </CardContent>
         </Card>

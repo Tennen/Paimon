@@ -8,6 +8,15 @@ import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { EnvConfigStore } from "../config/envConfigStore";
 import {
+  DATA_STORE,
+  describeStore,
+  ensureDir,
+  getStore,
+  registerStore,
+  resolveDataPath,
+  setStore
+} from "../storage/persistence";
+import {
   CreatePushUserInput,
   CreateScheduledTaskInput,
   SchedulerService,
@@ -101,11 +110,11 @@ type RunMarketOncePayloadParseResult =
   | { payload: RunMarketOncePayload; error?: undefined }
   | { payload?: undefined; error: string };
 
-const MARKET_DATA_DIR = path.resolve(process.cwd(), "data/market-analysis");
+const MARKET_DATA_DIR = resolveDataPath("market-analysis");
 const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
-const MARKET_PORTFOLIO_FILE = path.join(MARKET_DATA_DIR, "portfolio.json");
-const MARKET_CONFIG_FILE = path.join(MARKET_DATA_DIR, "config.json");
-const MARKET_STATE_FILE = path.join(MARKET_DATA_DIR, "state.json");
+const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
+const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
+const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 
@@ -166,16 +175,16 @@ export class AdminIngressAdapter implements IngressAdapter {
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
         envPath,
-        taskStorePath: this.scheduler.getStorePath(),
-        userStorePath: this.scheduler.getUserStorePath(),
+        taskStore: this.scheduler.getTaskStore(),
+        userStore: this.scheduler.getUserStore(),
         timezone: this.scheduler.getTimezone(),
         tickMs: this.scheduler.getTickMs(),
         evolution: evolutionSnapshot
           ? {
               tickMs: this.evolutionService?.getTickMs(),
-              statePath: evolutionSnapshot.paths.stateFile,
-              retryQueuePath: evolutionSnapshot.paths.retryQueueFile,
-              metricsPath: evolutionSnapshot.paths.metricsFile
+              stateStore: evolutionSnapshot.storage.stores.state,
+              retryQueueStore: evolutionSnapshot.storage.stores.retryQueue,
+              metricsStore: evolutionSnapshot.storage.stores.metrics
             }
           : null
       });
@@ -616,10 +625,10 @@ export class AdminIngressAdapter implements IngressAdapter {
       res.json({
         portfolio,
         config,
-        portfolioPath: MARKET_PORTFOLIO_FILE,
-        configPath: MARKET_CONFIG_FILE,
-        statePath: MARKET_STATE_FILE,
-        runsDir: MARKET_RUNS_DIR
+        portfolioStore: describeStore(MARKET_PORTFOLIO_STORE),
+        configStore: describeStore(MARKET_CONFIG_STORE),
+        stateStore: describeStore(MARKET_STATE_STORE),
+        runsStore: "market.runs"
       });
     });
 
@@ -1062,50 +1071,24 @@ function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarket
 
 function readMarketPortfolio(): MarketPortfolio {
   ensureMarketStorage();
-
-  if (!fs.existsSync(MARKET_PORTFOLIO_FILE)) {
-    writeJsonFileAtomic(MARKET_PORTFOLIO_FILE, DEFAULT_MARKET_PORTFOLIO);
-    return { ...DEFAULT_MARKET_PORTFOLIO, funds: [] };
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(MARKET_PORTFOLIO_FILE, "utf-8"));
-    return normalizeMarketPortfolio(parsed);
-  } catch {
-    return { ...DEFAULT_MARKET_PORTFOLIO, funds: [] };
-  }
+  const parsed = getStore<unknown>(MARKET_PORTFOLIO_STORE);
+  return normalizeMarketPortfolio(parsed);
 }
 
 function readMarketAnalysisConfig(): MarketAnalysisConfig {
   ensureMarketStorage();
-
-  if (!fs.existsSync(MARKET_CONFIG_FILE)) {
-    writeJsonFileAtomic(MARKET_CONFIG_FILE, DEFAULT_MARKET_ANALYSIS_CONFIG);
-    return {
-      ...DEFAULT_MARKET_ANALYSIS_CONFIG,
-      gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(MARKET_CONFIG_FILE, "utf-8"));
-    return normalizeMarketAnalysisConfig(parsed);
-  } catch {
-    return {
-      ...DEFAULT_MARKET_ANALYSIS_CONFIG,
-      gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
-    };
-  }
+  const parsed = getStore<unknown>(MARKET_CONFIG_STORE);
+  return normalizeMarketAnalysisConfig(parsed);
 }
 
 function writeMarketPortfolio(portfolio: MarketPortfolio): void {
   ensureMarketStorage();
-  writeJsonFileAtomic(MARKET_PORTFOLIO_FILE, normalizeMarketPortfolio(portfolio));
+  setStore(MARKET_PORTFOLIO_STORE, normalizeMarketPortfolio(portfolio));
 }
 
 function writeMarketAnalysisConfig(config: MarketAnalysisConfig): void {
   ensureMarketStorage();
-  writeJsonFileAtomic(MARKET_CONFIG_FILE, normalizeMarketAnalysisConfig(config));
+  setStore(MARKET_CONFIG_STORE, normalizeMarketAnalysisConfig(config));
 }
 
 function listMarketRunSummaries(limit: number, phase?: MarketPhase): MarketRunSummary[] {
@@ -1129,17 +1112,8 @@ function listMarketRunSummaries(limit: number, phase?: MarketPhase): MarketRunSu
 
 function readMarketStateFile(): MarketStateFile {
   ensureMarketStorage();
-
-  if (!fs.existsSync(MARKET_STATE_FILE)) {
-    return buildDefaultMarketState();
-  }
-
-  try {
-    const parsed = JSON.parse(fs.readFileSync(MARKET_STATE_FILE, "utf-8"));
-    return normalizeMarketState(parsed);
-  } catch {
-    return buildDefaultMarketState();
-  }
+  const parsed = getStore<unknown>(MARKET_STATE_STORE);
+  return normalizeMarketState(parsed);
 }
 
 function loadMarketRunSummariesFromFiles(limit: number): MarketRunSummary[] {
@@ -1765,18 +1739,11 @@ function extractSixDigitCode(raw: string): string {
 }
 
 function ensureMarketStorage(): void {
-  if (!fs.existsSync(MARKET_DATA_DIR)) {
-    fs.mkdirSync(MARKET_DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(MARKET_RUNS_DIR)) {
-    fs.mkdirSync(MARKET_RUNS_DIR, { recursive: true });
-  }
-}
-
-function writeJsonFileAtomic(filePath: string, payload: unknown): void {
-  const tempPath = `${filePath}.tmp`;
-  fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
-  fs.renameSync(tempPath, filePath);
+  ensureDir(MARKET_DATA_DIR);
+  ensureDir(MARKET_RUNS_DIR);
+  registerStore(MARKET_PORTFOLIO_STORE, () => DEFAULT_MARKET_PORTFOLIO);
+  registerStore(MARKET_CONFIG_STORE, () => DEFAULT_MARKET_ANALYSIS_CONFIG);
+  registerStore(MARKET_STATE_STORE, () => buildDefaultMarketState());
 }
 
 function roundTo(value: number, digits: number): number {

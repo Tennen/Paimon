@@ -1,6 +1,16 @@
 import fs from "fs";
 import path from "path";
 import {
+  DATA_STORE,
+  DataStoreDescriptor,
+  getStore,
+  getStoreFilePathForDebug,
+  registerStore,
+  ensureDir,
+  resolveDataPath,
+  setStore
+} from "../storage/persistence";
+import {
   EvolutionGoal,
   EvolutionGoalEvent,
   EvolutionRawLine,
@@ -9,12 +19,16 @@ import {
   RetryQueueState
 } from "./types";
 
-export type EvolutionStorePaths = {
-  stateDir: string;
-  stateFile: string;
-  retryQueueFile: string;
-  metricsFile: string;
-  codexOutputDir: string;
+export type EvolutionStoreBindings = {
+  stores: {
+    state: DataStoreDescriptor;
+    retryQueue: DataStoreDescriptor;
+    metrics: DataStoreDescriptor;
+  };
+  artifacts: {
+    workspaceDir: string;
+    codexOutputDir: string;
+  };
 };
 
 type CreateGoalInput = {
@@ -28,52 +42,60 @@ const MAX_GOAL_EVENTS = 80;
 const MAX_GOAL_RAW_LINES = 120;
 
 export class EvolutionStateStore {
-  private readonly paths: EvolutionStorePaths;
+  private readonly storeKeys = {
+    state: DATA_STORE.EVOLUTION_STATE,
+    retryQueue: DATA_STORE.EVOLUTION_RETRY_QUEUE,
+    metrics: DATA_STORE.EVOLUTION_METRICS
+  } as const;
+  private readonly stores: EvolutionStoreBindings["stores"];
 
-  constructor(stateDir?: string) {
-    const resolvedStateDir = path.resolve(process.cwd(), stateDir ?? process.env.EVOLUTION_STATE_DIR ?? "state");
-    this.paths = {
-      stateDir: resolvedStateDir,
-      stateFile: path.join(resolvedStateDir, "evolution.json"),
-      retryQueueFile: path.join(resolvedStateDir, "retry_queue.json"),
-      metricsFile: path.join(resolvedStateDir, "metrics.json"),
-      codexOutputDir: path.join(resolvedStateDir, "codex")
+  private readonly artifacts = {
+    workspaceDir: resolveDataPath("evolution"),
+    codexOutputDir: resolveDataPath("evolution", "codex")
+  };
+
+  constructor() {
+    this.migrateLegacyState(path.resolve(process.cwd(), "state"));
+    this.stores = {
+      state: registerStore(this.storeKeys.state, () => createDefaultEvolutionState()),
+      retryQueue: registerStore(this.storeKeys.retryQueue, () => createDefaultRetryQueueState()),
+      metrics: registerStore(this.storeKeys.metrics, () => createDefaultMetricsState())
     };
-    this.ensureStorage();
+    this.ensureArtifacts();
   }
 
-  getPaths(): EvolutionStorePaths {
-    return { ...this.paths };
+  getBindings(): EvolutionStoreBindings {
+    return {
+      stores: { ...this.stores },
+      artifacts: { ...this.artifacts }
+    };
   }
 
   readEvolutionState(): EvolutionState {
-    const fallback = createDefaultEvolutionState();
-    const parsed = readJsonFile(this.paths.stateFile, fallback);
+    const parsed = getStore<unknown>(this.storeKeys.state);
     return normalizeEvolutionState(parsed);
   }
 
   saveEvolutionState(value: EvolutionState): void {
-    writeJsonFileAtomic(this.paths.stateFile, normalizeEvolutionState(value));
+    setStore(this.storeKeys.state, normalizeEvolutionState(value));
   }
 
   readRetryQueue(): RetryQueueState {
-    const fallback = createDefaultRetryQueueState();
-    const parsed = readJsonFile(this.paths.retryQueueFile, fallback);
+    const parsed = getStore<unknown>(this.storeKeys.retryQueue);
     return normalizeRetryQueueState(parsed);
   }
 
   saveRetryQueue(value: RetryQueueState): void {
-    writeJsonFileAtomic(this.paths.retryQueueFile, normalizeRetryQueueState(value));
+    setStore(this.storeKeys.retryQueue, normalizeRetryQueueState(value));
   }
 
   readMetrics(): EvolutionMetrics {
-    const fallback = createDefaultMetricsState();
-    const parsed = readJsonFile(this.paths.metricsFile, fallback);
+    const parsed = getStore<unknown>(this.storeKeys.metrics);
     return normalizeMetrics(parsed);
   }
 
   saveMetrics(value: EvolutionMetrics): void {
-    writeJsonFileAtomic(this.paths.metricsFile, normalizeMetrics(value));
+    setStore(this.storeKeys.metrics, normalizeMetrics(value));
   }
 
   appendGoal(input: CreateGoalInput): EvolutionGoal {
@@ -123,21 +145,44 @@ export class EvolutionStateStore {
     this.saveMetrics(metrics);
   }
 
-  private ensureStorage(): void {
-    if (!fs.existsSync(this.paths.stateDir)) {
-      fs.mkdirSync(this.paths.stateDir, { recursive: true });
+  private ensureArtifacts(): void {
+    ensureDir(this.artifacts.workspaceDir);
+    ensureDir(this.artifacts.codexOutputDir);
+  }
+
+  private migrateLegacyState(legacyDir: string): void {
+    const targetDir = this.artifacts.workspaceDir;
+    if (legacyDir === targetDir || !fs.existsSync(legacyDir)) {
+      return;
     }
-    if (!fs.existsSync(this.paths.codexOutputDir)) {
-      fs.mkdirSync(this.paths.codexOutputDir, { recursive: true });
+
+    ensureDir(targetDir);
+    const legacyFiles = [
+      { store: this.storeKeys.state, legacyFile: "evolution.json" },
+      { store: this.storeKeys.retryQueue, legacyFile: "retry_queue.json" },
+      { store: this.storeKeys.metrics, legacyFile: "metrics.json" }
+    ] as const;
+
+    for (const item of legacyFiles) {
+      const from = path.join(legacyDir, item.legacyFile);
+      const to = getStoreFilePathForDebug(item.store);
+      if (!fs.existsSync(from) || fs.existsSync(to)) {
+        continue;
+      }
+      try {
+        fs.copyFileSync(from, to);
+      } catch {
+        // Keep startup resilient; defaults will be created later if copy fails.
+      }
     }
-    if (!fs.existsSync(this.paths.stateFile)) {
-      this.saveEvolutionState(createDefaultEvolutionState());
-    }
-    if (!fs.existsSync(this.paths.retryQueueFile)) {
-      this.saveRetryQueue(createDefaultRetryQueueState());
-    }
-    if (!fs.existsSync(this.paths.metricsFile)) {
-      this.saveMetrics(createDefaultMetricsState());
+
+    const legacyCodexDir = path.join(legacyDir, "codex");
+    if (fs.existsSync(legacyCodexDir) && !fs.existsSync(this.artifacts.codexOutputDir)) {
+      try {
+        fs.cpSync(legacyCodexDir, this.artifacts.codexOutputDir, { recursive: true });
+      } catch {
+        // No-op: codex output can be regenerated and is non-critical runtime data.
+      }
     }
   }
 }
@@ -172,27 +217,6 @@ function createDefaultMetricsState(): EvolutionMetrics {
     avgRetries: 0,
     avgStepsPerGoal: 0
   };
-}
-
-function readJsonFile<T>(filePath: string, fallback: T): unknown {
-  if (!fs.existsSync(filePath)) {
-    return fallback;
-  }
-  const raw = fs.readFileSync(filePath, "utf-8").trim();
-  if (!raw) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonFileAtomic(filePath: string, payload: unknown): void {
-  const tmpFile = `${filePath}.tmp`;
-  fs.writeFileSync(tmpFile, `${JSON.stringify(payload, null, 2)}\n`, "utf-8");
-  fs.renameSync(tmpFile, filePath);
 }
 
 function normalizeEvolutionState(raw: unknown): EvolutionState {

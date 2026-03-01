@@ -84,6 +84,7 @@ Set STT env vars:
 export STT_PROVIDER="fast-whisper" # fast-whisper | mock
 export STT_FAST_WHISPER_AUTO_INSTALL="true" # auto pip install on startup
 export STT_FAST_WHISPER_PYTHON="python3"
+export STT_FAST_WHISPER_SCRIPT="tools/fast-whisper-transcribe.py" # optional, custom script path
 export STT_FAST_WHISPER_MODEL="small"
 export STT_FAST_WHISPER_DEVICE="auto"
 export STT_FAST_WHISPER_COMPUTE_TYPE="int8"
@@ -114,6 +115,17 @@ export HA_ENTITY_REFRESH_MS="60000"
 ```bash
 npm run dev
 ```
+
+## External scripts
+
+All standalone helper scripts and bridge programs are under `tools/`:
+
+- `tools/fast-whisper-transcribe.py`
+- `tools/market-smoke.ts`
+- `tools/wecom-bridge.go`
+- `tools/wecom-bridge.js`
+
+See `tools/README.md` for details.
 
 ## Health / sessions
 
@@ -262,11 +274,11 @@ Per-session memory is stored at `data/memory/<sessionId>/MEMORY.md` and injected
 
 Paimon now includes a built-in evolution loop for autonomous repo changes based on queued goals.
 
-State files:
+State stores (`json-file` backend):
 
-- `state/evolution.json`
-- `state/retry_queue.json`
-- `state/metrics.json`
+- `evolution.state`
+- `evolution.retry_queue`
+- `evolution.metrics`
 
 Core behavior:
 

@@ -1,3 +1,8 @@
+export type DataStoreDescriptor = {
+  name: string;
+  driver: string;
+};
+
 export type AdminConfig = {
   model: string;
   planningModel: string;
@@ -7,8 +12,8 @@ export type AdminConfig = {
   codexModel: string;
   codexReasoningEffort: string;
   envPath: string;
-  taskStorePath: string;
-  userStorePath: string;
+  taskStore: DataStoreDescriptor;
+  userStore: DataStoreDescriptor;
   timezone: string;
   tickMs: number;
 };
@@ -63,10 +68,10 @@ export type MarketAnalysisConfig = {
 export type MarketConfig = {
   portfolio: MarketPortfolio;
   config: MarketAnalysisConfig;
-  portfolioPath: string;
-  configPath: string;
-  statePath: string;
-  runsDir: string;
+  portfolioStore: DataStoreDescriptor;
+  configStore: DataStoreDescriptor;
+  stateStore: DataStoreDescriptor;
+  runsStore: string;
 };
 
 export type MarketPhase = "midday" | "close";
@@ -234,11 +239,16 @@ export type EvolutionStateSnapshot = {
     avgRetries: number;
     avgStepsPerGoal: number;
   };
-  paths: {
-    stateFile: string;
-    retryQueueFile: string;
-    metricsFile: string;
-    codexOutputDir: string;
+  storage: {
+    stores: {
+      state: DataStoreDescriptor;
+      retryQueue: DataStoreDescriptor;
+      metrics: DataStoreDescriptor;
+    };
+    artifacts: {
+      workspaceDir: string;
+      codexOutputDir: string;
+    };
   };
 };
 

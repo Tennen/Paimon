@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
+import { ensureDir, resolveDataPath } from "../storage/persistence";
 
 export type CodexRunRequest = {
   taskId: string;
@@ -66,7 +67,7 @@ export class CodexAdapter {
 
   constructor(options?: Partial<CodexAdapterOptions>) {
     const rootDir = options?.rootDir ?? process.cwd();
-    const outputDir = options?.outputDir ?? path.resolve(process.cwd(), "state", "codex");
+    const outputDir = options?.outputDir ?? resolveDataPath("evolution", "codex");
     this.options = {
       rootDir,
       outputDir,
@@ -75,9 +76,7 @@ export class CodexAdapter {
       model: String(options?.model ?? "").trim(),
       reasoningEffort: String(options?.reasoningEffort ?? "").trim().toLowerCase()
     };
-    if (!fs.existsSync(this.options.outputDir)) {
-      fs.mkdirSync(this.options.outputDir, { recursive: true });
-    }
+    ensureDir(this.options.outputDir);
   }
 
   async run(request: CodexRunRequest): Promise<CodexRunResult> {

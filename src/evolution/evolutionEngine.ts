@@ -53,7 +53,7 @@ export class EvolutionEngine {
 
   constructor(store?: EvolutionStateStore, codex?: CodexAdapter, testRunner?: TestRunner, options?: Partial<EvolutionEngineOptions>) {
     this.store = store ?? new EvolutionStateStore();
-    this.codex = codex ?? new CodexAdapter({ outputDir: this.store.getPaths().codexOutputDir });
+    this.codex = codex ?? new CodexAdapter({ outputDir: this.store.getBindings().artifacts.codexOutputDir });
     this.testRunner = testRunner ?? new TestRunner();
     this.options = {
       tickMs: options?.tickMs ?? parseInt(process.env.EVOLUTION_TICK_MS ?? "30000", 10),
@@ -92,7 +92,7 @@ export class EvolutionEngine {
       state: this.store.readEvolutionState(),
       retryQueue: this.store.readRetryQueue(),
       metrics: this.store.readMetrics(),
-      paths: this.store.getPaths()
+      storage: this.store.getBindings()
     };
   }
 
@@ -600,8 +600,8 @@ export class EvolutionEngine {
     if (touchedSelf) {
       const diffResult = await this.runCommand("git", ["diff", "--", SELF_EVOLUTION_FILE], 120000, goal.id);
       if (diffResult.ok && diffResult.stdout.trim()) {
-        const paths = this.store.getPaths();
-        const diffFile = path.join(paths.stateDir, `self-evolution-${goal.id}.diff`);
+        const bindings = this.store.getBindings();
+        const diffFile = path.join(bindings.artifacts.workspaceDir, `self-evolution-${goal.id}.diff`);
         fs.writeFileSync(diffFile, diffResult.stdout, "utf-8");
 
         const state = this.store.readEvolutionState();
