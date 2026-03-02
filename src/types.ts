@@ -12,6 +12,7 @@ export type Envelope = {
 export type SkillSelectionResult = {
   decision: "respond" | "use_skill";
   skill_name?: string;
+  planning_thinking_budget?: number;
   response_text?: string;
 };
 

@@ -47,6 +47,20 @@ function parseJsonObject(rawText: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function parseOptionalPositiveInteger(
+  obj: Record<string, unknown>,
+  key: string
+): number | undefined {
+  if (!(key in obj) || obj[key] === undefined || obj[key] === null) {
+    return undefined;
+  }
+  const value = obj[key];
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    throw new Error(`Invalid ${key}: must be a positive integer`);
+  }
+  return value;
+}
+
 export function parseSkillSelectionResult(rawText: string): SkillSelectionResult {
   console.log("rawText", rawText);
   const obj = parseJsonObject(rawText);
@@ -59,6 +73,7 @@ export function parseSkillSelectionResult(rawText: string): SkillSelectionResult
   return {
     decision: decision as "respond" | "use_skill",
     skill_name: typeof obj.skill_name === "string" ? obj.skill_name : undefined,
+    planning_thinking_budget: parseOptionalPositiveInteger(obj, "planning_thinking_budget"),
     response_text: typeof obj.response_text === "string" ? obj.response_text : undefined,
   };
 }

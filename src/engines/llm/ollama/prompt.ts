@@ -10,11 +10,68 @@ type UserPromptOptions = {
   mode?: PromptMode;
 };
 
+const DEFAULT_THINKING_BUDGET = 1024;
+const DEFAULT_THINKING_BUDGET_MIN = 1;
+const DEFAULT_THINKING_BUDGET_MAX = 32768;
+
 function toRecord(input: unknown): Record<string, unknown> | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return null;
   }
   return input as Record<string, unknown>;
+}
+
+function parsePositiveInteger(value: unknown): number | null {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0 || !Number.isInteger(numeric)) {
+    return null;
+  }
+  return numeric;
+}
+
+function parseBooleanValue(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function buildThinkingBudgetContext(context: Record<string, unknown>): Record<string, unknown> {
+  const source = toRecord(context.thinking_budget);
+  const envEnabled = parseBooleanValue(process.env.LLM_THINKING_BUDGET_ENABLED) ?? false;
+  const envDefaultBudget = parsePositiveInteger(process.env.LLM_THINKING_BUDGET) ?? DEFAULT_THINKING_BUDGET;
+  const envMax = parsePositiveInteger(process.env.LLM_THINKING_MAX_NEW_TOKENS) ?? DEFAULT_THINKING_BUDGET_MAX;
+
+  const min = parsePositiveInteger(source?.min) ?? DEFAULT_THINKING_BUDGET_MIN;
+  const maxCandidate = parsePositiveInteger(source?.max) ?? envMax;
+  const max = Math.max(min, maxCandidate);
+
+  const enabled = parseBooleanValue(source?.enabled) ?? envEnabled;
+  const defaultBudgetRaw = parsePositiveInteger(source?.default_budget) ?? envDefaultBudget;
+  const defaultBudget = clamp(defaultBudgetRaw, min, max);
+
+  return {
+    enabled,
+    default_budget: defaultBudget,
+    min,
+    max
+  };
 }
 
 function detectPromptMode(runtimeContext?: LLMRuntimeContext): PromptMode {
@@ -71,11 +128,14 @@ function getSkillSelectionInstructions(): string[] {
     "Output format:",
     '  {"decision":"respond","response_text":"your response here"}',
     '  OR',
-    '  {"decision":"use_skill","skill_name":"skill_name"}',
+    '  {"decision":"use_skill","skill_name":"skill_name","planning_thinking_budget":1024}',
     "",
     "Decision logic:",
     "- If request is conversational or doesn't need tools, use decision='respond'",
     "- If request requires a skill, use decision='use_skill' with skill_name from CONTEXT_JSON.skills_context",
+    "- If CONTEXT_JSON.thinking_budget.enabled=true and decision='use_skill', planning_thinking_budget is required",
+    "- planning_thinking_budget must be an integer within [CONTEXT_JSON.thinking_budget.min, CONTEXT_JSON.thinking_budget.max]",
+    "- If CONTEXT_JSON.thinking_budget.enabled=false, omit planning_thinking_budget",
     "- Keep decision/skill_name keys and decision values in English exactly as specified",
   ];
 }
@@ -133,7 +193,8 @@ function buildSelectionRuntimeContext(context: Record<string, unknown>): Record<
   const base: Record<string, unknown> = {
     current_time: buildCurrentTimeBlock(context),
     skills_context: skillsContext ?? null,
-    skill_names: skillsContext ? Object.keys(skillsContext).sort() : []
+    skill_names: skillsContext ? Object.keys(skillsContext).sort() : [],
+    thinking_budget: buildThinkingBudgetContext(context)
   };
 
   if (nextStep) {
@@ -144,7 +205,7 @@ function buildSelectionRuntimeContext(context: Record<string, unknown>): Record<
     base.memory = context.memory;
   }
 
-  const others = omitKeys(context, ["now", "timezone", "memory", "skills_context", "next_step_context"]);
+  const others = omitKeys(context, ["now", "timezone", "memory", "skills_context", "next_step_context", "thinking_budget"]);
   if (Object.keys(others).length > 0) {
     base.other_context = others;
   }

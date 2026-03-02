@@ -1,4 +1,4 @@
-import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep } from "../llm";
+import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep, LLMPlanningOptions } from "../llm";
 import { ollamaChat } from "./client";
 import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
 import { parseSkillSelectionResult, parseSkillPlanningResult } from "../json_guard";
@@ -100,12 +100,16 @@ export class OllamaLLMEngine implements LLMEngine {
 
   async planToolExecution(
     text: string,
-    runtimeContext: LLMRuntimeContext
+    runtimeContext: LLMRuntimeContext,
+    planningOptions?: LLMPlanningOptions
   ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
     const mode = PromptMode.SkillPlanning;
     const model = this.options.planningModel;
     const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
     const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
+    const effectiveThinkingBudget = this.options.thinkingBudgetEnabled
+      ? planningOptions?.thinkingBudgetOverride ?? this.options.thinkingBudget
+      : undefined;
 
     let retries = 0;
     let lastRaw = "";
@@ -126,7 +130,7 @@ export class OllamaLLMEngine implements LLMEngine {
           options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
           thinkingBudget: {
             enabled: this.options.thinkingBudgetEnabled,
-            budgetTokens: this.options.thinkingBudget,
+            budgetTokens: effectiveThinkingBudget,
             maxNewTokens: this.options.thinkingMaxNewTokens
           },
           messages: [

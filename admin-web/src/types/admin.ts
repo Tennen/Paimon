@@ -8,7 +8,8 @@ export type AdminConfig = {
   planningModel: string;
   planningTimeoutMs: string;
   thinkingBudgetEnabled: boolean;
-  thinkingBudget: string;
+  thinkingBudgetDefault?: string;
+  thinkingBudget?: string;
   codexModel: string;
   codexReasoningEffort: string;
   envPath: string;

@@ -182,7 +182,7 @@ export default function App() {
     setPlanningModelDraft(payload.planningModel || "");
     setPlanningTimeoutDraft(payload.planningTimeoutMs || "");
     setThinkingBudgetEnabledDraft(payload.thinkingBudgetEnabled === true);
-    setThinkingBudgetDraft(payload.thinkingBudget || "");
+    setThinkingBudgetDraft(payload.thinkingBudgetDefault ?? payload.thinkingBudget ?? "");
     setCodexModelDraft(payload.codexModel || "");
     setCodexReasoningEffortDraft(payload.codexReasoningEffort || "");
   }
@@ -264,16 +264,16 @@ export default function App() {
         return;
       }
     }
-    const thinkingBudget = thinkingBudgetDraft.trim();
-    if (thinkingBudget) {
-      const parsed = Number(thinkingBudget);
+    const thinkingBudgetDefault = thinkingBudgetDraft.trim();
+    if (thinkingBudgetDefault) {
+      const parsed = Number(thinkingBudgetDefault);
       if (!Number.isFinite(parsed) || parsed <= 0) {
-        setNotice({ type: "error", title: "Thinking Budget 必须是正整数（tokens）" });
+        setNotice({ type: "error", title: "Planning Thinking Budget 默认值必须是正整数（tokens）" });
         return;
       }
     }
-    if (thinkingBudgetEnabledDraft && !thinkingBudget) {
-      setNotice({ type: "error", title: "开启 Thinking Budget 时必须设置预算值" });
+    if (thinkingBudgetEnabledDraft && !thinkingBudgetDefault) {
+      setNotice({ type: "error", title: "开启 Thinking Budget 时必须设置 Planning Thinking Budget 默认值" });
       return;
     }
 
@@ -286,7 +286,8 @@ export default function App() {
           planningModel,
           planningTimeoutMs,
           thinkingBudgetEnabled: thinkingBudgetEnabledDraft,
-          thinkingBudget,
+          thinkingBudgetDefault,
+          thinkingBudget: thinkingBudgetDefault,
           restart: restartAfterSave
         })
       });

@@ -166,12 +166,14 @@ export class AdminIngressAdapter implements IngressAdapter {
       const envPath = this.envStore.getPath();
       const evolutionSnapshot = this.evolutionService?.getSnapshot();
       const codexConfig = this.codexConfigService.getConfig();
+      const thinkingBudgetDefault = getEnvValue(envPath, "LLM_THINKING_BUDGET");
       res.json({
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
         planningTimeoutMs: getEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS"),
         thinkingBudgetEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_THINKING_BUDGET_ENABLED")) ?? false,
-        thinkingBudget: getEnvValue(envPath, "LLM_THINKING_BUDGET"),
+        thinkingBudgetDefault,
+        thinkingBudget: thinkingBudgetDefault,
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
         envPath,
@@ -258,6 +260,7 @@ export class AdminIngressAdapter implements IngressAdapter {
         planningModel?: unknown;
         planningTimeoutMs?: unknown;
         thinkingBudgetEnabled?: unknown;
+        thinkingBudgetDefault?: unknown;
         thinkingBudget?: unknown;
         restart?: unknown;
       };
@@ -280,14 +283,15 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({ error: "thinkingBudgetEnabled must be boolean" });
         return;
       }
-      const thinkingBudgetRaw = normalizeOptionalIntegerString(body.thinkingBudget);
+      const thinkingBudgetInput = body.thinkingBudgetDefault ?? body.thinkingBudget;
+      const thinkingBudgetRaw = normalizeOptionalIntegerString(thinkingBudgetInput);
       if (thinkingBudgetRaw === null) {
-        res.status(400).json({ error: "thinkingBudget must be a positive integer or empty" });
+        res.status(400).json({ error: "thinkingBudgetDefault must be a positive integer or empty" });
         return;
       }
       const effectiveThinkingBudgetEnabled = thinkingBudgetEnabled ?? false;
       if (effectiveThinkingBudgetEnabled && !thinkingBudgetRaw) {
-        res.status(400).json({ error: "thinkingBudget is required when thinkingBudgetEnabled is true" });
+        res.status(400).json({ error: "thinkingBudgetDefault is required when thinkingBudgetEnabled is true" });
         return;
       }
 
@@ -319,7 +323,7 @@ export class AdminIngressAdapter implements IngressAdapter {
       const restart = parseOptionalBoolean(body.restart) ?? false;
       const effectivePlanningModel = planningModel || model;
       const effectivePlanningTimeoutMs = planningTimeoutRaw || "";
-      const effectiveThinkingBudget = thinkingBudgetRaw || "";
+      const effectiveThinkingBudgetDefault = thinkingBudgetRaw || "";
       if (!restart) {
         res.json({
           ok: true,
@@ -327,7 +331,8 @@ export class AdminIngressAdapter implements IngressAdapter {
           planningModel: effectivePlanningModel,
           planningTimeoutMs: effectivePlanningTimeoutMs,
           thinkingBudgetEnabled: effectiveThinkingBudgetEnabled,
-          thinkingBudget: effectiveThinkingBudget,
+          thinkingBudgetDefault: effectiveThinkingBudgetDefault,
+          thinkingBudget: effectiveThinkingBudgetDefault,
           restarted: false
         });
         return;
@@ -341,7 +346,8 @@ export class AdminIngressAdapter implements IngressAdapter {
           planningModel: effectivePlanningModel,
           planningTimeoutMs: effectivePlanningTimeoutMs,
           thinkingBudgetEnabled: effectiveThinkingBudgetEnabled,
-          thinkingBudget: effectiveThinkingBudget,
+          thinkingBudgetDefault: effectiveThinkingBudgetDefault,
+          thinkingBudget: effectiveThinkingBudgetDefault,
           restarted: true,
           output
         });
@@ -352,7 +358,8 @@ export class AdminIngressAdapter implements IngressAdapter {
           planningModel: effectivePlanningModel,
           planningTimeoutMs: effectivePlanningTimeoutMs,
           thinkingBudgetEnabled: effectiveThinkingBudgetEnabled,
-          thinkingBudget: effectiveThinkingBudget,
+          thinkingBudgetDefault: effectiveThinkingBudgetDefault,
+          thinkingBudget: effectiveThinkingBudgetDefault,
           restarted: false,
           error: (error as Error).message ?? "pm2 restart failed"
         });

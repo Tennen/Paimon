@@ -68,11 +68,15 @@ export LLM_PLANNING_TIMEOUT_MS="30000" # optional, fallback to LLM_TIMEOUT_MS
 export LLM_MAX_RETRIES="2"
 export LLM_STRICT_JSON="true"
 export LLM_MAX_ITERATIONS="2"
+export LLM_THINKING_BUDGET_ENABLED="false" # optional, enable planning thinking budget control
+export LLM_THINKING_BUDGET="1024" # optional, admin default for Step2 planning; Step1 may override per request when enabled
 export VISION_TIMEOUT_MS="30000"
 export VISION_MAX_RETRIES="1"
 export HA_SNAPSHOT_DESCRIBE="true"
 export VISION_PROMPT="请用中文简短描述图片内容，1句话以内，不要臆测或编造。"
 ```
+
+`LLM_THINKING_BUDGET_ENABLED=true` 时，Admin 中的 `LLM_THINKING_BUDGET` 表示 Planning Thinking Budget 默认值（供 Step1 LLM 参考）；Step2 实际执行可被 Step1 决策输出覆盖。
 
 Set WeCom env vars:
 
@@ -142,6 +146,23 @@ See `tools/README.md` for details.
 ```bash
 curl -s http://localhost:3000/health
 curl -s http://localhost:3000/sessions
+```
+
+## Admin config example
+
+```bash
+curl -s http://localhost:3000/admin/api/config
+```
+
+```json
+{
+  "model": "qwen3:4b",
+  "planningModel": "qwen3:8b",
+  "planningTimeoutMs": "30000",
+  "thinkingBudgetEnabled": true,
+  "thinkingBudgetDefault": "1024",
+  "thinkingBudget": "1024"
+}
 ```
 
 ## WeCom ingress

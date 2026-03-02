@@ -64,7 +64,14 @@ export class Orchestrator {
       }
 
       // Step 2: Skill Plan - Get detailed skill plan with response templates
-      const skillPlanResult = await this.skillPlanStep(llmResult.skillName!, text, memory, envelope, start);
+      const skillPlanResult = await this.skillPlanStep(
+        llmResult.skillName!,
+        llmResult.planningThinkingBudget,
+        text,
+        memory,
+        envelope,
+        start
+      );
       if (skillPlanResult.response) {
         this.processed.set(envelope.requestId, skillPlanResult.response);
         this.appendMemory(envelope, text, skillPlanResult.response);
@@ -222,7 +229,7 @@ export class Orchestrator {
     memory: string,
     envelope: Envelope,
     start: number
-  ): Promise<{ response?: Response; skillName?: string }> {
+  ): Promise<{ response?: Response; skillName?: string; planningThinkingBudget?: number }> {
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
     const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
 
@@ -255,7 +262,10 @@ export class Orchestrator {
     }
 
     if (result.decision === "use_skill" && result.skill_name) {
-      return { skillName: result.skill_name };
+      return {
+        skillName: result.skill_name,
+        planningThinkingBudget: result.planning_thinking_budget
+      };
     }
 
     const response = { text: "I don't understand. Please try rephrasing." };
@@ -265,6 +275,7 @@ export class Orchestrator {
 
   private async skillPlanStep(
     skillName: string,
+    planningThinkingBudget: number | undefined,
     text: string,
     memory: string,
     envelope: Envelope,
@@ -316,7 +327,13 @@ export class Orchestrator {
         : null
     };
 
-    const plan = await this.llmEngine.planToolExecution(text, runtimeContext);
+    const plan = await this.llmEngine.planToolExecution(
+      text,
+      runtimeContext,
+      planningThinkingBudget === undefined
+        ? undefined
+        : { thinkingBudgetOverride: planningThinkingBudget }
+    );
 
     // Write audit log
     const llmMeta: LLMPlanMeta = {

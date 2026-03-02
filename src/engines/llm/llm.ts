@@ -26,9 +26,17 @@ export type LLMPlanMeta = {
 
 export type LLMExecutionStep = "skill_selection" | "skill_planning";
 
+export type LLMPlanningOptions = {
+  thinkingBudgetOverride?: number;
+};
+
 export interface LLMEngine {
   selectSkill(text: string, runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult>;
-  planToolExecution(text: string, runtimeContext: Record<string, unknown>): Promise<SkillPlanningResult>;
+  planToolExecution(
+    text: string,
+    runtimeContext: Record<string, unknown>,
+    planningOptions?: LLMPlanningOptions
+  ): Promise<SkillPlanningResult>;
   getModelForStep(step: LLMExecutionStep): string;
 }
 
