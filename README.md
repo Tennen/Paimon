@@ -330,6 +330,16 @@ Admin APIs:
 - `POST /admin/api/evolution/goals`
 - `POST /admin/api/evolution/tick`
 
+Evolution Admin (UI):
+
+- `统一队列模块（Goal+Retry+History）`：按 `goalId` 合并 `state.goals`、`state.history`、`retryQueue.items`，在同一表格展示 active/retry/history。
+- 字段来源：
+- `goalId`：来自 `goal.id` / `history.id` / `retryItem.goalId`（同一 `goalId` 去重）。
+- `goal`：优先 `state.goals[].goal`，其次 `state.history[].goal`。
+- `status` / `stage` / `stepProgress`：优先当前 goal；无 goal 时回退 history；仅 retry 时状态/阶段为 `waiting_retry`，步骤为 `-`。
+- `retrySummary` / `nextRetryAt`：综合 `goal.retries`、`history.retries` 与 `retryQueue.items[]`；`nextRetryAt` 取最早待重试时间。
+- `updatedAt` / `completedAt`：`completedAt` 取 goal/history 完成时间；`updatedAt` 取 goal 更新时间、完成时间、重试时间中的最新值。
+
 WeCom / HTTP direct commands:
 
 - `/evolve <goal>`

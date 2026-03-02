@@ -21,17 +21,16 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime, formatEvolutionStatus, getEvolutionStatusBadgeVariant } from "@/lib/adminFormat";
+import { EvolutionQueueRow } from "@/lib/evolutionQueueRows";
 import {
   EvolutionGoal,
-  EvolutionGoalHistory,
   EvolutionStateSnapshot
 } from "@/types/admin";
 
 type EvolutionSectionProps = {
   evolutionSnapshot: EvolutionStateSnapshot | null;
   currentEvolutionGoal: EvolutionGoal | null;
-  sortedEvolutionGoals: EvolutionGoal[];
-  sortedEvolutionHistory: EvolutionGoalHistory[];
+  evolutionQueueRows: EvolutionQueueRow[];
   loadingEvolution: boolean;
   evolutionGoalDraft: string;
   evolutionCommitDraft: string;
@@ -43,6 +42,20 @@ type EvolutionSectionProps = {
   onTriggerTick: () => void;
   onRefresh: () => void;
 };
+
+const EVOLUTION_QUEUE_SOURCE_LABEL: Record<EvolutionQueueRow["source"], string> = {
+  goal: "goal",
+  history: "history",
+  retry: "retry",
+  "goal+history": "goal+history",
+  "goal+retry": "goal+retry",
+  "history+retry": "history+retry",
+  "goal+history+retry": "goal+history+retry"
+};
+
+function formatEvolutionQueueSource(source: EvolutionQueueRow["source"]): string {
+  return EVOLUTION_QUEUE_SOURCE_LABEL[source] ?? source;
+}
 
 export function EvolutionSection(props: EvolutionSectionProps) {
   return (
@@ -138,8 +151,8 @@ export function EvolutionSection(props: EvolutionSectionProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Goal Queue</CardTitle>
-          <CardDescription>当前待处理与最近更新的 Goals</CardDescription>
+          <CardTitle>Unified Queue</CardTitle>
+          <CardDescription>合并展示 active / retry / history 队列信息</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -152,36 +165,40 @@ export function EvolutionSection(props: EvolutionSectionProps) {
                 <TableHead>重试</TableHead>
                 <TableHead>下一次重试</TableHead>
                 <TableHead>更新时间</TableHead>
+                <TableHead>完成时间</TableHead>
+                <TableHead>来源</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {props.sortedEvolutionGoals.length === 0 ? (
+              {props.evolutionQueueRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-muted-foreground">
+                  <TableCell colSpan={9} className="text-muted-foreground">
                     暂无 Goal
                   </TableCell>
                 </TableRow>
               ) : (
-                props.sortedEvolutionGoals.slice(0, 16).map((goal) => (
-                  <TableRow key={goal.id}>
+                props.evolutionQueueRows.slice(0, 16).map((row) => (
+                  <TableRow key={row.goalId}>
                     <TableCell>
-                      <div className="mono text-xs">{goal.id}</div>
-                      <div className="line-clamp-2 text-xs text-muted-foreground">{goal.goal}</div>
+                      <div className="mono text-xs">{row.goalId}</div>
+                      <div className="line-clamp-2 text-xs text-muted-foreground">{row.goal}</div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={getEvolutionStatusBadgeVariant(goal.status)}>
-                        {formatEvolutionStatus(goal.status)}
+                      <Badge variant={getEvolutionStatusBadgeVariant(row.status)}>
+                        {formatEvolutionStatus(row.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">
-                      <span className="mono">{goal.stage || "-"}</span>
+                      <span className="mono">{row.stage || "-"}</span>
                     </TableCell>
-                    <TableCell className="text-xs">
-                      {goal.plan.currentStep}/{goal.plan.steps.length}
+                    <TableCell className="text-xs">{row.stepProgress || "-"}</TableCell>
+                    <TableCell className="text-xs">{row.retrySummary || "-"}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(row.nextRetryAt)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(row.updatedAt)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(row.completedAt)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      <span className="mono">{formatEvolutionQueueSource(row.source)}</span>
                     </TableCell>
-                    <TableCell className="text-xs">{goal.retries}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(goal.nextRetryAt)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(goal.updatedAt)}</TableCell>
                   </TableRow>
                 ))
               )}
@@ -242,85 +259,6 @@ export function EvolutionSection(props: EvolutionSectionProps) {
               </div>
             </>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Retry Queue & History</CardTitle>
-          <CardDescription>重试任务与已完成历史</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Retry ID</TableHead>
-                <TableHead>目标</TableHead>
-                <TableHead>类型</TableHead>
-                <TableHead>尝试</TableHead>
-                <TableHead>重试时间</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(props.evolutionSnapshot?.retryQueue.items.length ?? 0) === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
-                    当前无重试任务
-                  </TableCell>
-                </TableRow>
-              ) : (
-                (props.evolutionSnapshot?.retryQueue.items ?? []).slice(0, 10).map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="mono text-xs">{item.id}</TableCell>
-                    <TableCell className="mono text-xs">{item.goalId}</TableCell>
-                    <TableCell className="text-xs">{item.taskType}{Number.isInteger(item.stepIndex) ? `#${item.stepIndex}` : ""}</TableCell>
-                    <TableCell className="text-xs">{item.attempts}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(item.retryAt)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-
-          <Separator />
-
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Goal ID</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>重试</TableHead>
-                <TableHead>步骤</TableHead>
-                <TableHead>完成时间</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {props.sortedEvolutionHistory.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
-                    暂无历史记录
-                  </TableCell>
-                </TableRow>
-              ) : (
-                props.sortedEvolutionHistory.slice(0, 16).map((item) => (
-                  <TableRow key={`history-${item.id}-${item.completedAt}`}>
-                    <TableCell>
-                      <div className="mono text-xs">{item.id}</div>
-                      <div className="line-clamp-2 text-xs text-muted-foreground">{item.goal}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={item.status === "failed" ? "destructive" : "default"}>
-                        {item.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs">{item.retries}</TableCell>
-                    <TableCell className="text-xs">{item.totalSteps}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDateTime(item.completedAt)}</TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
         </CardContent>
       </Card>
     </div>

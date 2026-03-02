@@ -5,6 +5,7 @@ import { FeatureMenu } from "@/components/admin/FeatureMenu";
 import { MarketSection } from "@/components/admin/MarketSection";
 import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
+import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
   DEFAULT_MARKET_ANALYSIS_CONFIG,
@@ -12,6 +13,7 @@ import {
   EMPTY_TASK_FORM,
   EMPTY_USER_FORM,
   EvolutionGoal,
+  EvolutionGoalHistory,
   EvolutionStateSnapshot,
   MarketConfig,
   MarketAnalysisConfig,
@@ -110,15 +112,26 @@ export default function App() {
     return evolutionSnapshot.state.goals.find((goal) => goal.id === evolutionSnapshot.state.currentGoalId) ?? null;
   }, [evolutionSnapshot]);
 
-  const sortedEvolutionGoals = useMemo(() => {
-    const goals = evolutionSnapshot?.state.goals ?? [];
-    return goals.slice().sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const evolutionQueueRows = useMemo(() => {
+    return buildEvolutionQueueRows({
+      goals: evolutionSnapshot?.state.goals,
+      history: evolutionSnapshot?.state.history,
+      retryItems: evolutionSnapshot?.retryQueue.items
+    });
   }, [evolutionSnapshot]);
 
-  const sortedEvolutionHistory = useMemo(() => {
-    const history = evolutionSnapshot?.state.history ?? [];
-    return history.slice().sort((left, right) => Date.parse(right.completedAt) - Date.parse(left.completedAt));
-  }, [evolutionSnapshot]);
+  const evolutionGoalById = new Map(
+    (evolutionSnapshot?.state.goals ?? []).map((goal) => [goal.id, goal] as const)
+  );
+  const evolutionHistoryById = new Map(
+    (evolutionSnapshot?.state.history ?? []).map((item) => [item.id, item] as const)
+  );
+  const evolutionGoalsInQueueOrder = evolutionQueueRows
+    .map((row) => evolutionGoalById.get(row.goalId))
+    .filter((goal): goal is EvolutionGoal => Boolean(goal));
+  const evolutionHistoryInQueueOrder = evolutionQueueRows
+    .map((row) => evolutionHistoryById.get(row.goalId))
+    .filter((item): item is EvolutionGoalHistory => Boolean(item));
 
   const marketFundSaveStates = useMemo<Array<"saved" | "dirty" | "saving">>(() => {
     return marketPortfolio.funds.map((fund, index) => {
@@ -1052,8 +1065,11 @@ export default function App() {
         <EvolutionSection
           evolutionSnapshot={evolutionSnapshot}
           currentEvolutionGoal={currentEvolutionGoal}
-          sortedEvolutionGoals={sortedEvolutionGoals}
-          sortedEvolutionHistory={sortedEvolutionHistory}
+          {...{
+            evolutionQueueRows,
+            sortedEvolutionGoals: evolutionGoalsInQueueOrder,
+            sortedEvolutionHistory: evolutionHistoryInQueueOrder
+          }}
           loadingEvolution={loadingEvolution}
           evolutionGoalDraft={evolutionGoalDraft}
           evolutionCommitDraft={evolutionCommitDraft}
