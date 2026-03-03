@@ -3,9 +3,9 @@ name: evolution-operator
 description: Trigger and inspect the built-in evolution engine from chat endpoints (WeCom/HTTP) via direct commands. Supports goal enqueue, status query, and manual tick.
 keywords: ["evolution", "coding", "codex", "goal", "自进化", "代码", "需求实现", "状态", "重试"]
 prefer_tool_result: true
-runtime_tool: skill.evolution-operator
-runtime_action: execute
-runtime_params: ["input"]
+tool: skill.evolution-operator
+action: execute
+params: ["input"]
 ---
 
 # Evolution Operator
@@ -35,10 +35,10 @@ Commit behavior:
 
 Runtime model:
 
-- Runtime tool uses in-process evolution runtime context directly (no HTTP fetch).
-- Admin routes and runtime tool share the same evolution business abstraction.
+- Tool uses in-process evolution runtime context directly (no HTTP fetch).
+- Admin routes and tool share the same evolution business abstraction.
 
-Runtime tool contract (LLM must output JSON)
+Tool contract (LLM must output JSON)
 
 ```json
 {

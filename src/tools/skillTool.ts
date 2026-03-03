@@ -29,9 +29,9 @@ class SkillTool {
       output: {
         name: skill.name,
         description: skill.description,
-        runtimeTool: skill.runtimeTool ?? "",
-        runtimeAction: skill.runtimeAction ?? "execute",
-        runtimeParams: skill.runtimeParams ?? ["input"]
+        tool: skill.tool ?? "",
+        action: skill.action ?? "execute",
+        params: skill.params ?? ["input"]
       }
     };
   }

@@ -15,9 +15,9 @@ export type SkillInfo = {
   directAsync?: boolean;
   directAcceptedText?: string;
   directAcceptedDelayMs?: number;
-  runtimeTool?: string;
-  runtimeAction?: string;
-  runtimeParams?: string[];
+  tool?: string;
+  action?: string;
+  params?: string[];
   preferToolResult?: boolean;
   detail?: string;
   install?: string;
@@ -29,9 +29,9 @@ export type SkillInfo = {
     directAsync?: boolean;
     directAcceptedText?: string;
     directAcceptedDelayMs?: number;
-    runtimeTool?: string;
-    runtimeAction?: string;
-    runtimeParams?: string[];
+    tool?: string;
+    action?: string;
+    params?: string[];
     preferToolResult?: boolean;
     [key: string]: any;
   };
@@ -82,9 +82,9 @@ export class SkillManager {
           directAsync: frontmetadata.directAsync,
           directAcceptedText: frontmetadata.directAcceptedText,
           directAcceptedDelayMs: frontmetadata.directAcceptedDelayMs,
-          runtimeTool: frontmetadata.runtimeTool,
-          runtimeAction: frontmetadata.runtimeAction,
-          runtimeParams: frontmetadata.runtimeParams,
+          tool: frontmetadata.tool,
+          action: frontmetadata.action,
+          params: frontmetadata.params,
           preferToolResult: frontmetadata.preferToolResult,
           install: frontmetadata.install,
           metadata: frontmetadata,
@@ -253,9 +253,9 @@ function extractFrontmatter(content: string): {
   directAsync?: boolean;
   directAcceptedText?: string;
   directAcceptedDelayMs?: number;
-  runtimeTool?: string;
-  runtimeAction?: string;
-  runtimeParams?: string[];
+  tool?: string;
+  action?: string;
+  params?: string[];
   preferToolResult?: boolean;
 } {
   const lines = content.split("\n");
@@ -273,9 +273,9 @@ function extractFrontmatter(content: string): {
   let directAsync: boolean | undefined;
   let directAcceptedText: string | undefined;
   let directAcceptedDelayMs: number | undefined;
-  let runtimeTool: string | undefined;
-  let runtimeAction: string | undefined;
-  let runtimeParams: string[] | undefined;
+  let tool: string | undefined;
+  let action: string | undefined;
+  let params: string[] | undefined;
   let preferToolResult: boolean | undefined;
 
   for (const line of fmLines) {
@@ -335,25 +335,23 @@ function extractFrontmatter(content: string): {
       if (parsed !== undefined) {
         directAcceptedDelayMs = parsed;
       }
-    } else if (trimmed.startsWith("runtime_tool:") || trimmed.startsWith("runtimeTool:")) {
-      runtimeTool = parseFrontmatterString(
+    } else if (trimmed.startsWith("tool:")) {
+      tool = parseFrontmatterString(
         trimmed
-          .replace(/^runtime_tool:/i, "")
-          .replace(/^runtimeTool:/i, "")
+          .replace(/^tool:/i, "")
           .trim()
       );
-    } else if (trimmed.startsWith("runtime_action:") || trimmed.startsWith("runtimeAction:")) {
-      runtimeAction = parseFrontmatterString(
+    } else if (trimmed.startsWith("action:")) {
+      action = parseFrontmatterString(
         trimmed
-          .replace(/^runtime_action:/i, "")
-          .replace(/^runtimeAction:/i, "")
+          .replace(/^action:/i, "")
           .trim()
       );
-    } else if (trimmed.startsWith("runtime_params:") || trimmed.startsWith("runtimeParams:")) {
-      const raw = trimmed.replace(/^(runtime_params|runtimeParams):/i, "").trim();
+    } else if (trimmed.startsWith("params:")) {
+      const raw = trimmed.replace(/^(params):/i, "").trim();
       const list = parseFrontmatterList(raw);
       if (list.length > 0) {
-        runtimeParams = list;
+        params = list;
       }
     }
   }
@@ -369,9 +367,9 @@ function extractFrontmatter(content: string): {
     directAsync,
     directAcceptedText,
     directAcceptedDelayMs,
-    runtimeTool,
-    runtimeAction,
-    runtimeParams,
+    tool,
+    action,
+    params,
     preferToolResult
   };
 }

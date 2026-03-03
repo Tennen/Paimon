@@ -1,11 +1,11 @@
 import { Envelope, Image, Response, ToolExecution } from "../types";
 import { policyCheck } from "../policy";
-import { ToolRouter } from "./toolRouter";
+import { ToolRouter } from "../tools/toolRouter";
 import { writeAudit } from "../auditLogger";
 import { LLMRuntimeContext, LLMPlanMeta } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
-import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../runtime-tools/toolRegistry";
+import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
 import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { sttRuntime } from "../engines/stt";
@@ -288,7 +288,7 @@ export class Orchestrator {
     preferToolResult?: boolean;
   }> {
     const selectedSkill = this.skillManager.get(skillName);
-    const runtimeToolName = selectedSkill?.runtimeTool;
+    const toolName = selectedSkill?.tool;
 
     // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
@@ -302,8 +302,8 @@ export class Orchestrator {
     if (skillName && skillContext?.[skillName]?.terminal) {
       forceTools.push("terminal");
     }
-    if (runtimeToolName) {
-      forceTools.push(runtimeToolName);
+    if (toolName) {
+      forceTools.push(toolName);
     }
 
     const fullToolContext = this.toolRegistry.buildRuntimeContext();
@@ -318,11 +318,11 @@ export class Orchestrator {
       // skills_context: skillContext,
       tools_context: toolContext,
       skill_detail: detail,
-      skill_runtime_contract: selectedSkill?.runtimeTool
+      skill_contract: selectedSkill?.tool
         ? {
-            tool: selectedSkill.runtimeTool,
-            action: selectedSkill.runtimeAction ?? "execute",
-            params: selectedSkill.runtimeParams ?? ["input"]
+            tool: selectedSkill.tool,
+            action: selectedSkill.action ?? "execute",
+            params: selectedSkill.params ?? ["input"]
           }
         : null
     };
@@ -550,8 +550,8 @@ function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?
 function buildSkillsContext(
   skillManager: SkillManager,
   onlyNames?: string[],
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> = {}
-): Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> | null {
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {}
+): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> | null {
   const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
   const entries = skills.map((skill) => {
     const command = skill.metadata?.command ?? skill.command;
@@ -562,9 +562,9 @@ function buildSkillsContext(
         description: skill.description,
         command,
         terminal: skill.terminal,
-        ...(skill.runtimeTool ? { runtime_tool: skill.runtimeTool } : {}),
-        ...(skill.runtimeAction ? { runtime_action: skill.runtimeAction } : {}),
-        ...(skill.runtimeParams && skill.runtimeParams.length > 0 ? { runtime_params: skill.runtimeParams } : {}),
+        ...(skill.tool ? { tool: skill.tool } : {}),
+        ...(skill.action ? { action: skill.action } : {}),
+        ...(skill.params && skill.params.length > 0 ? { params: skill.params } : {}),
         ...(keywords ? { keywords } : {})
       }
     ] as const;
@@ -577,16 +577,16 @@ function buildSkillsContext(
 
 function buildExtraSkillsContext(
   toolRegistry: ToolRegistry
-): Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> {
-  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }> = {};
+): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> {
+  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {};
   const haSchema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
   if (haSchema) {
     extra.homeassistant = {
       description: "Control and query Home Assistant devices (services, state, snapshots).",
       command: "homeassistant",
       terminal: false,
-      runtime_tool: "homeassistant",
-      runtime_action: "call_service",
+      tool: "homeassistant",
+      action: "call_service",
       ...(haSchema.keywords ? { keywords: haSchema.keywords } : {})
     };
   }
@@ -596,7 +596,7 @@ function buildExtraSkillsContext(
 function getSkillDetail(
   name: string,
   skillManager: SkillManager,
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; runtime_tool?: string; runtime_action?: string; runtime_params?: string[]; keywords?: string[] }>,
+  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }>,
   toolRegistry: ToolRegistry
 ): string {
   if (extraSkills[name] && name === "homeassistant") {

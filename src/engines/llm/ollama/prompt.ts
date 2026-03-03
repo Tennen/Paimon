@@ -146,7 +146,7 @@ function getSkillPlanningInstructions(): string[] {
     "You have selected a skill. Plan the tool execution.",
     "Read the user prompt sections in order: USER_REQUEST -> CONTEXT_JSON.",
     "Understand skill intent from CONTEXT_JSON.selected_skill.detail.",
-    "If CONTEXT_JSON.skill_runtime_contract exists, it has highest priority for tool/action/params shape.",
+    "If CONTEXT_JSON.skill_contract exists, it has highest priority for tool/action/params shape.",
     "Use the tool/action from CONTEXT_JSON.tools_schema.",
     "Use CONTEXT_JSON.tools_context runtime data to fill params (entity_id/device names/etc).",
     "",

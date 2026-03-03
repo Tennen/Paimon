@@ -10,7 +10,7 @@ src/
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # External API adapters (flat by domain)
     evolution-operator/ # Evolution runtime engine + state orchestration
-  runtime-tools/   # Tool handlers and schemas (one tool per file, self-register)
+  tools/   # Tool handlers and schemas (one tool per file, self-register)
   storage/         # Persistence abstraction (store registration/get/set)
   scheduler/       # Schedule/user domain
   memory/          # Session memory domain
@@ -28,7 +28,7 @@ skills/            # Skill packages (SKILL.md declarations only)
 admin-web/         # Admin frontend
 ```
 
-Note: `handler.js` is deprecated. Keep runtime execution in `src/runtime-tools/` and integrations flat under `src/integrations/`.
+Note: `handler.js` is deprecated. Keep runtime execution in `src/tools/` and integrations flat under `src/integrations/`.
 
 ## Why This Refactor
 
@@ -38,15 +38,15 @@ Note: `handler.js` is deprecated. Keep runtime execution in `src/runtime-tools/`
 
 ## Naming Decisions
 
-- `src/tools` -> `src/runtime-tools`
-  - Clarifies: this is runtime tool layer, not scripts.
+- `src/tools` -> `src/tools`
+  - Clarifies: this is tool layer, not scripts.
 - `src/endpoints` -> `src/integrations`
   - Clarifies: these modules are outbound adapters to third-party systems.
 
 ## Placement Rules
 
 - If code consumes third-party API protocol directly -> `src/integrations/`.
-- If code is LLM-callable tool (including skill-bound tools) -> `src/runtime-tools/`.
+- If code is LLM-callable tool (including skill-bound tools) -> `src/tools/`.
 - If code only translates inbound requests to internal model -> `src/ingress/`.
 - If code stores persistent domain state -> use `src/storage/persistence.ts` API only.
 

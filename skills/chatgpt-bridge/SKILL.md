@@ -4,16 +4,16 @@ description: Use ChatGPT Web (already logged-in Chrome) for general Q&A, knowled
 install: npm install puppeteer-core --no-save
 prefer_tool_result: true
 keywords: ["chatgpt", "openai", "gpt", "问答", "查询", "解释", "总结", "科普", "搜索", "查一下", "what", "how", "why", "where", "when"]
-runtime_tool: skill.chatgpt-bridge
-runtime_action: execute
-runtime_params: ["input"]
+tool: skill.chatgpt-bridge
+action: execute
+params: ["input"]
 ---
 
 # ChatGPT Bridge Skill
 
 Bridge user messages to ChatGPT Web through an existing logged-in Chrome session and return text/images.
 
-Runtime tool contract (LLM must output JSON)
+Tool contract (LLM must output JSON)
 
 ```json
 {

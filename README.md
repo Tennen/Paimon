@@ -33,7 +33,7 @@ sequenceDiagram
 
 - `src/ingress`: inbound protocol adapters (`/ingress/*`, admin API, bridge stream).
 - `src/integrations`: outbound integrations (Home Assistant, WeCom clients).
-- `src/runtime-tools`: LLM-callable tools and registry.
+- `src/tools`: LLM-callable tools and registry.
 - `src/storage`: persistence abstraction (`registerStore/getStore/setStore`).
 - `tools/`: standalone operational scripts (not runtime modules).
 
@@ -447,7 +447,7 @@ Create a skill under `skills/<name>/SKILL.md`.
 Layering rules:
 
 - Keep integration adapters flat under `src/integrations/<domain>/`.
-- Keep all LLM-callable tool implementations in `src/runtime-tools/` (one tool per file, self-register).
+- Keep all LLM-callable tool implementations in `src/tools/` (one tool per file, self-register).
 - Keep `src/skills/` focused on skill metadata management.
 
 Example structure:
@@ -455,21 +455,21 @@ Example structure:
 ```
 skills/my-skill/SKILL.md
 src/integrations/my-integration/client.ts
-src/runtime-tools/mySkillTool.ts
+src/tools/mySkillTool.ts
 ```
 
 In `SKILL.md`, define runtime contract fields:
 
-- `runtime_tool`
-- `runtime_action`
-- `runtime_params`
+- `tool`
+- `action`
+- `params`
 
 And describe LLM output JSON as:
 
 ```json
 {
-  "tool": "runtime_tool_name",
-  "action": "runtime_action_name",
+  "tool": "tool_name",
+  "action": "action_name",
   "params": {
     "key": "value"
   }
