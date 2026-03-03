@@ -11,7 +11,7 @@ sequenceDiagram
   participant WeCom as WeCom (Client)
   participant Bridge as WeCom Bridge (optional)
   participant Paimon as Paimon (Ingress + Orchestrator)
-  participant LLM as Ollama LLM
+  participant LLM as LLM Engine (Ollama / llama-server)
   participant Tools as ToolRouter
   participant HA as Home Assistant
 
@@ -56,7 +56,18 @@ export HA_BASE_URL="http://homeassistant.local:8123"
 export HA_TOKEN="YOUR_LONG_LIVED_TOKEN"
 ```
 
-Set Ollama env vars:
+Set LLM env vars:
+
+```bash
+export LLM_PROVIDER="ollama" # ollama | llama-server
+export LLM_TIMEOUT_MS="15000"
+export LLM_PLANNING_TIMEOUT_MS="30000" # optional, fallback to LLM_TIMEOUT_MS
+export LLM_MAX_RETRIES="2"
+export LLM_STRICT_JSON="true"
+export LLM_MAX_ITERATIONS="2"
+```
+
+Set Ollama provider env vars:
 
 ```bash
 export OLLAMA_BASE_URL="http://127.0.0.1:11434"
@@ -77,6 +88,19 @@ export VISION_PROMPT="请用中文简短描述图片内容，1句话以内，不
 ```
 
 `LLM_THINKING_BUDGET_ENABLED=true` 时，Admin 中的 `LLM_THINKING_BUDGET` 表示 Planning Thinking Budget 默认值（供 Step1 LLM 参考）；Step2 实际执行可被 Step1 决策输出覆盖。
+Set llama-server provider env vars:
+
+```bash
+export LLM_PROVIDER="llama-server"
+export LLAMA_SERVER_BASE_URL="http://127.0.0.1:8080"
+export LLAMA_SERVER_MODEL="qwen3-thinking"
+export LLAMA_SERVER_PLANNING_MODEL="qwen3-thinking" # optional, fallback to LLAMA_SERVER_MODEL
+export LLAMA_SERVER_API_KEY="" # optional
+export LLAMA_SERVER_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true}'
+export LLAMA_SERVER_PLANNING_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true,"thinking_budget":1024}'
+```
+
+Note: vision caption (`ha.camera_snapshot` describe) still uses `OLLAMA_VISION_MODEL`.
 
 Set WeCom env vars:
 
@@ -135,11 +159,51 @@ npm run dev
 All standalone helper scripts and bridge programs are under `tools/`:
 
 - `tools/fast-whisper-transcribe.py`
+- `tools/llama-server-daemon-macos.sh`
 - `tools/market-smoke.ts`
+- `tools/ollama-model-to-gguf.js`
 - `tools/wecom-bridge.go`
 - `tools/wecom-bridge.js`
 
 See `tools/README.md` for details.
+
+## llama-server (macOS silent daemon)
+
+Install `llama-server` first (for example, via `brew install llama.cpp`), then run:
+
+```bash
+tools/llama-server-daemon-macos.sh start \
+  --model ~/.llm/models/qwen3-thinking.gguf \
+  --port 8080 \
+  --ctx-size 32768 \
+  --threads 8 \
+  --parallel 1 \
+  --alias qwen3-thinking
+```
+
+This uses `launchctl` (`~/Library/LaunchAgents/com.paimon.llama-server.plist`) so the process keeps running without an attached terminal, and defaults to silent logs (`/dev/null`).
+
+Common operations:
+
+```bash
+tools/llama-server-daemon-macos.sh status
+tools/llama-server-daemon-macos.sh restart --model ~/.llm/models/qwen3-thinking.gguf
+tools/llama-server-daemon-macos.sh stop
+```
+
+## Export Ollama model to GGUF
+
+If your model is already downloaded by Ollama, export/copy it to `~/.llm/models`:
+
+```bash
+node tools/ollama-model-to-gguf.js --model qwen3:4b
+```
+
+Custom output directory and overwrite:
+
+```bash
+node tools/ollama-model-to-gguf.js --model qwen3:4b --output-dir ~/.llm/models --force
+```
 
 ## Health / sessions
 

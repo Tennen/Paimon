@@ -49,6 +49,10 @@ export class OllamaLLMEngine implements LLMEngine {
     return step === "skill_planning" ? this.options.planningModel : this.options.model;
   }
 
+  getProviderName(): "ollama" {
+    return "ollama";
+  }
+
   async selectSkill(
     text: string,
     runtimeContext: LLMRuntimeContext

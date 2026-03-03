@@ -3,7 +3,7 @@ import express from "express";
 import { SessionManager } from "./core/sessionManager";
 import { Orchestrator } from "./core/orchestrator";
 import { ToolRouter } from "./core/toolRouter";
-import { OllamaLLMEngine } from "./engines/llm/ollama";
+import { createLLMEngine } from "./engines/llm";
 import { HttpIngressAdapter } from "./ingress/http";
 import { HANotifyIngressAdapter } from "./ingress/haNotify";
 import { WeComIngressAdapter } from "./ingress/wecom";
@@ -34,7 +34,7 @@ const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConf
 const registry = new ToolRegistry();
 loadTools(registry, { skillManager, evolutionService });
 const toolRouter = new ToolRouter(registry);
-const llmEngine = new OllamaLLMEngine();
+const llmEngine = createLLMEngine();
 const callbackDispatcher = new CallbackDispatcher();
 const orchestrator = new Orchestrator(
   toolRouter,

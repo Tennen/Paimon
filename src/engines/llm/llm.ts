@@ -1,5 +1,7 @@
 import { SkillSelectionResult, SkillPlanningResult } from "../../types";
 
+export type LLMProvider = "ollama" | "llama-server";
+
 export type LLMRuntimeContext = {
   now?: string;
   timezone?: string;
@@ -16,7 +18,7 @@ export type LLMRuntimeContext = {
 };
 
 export type LLMPlanMeta = {
-  llm_provider: "ollama";
+  llm_provider: LLMProvider;
   model: string;
   retries: number;
   parse_ok: boolean;
@@ -38,6 +40,7 @@ export interface LLMEngine {
     planningOptions?: LLMPlanningOptions
   ): Promise<SkillPlanningResult>;
   getModelForStep(step: LLMExecutionStep): string;
+  getProviderName(): LLMProvider;
 }
 
 export type LLMPlanResult = {

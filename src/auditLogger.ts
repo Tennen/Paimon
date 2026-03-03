@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import type { LLMProvider } from "./engines/llm/llm";
 
 export type AuditEntry = {
   requestId: string;
@@ -10,7 +11,7 @@ export type AuditEntry = {
   latencyMs: number;
   tool?: string;
   tool_meta?: unknown;
-  llm_provider?: "ollama";
+  llm_provider?: LLMProvider;
   model?: string;
   retries?: number;
   parse_ok?: boolean;

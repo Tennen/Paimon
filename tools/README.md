@@ -5,7 +5,9 @@ This directory contains standalone scripts and bridge programs used by Paimon.
 ## Files
 
 - `fast-whisper-transcribe.py`: helper script used by `STT_PROVIDER=fast-whisper`.
+- `llama-server-daemon-macos.sh`: manage `llama-server` as a macOS launchd daemon (silent/background).
 - `market-smoke.ts`: smoke test for `market-analysis` + `chatgpt-bridge` integration.
+- `ollama-model-to-gguf.js`: export an Ollama-downloaded GGUF blob into `~/.llm/models`.
 - `wecom-bridge.go`: production-ready WeCom callback bridge (recommended on VPS).
 - `wecom-bridge.js`: Node.js implementation of the same bridge (for quick local use).
 - `package.json`: dependencies and start script for `wecom-bridge.js`.
@@ -22,6 +24,20 @@ Market smoke script:
 
 ```bash
 npx tsx tools/market-smoke.ts
+```
+
+llama-server daemon on macOS (silent by default):
+
+```bash
+tools/llama-server-daemon-macos.sh start --model ~/.llm/models/qwen3-thinking.gguf --port 8080
+tools/llama-server-daemon-macos.sh status
+tools/llama-server-daemon-macos.sh stop
+```
+
+Export Ollama model blob to GGUF:
+
+```bash
+node tools/ollama-model-to-gguf.js --model qwen3:4b
 ```
 
 ## WeCom bridge (VPS)
