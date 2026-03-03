@@ -135,9 +135,6 @@ export class HAEntityRegistry {
     for (const item of this.pendingEntityList) {
       const shouldExpose = item?.options?.conversation?.should_expose === true;
       const entityId = typeof item?.entity_id === "string" ? item.entity_id : "";
-      if (entityId === 'camera.pet') {
-        console.log(item)
-      }
       if (!shouldExpose || !entityId) continue;
       nextSet.add(entityId);
       const domain = entityId.split(".")[0] ?? "";
