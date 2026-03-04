@@ -1,6 +1,9 @@
 import crypto from "crypto";
 import { XMLParser } from "fast-xml-parser";
+import { jsonrepair } from "jsonrepair";
 import { DATA_STORE, getStore, registerStore, setStore } from "../../storage/persistence";
+import { ollamaChat } from "../../engines/llm/ollama/client";
+import { llamaServerChat } from "../../engines/llm/llama-server/client";
 
 export const directCommands = ["/topic"];
 
@@ -148,6 +151,13 @@ type DigestRunResult = {
   unsentCount: number;
 };
 
+type PlanningDigestItemPatch = {
+  id: string;
+  titleCn?: string;
+  whyCn?: string;
+  topicTags?: TopicKey[];
+};
+
 const TOPIC_KEYS: TopicKey[] = [
   "llm_apps",
   "agents",
@@ -189,6 +199,16 @@ const FEED_FETCH_TIMEOUT_MS = 12000;
 
 const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
 const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
+const LEGACY_FEED_URL_MIGRATION: Record<string, string> = {
+  "https://eng.uber.com/feed": "https://www.uber.com/blog/engineering/feed/",
+  "https://eng.uber.com/feed/": "https://www.uber.com/blog/engineering/feed/",
+  "https://www.interconnects.ai/rss": "https://www.interconnects.ai/feed",
+  "https://www.interconnects.ai/rss/": "https://www.interconnects.ai/feed"
+};
+const LEGACY_FEED_DISABLE_LIST = new Set([
+  "https://www.anthropic.com/news/rss",
+  "https://www.anthropic.com/news/rss.xml"
+]);
 
 const DEFAULT_SOURCES: TopicPushSource[] = [
   {
@@ -197,14 +217,6 @@ const DEFAULT_SOURCES: TopicPushSource[] = [
     category: "engineering",
     feedUrl: "https://openai.com/blog/rss.xml",
     weight: 1.2,
-    enabled: true
-  },
-  {
-    id: "anthropic-news",
-    name: "Anthropic News",
-    category: "engineering",
-    feedUrl: "https://www.anthropic.com/news/rss",
-    weight: 1.1,
     enabled: true
   },
   {
@@ -235,7 +247,7 @@ const DEFAULT_SOURCES: TopicPushSource[] = [
     id: "uber-engineering",
     name: "Uber Engineering",
     category: "engineering",
-    feedUrl: "https://eng.uber.com/feed/",
+    feedUrl: "https://www.uber.com/blog/engineering/feed/",
     weight: 1.0,
     enabled: true
   },
@@ -275,7 +287,7 @@ const DEFAULT_SOURCES: TopicPushSource[] = [
     id: "interconnects",
     name: "Interconnects",
     category: "engineering",
-    feedUrl: "https://www.interconnects.ai/rss/",
+    feedUrl: "https://www.interconnects.ai/feed",
     weight: 1.0,
     enabled: true
   },
@@ -456,7 +468,7 @@ export async function execute(input: string): Promise<{ text: string; result?: u
         const nextState = mergeSentLog(state, run.selected, now);
         writeState(nextState);
         return {
-          text: formatDigest(run, config.dailyQuota),
+          text: formatDigest(run),
           result: {
             selectedCount: run.selected.length,
             selectedByCategory: run.selectedByCategory,
@@ -546,12 +558,14 @@ async function runDigest(config: TopicPushConfig, state: TopicPushState, now: Da
   const sentSet = new Set(state.sentLog.map((entry) => entry.urlNormalized));
   const unsent = deduped.filter((item) => !sentSet.has(item.urlNormalized));
 
-  const selected = selectCandidates(unsent, config.dailyQuota, config.filters.maxPerDomain)
+  const selectedRaw = selectCandidates(unsent, config.dailyQuota, config.filters.maxPerDomain)
     .map((item, index) => ({
       ...item,
       rank: index + 1,
       whyItMatters: buildWhyItMatters(item.candidate)
     }));
+
+  const selected = await refineSelectedItemsWithPlanningModel(selectedRaw);
 
   const selectedByCategory = {
     engineering: selected.filter((item) => item.candidate.category === "engineering").length,
@@ -610,7 +624,8 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        "User-Agent": "Paimon-TopicPush/1.0"
+        "User-Agent": "Paimon-TopicPush/1.0",
+        Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.6"
       },
       signal: controller.signal
     });
@@ -903,6 +918,265 @@ function pickFromBucket(
     });
     picked += 1;
   }
+}
+
+async function refineSelectedItemsWithPlanningModel(selected: SelectedItem[]): Promise<SelectedItem[]> {
+  if (selected.length === 0) {
+    return selected;
+  }
+
+  if (!shouldUsePlanningModelRefine()) {
+    return selected;
+  }
+
+  try {
+    const patches = await generatePlanningDigestPatchMap(selected);
+    if (patches.size === 0) {
+      return selected;
+    }
+
+    return selected.map((item) => {
+      const patch = patches.get(item.candidate.id);
+      if (!patch) {
+        return item;
+      }
+
+      const nextTags = Array.isArray(patch.topicTags) && patch.topicTags.length > 0
+        ? patch.topicTags
+        : item.candidate.topicTags;
+
+      return {
+        ...item,
+        candidate: {
+          ...item.candidate,
+          ...(patch.titleCn ? { title: patch.titleCn } : {}),
+          topicTags: nextTags
+        },
+        ...(patch.whyCn ? { whyItMatters: patch.whyCn } : {})
+      };
+    });
+  } catch (error) {
+    console.warn(`topic-push planning model refine failed: ${(error as Error).message ?? "unknown error"}`);
+    return selected;
+  }
+}
+
+async function generatePlanningDigestPatchMap(selected: SelectedItem[]): Promise<Map<string, PlanningDigestItemPatch>> {
+  const input = selected.map((item) => ({
+    id: item.candidate.id,
+    title: item.candidate.title,
+    source_name: item.candidate.sourceName,
+    category: item.candidate.category,
+    published_at: item.candidate.publishedAt ?? "",
+    topic_tags: item.candidate.topicTags,
+    summary: item.candidate.summary,
+    why_draft: item.whyItMatters,
+    url: item.candidate.url
+  }));
+
+  const systemPrompt = [
+    "你是 AI 工程日报编辑。",
+    "任务：基于输入条目做中文整合与翻译，输出给工程读者。",
+    "要求：",
+    "1) title_cn: 生成简洁中文标题，保留必要英文专有名词（如产品名/模型名），不要出现 “Show HN:” 前缀。",
+    "2) why_cn: 生成 1 句话，强调工程价值与可复用点，长度 30-80 字。",
+    "3) topic_tags: 可选修正标签，但只能从 llm_apps/agents/multimodal/reasoning/rag/eval/on_device/safety 里选。",
+    "4) 不要输出链接，不要输出 'Article URL'，不要编造输入中不存在的信息。",
+    "输出必须是 JSON：",
+    "{\"items\":[{\"id\":\"...\",\"title_cn\":\"...\",\"why_cn\":\"...\",\"topic_tags\":[\"agents\"]}]}"
+  ].join("\n");
+
+  const userPrompt = JSON.stringify(
+    {
+      task: "将以下条目翻译并整合为中文日报文案",
+      items: input
+    },
+    null,
+    2
+  );
+
+  const raw = await chatWithPlanningModel(systemPrompt, userPrompt);
+  return parsePlanningDigestPatchMap(raw);
+}
+
+async function chatWithPlanningModel(systemPrompt: string, userPrompt: string): Promise<string> {
+  const provider = normalizeLlmProvider(process.env.LLM_PROVIDER);
+
+  if (provider === "llama-server") {
+    const model = String(
+      process.env.LLAMA_SERVER_PLANNING_MODEL
+      ?? process.env.LLAMA_SERVER_MODEL
+      ?? process.env.OLLAMA_PLANNING_MODEL
+      ?? process.env.OLLAMA_MODEL
+      ?? ""
+    ).trim();
+    if (!model) {
+      throw new Error("missing planning model for llama-server");
+    }
+
+    return llamaServerChat({
+      baseUrl: String(process.env.LLAMA_SERVER_BASE_URL ?? "http://127.0.0.1:8080").trim(),
+      model,
+      apiKey: String(process.env.LLAMA_SERVER_API_KEY ?? process.env.OPENAI_API_KEY ?? "").trim(),
+      timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    });
+  }
+
+  const model = String(process.env.OLLAMA_PLANNING_MODEL ?? process.env.OLLAMA_MODEL ?? "").trim();
+  if (!model) {
+    throw new Error("missing planning model for ollama");
+  }
+
+  return ollamaChat({
+    baseUrl: String(process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").trim(),
+    model,
+    timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
+    options: {
+      temperature: 0.2,
+      top_p: 0.9,
+      num_predict: 2048
+    },
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt }
+    ]
+  });
+}
+
+function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestItemPatch> {
+  const parsed = parseJsonLike(raw);
+  const rows = Array.isArray(parsed)
+    ? parsed
+    : (isRecord(parsed) && Array.isArray(parsed.items) ? parsed.items : []);
+
+  const patches = new Map<string, PlanningDigestItemPatch>();
+  for (const row of rows) {
+    if (!isRecord(row)) {
+      continue;
+    }
+
+    const id = normalizeText(row.id);
+    if (!id) {
+      continue;
+    }
+
+    const titleCn = sanitizePlanningText(row.title_cn ?? row.titleCn ?? row.title, 160);
+    const whyCn = sanitizePlanningText(row.why_cn ?? row.whyCn ?? row.why, 160);
+    const topicTags = toArray(row.topic_tags ?? row.topicTags)
+      .map((item) => normalizeTopicKey(item))
+      .filter((item): item is TopicKey => Boolean(item));
+
+    patches.set(id, {
+      id,
+      ...(titleCn ? { titleCn } : {}),
+      ...(whyCn ? { whyCn } : {}),
+      ...(topicTags.length > 0 ? { topicTags } : {})
+    });
+  }
+
+  return patches;
+}
+
+function sanitizePlanningText(value: unknown, maxLength: number): string {
+  const text = normalizeText(value)
+    .replace(/article\s*url\s*:\s*https?:\/\/\S+/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[-*]\s*/g, "")
+    .trim();
+  return clampText(text, maxLength);
+}
+
+function parseJsonLike(raw: string): unknown {
+  const text = String(raw ?? "").trim();
+  if (!text) {
+    return {};
+  }
+
+  const normalized = stripCodeFence(extractLikelyJsonBlock(text));
+  if (!normalized) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    try {
+      const repaired = jsonrepair(normalized);
+      return JSON.parse(repaired);
+    } catch {
+      return {};
+    }
+  }
+}
+
+function extractLikelyJsonBlock(text: string): string {
+  const objectStart = text.indexOf("{");
+  const objectEnd = text.lastIndexOf("}");
+  if (objectStart >= 0 && objectEnd > objectStart) {
+    return text.slice(objectStart, objectEnd + 1);
+  }
+
+  const arrayStart = text.indexOf("[");
+  const arrayEnd = text.lastIndexOf("]");
+  if (arrayStart >= 0 && arrayEnd > arrayStart) {
+    return text.slice(arrayStart, arrayEnd + 1);
+  }
+  return text;
+}
+
+function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("```")) {
+    return trimmed;
+  }
+
+  const lines = trimmed.split(/\r?\n/);
+  if (lines.length < 3) {
+    return trimmed;
+  }
+  if (!lines[lines.length - 1].trim().startsWith("```")) {
+    return trimmed;
+  }
+  return lines.slice(1, -1).join("\n").trim();
+}
+
+function normalizeTopicKey(raw: unknown): TopicKey | null {
+  const value = normalizeText(raw).toLowerCase().replace(/-/g, "_");
+  if (!value) {
+    return null;
+  }
+  if (value === "llmapps") return "llm_apps";
+  if (value === "ondevice") return "on_device";
+  return TOPIC_KEYS.includes(value as TopicKey) ? (value as TopicKey) : null;
+}
+
+function shouldUsePlanningModelRefine(): boolean {
+  const raw = String(process.env.TOPIC_PUSH_USE_PLANNING_MODEL ?? "true").trim().toLowerCase();
+  if (["false", "0", "no", "off"].includes(raw)) {
+    return false;
+  }
+  return true;
+}
+
+function normalizeLlmProvider(raw: string | undefined): "ollama" | "llama-server" {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (["llama-server", "llama_server", "llama.cpp", "llamacpp", "llama"].includes(value)) {
+    return "llama-server";
+  }
+  return "ollama";
+}
+
+function parsePositiveInteger(raw: unknown, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 function buildWhyItMatters(candidate: Candidate): string {
@@ -1321,26 +1595,9 @@ function formatState(state: TopicPushState): string {
   ].join("\n");
 }
 
-function formatDigest(run: DigestRunResult, quota: TopicPushDailyQuota): string {
+function formatDigest(run: DigestRunResult): string {
   const lines: string[] = [];
   lines.push(`AI Engineering Daily Digest (${formatLocalDate(run.now)})`);
-  lines.push(
-    `sources: ${run.fetchedSources}/${run.totalSources} ok | raw=${run.rawItemCount} | candidates=${run.candidateCount} | deduped=${run.dedupedCount} | unsent=${run.unsentCount}`
-  );
-  lines.push(
-    `quota: total=${quota.total}, engineering=${quota.engineering}, news=${quota.news}, ecosystem=${quota.ecosystem}`
-  );
-  lines.push(
-    `selected: ${run.selected.length} (engineering=${run.selectedByCategory.engineering}, news=${run.selectedByCategory.news}, ecosystem=${run.selectedByCategory.ecosystem})`
-  );
-
-  if (run.fetchErrors.length > 0) {
-    const compact = run.fetchErrors
-      .slice(0, 6)
-      .map((item) => `${item.sourceId}:${item.error}`)
-      .join(" | ");
-    lines.push(`fetch_errors: ${compact}${run.fetchErrors.length > 6 ? ` (+${run.fetchErrors.length - 6} more)` : ""}`);
-  }
 
   if (run.selected.length === 0) {
     lines.push("\n今天没有筛出新的可推送条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。");
@@ -1444,13 +1701,20 @@ function normalizeSource(input: unknown, index: number): TopicPushSource | null 
     return null;
   }
 
+  if (shouldDropLegacySource(id, feedUrl)) {
+    return null;
+  }
+
+  const migratedFeedUrl = migrateLegacyFeedUrl(feedUrl);
+  const enabled = parseOptionalBoolean(source.enabled) ?? true;
+
   return {
     id,
     name,
     category,
-    feedUrl,
+    feedUrl: migratedFeedUrl,
     weight: clampWeight(Number(source.weight)),
-    enabled: parseOptionalBoolean(source.enabled) ?? true
+    enabled
   };
 }
 
@@ -1766,6 +2030,23 @@ function normalizeFeedUrl(rawUrl: string): string {
   return normalized;
 }
 
+function migrateLegacyFeedUrl(feedUrl: string): string {
+  const key = feedUrl.toLowerCase();
+  const migrated = LEGACY_FEED_URL_MIGRATION[key];
+  if (!migrated) {
+    return feedUrl;
+  }
+  return normalizeFeedUrl(migrated) || feedUrl;
+}
+
+function shouldDropLegacySource(id: string, feedUrl: string): boolean {
+  const key = feedUrl.toLowerCase();
+  if (id !== "anthropic-news") {
+    return false;
+  }
+  return LEGACY_FEED_DISABLE_LIST.has(key);
+}
+
 function isDomainBlocked(domain: string, blocked: string[]): boolean {
   const normalized = domain.toLowerCase();
   return blocked.some((item) => normalized === item || normalized.endsWith(`.${item}`));
@@ -1906,6 +2187,9 @@ function normalizeSummary(text: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
+    .replace(/article\s*url\s*:\s*https?:\/\/\S+/gi, " ")
+    .replace(/source\s*url\s*:\s*https?:\/\/\S+/gi, " ")
+    .replace(/https?:\/\/\S+/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -2180,10 +2464,14 @@ function readFlagString(flags: Map<string, string | true>, key: string): string 
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  if (!isRecord(value)) {
     return null;
   }
   return value as Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function toArray(value: unknown): unknown[] {
