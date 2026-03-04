@@ -146,6 +146,73 @@ export type MarketSecuritySearchItem = {
   secid?: string;
 };
 
+export type TopicPushCategory = "engineering" | "news" | "ecosystem";
+
+export type TopicPushTopicKey =
+  | "llm_apps"
+  | "agents"
+  | "multimodal"
+  | "reasoning"
+  | "rag"
+  | "eval"
+  | "on_device"
+  | "safety";
+
+export type TopicPushSource = {
+  id: string;
+  name: string;
+  category: TopicPushCategory;
+  feedUrl: string;
+  weight: number;
+  enabled: boolean;
+};
+
+export type TopicPushFilters = {
+  timeWindowHours: number;
+  minTitleLength: number;
+  blockedDomains: string[];
+  blockedKeywordsInTitle: string[];
+  maxPerDomain: number;
+  dedup: {
+    titleSimilarityThreshold: number;
+    urlNormalization: boolean;
+  };
+};
+
+export type TopicPushDailyQuota = {
+  total: number;
+  engineering: number;
+  news: number;
+  ecosystem: number;
+};
+
+export type TopicPushConfig = {
+  version: 1;
+  sources: TopicPushSource[];
+  topics: Record<TopicPushTopicKey, string[]>;
+  filters: TopicPushFilters;
+  dailyQuota: TopicPushDailyQuota;
+};
+
+export type TopicPushSentLogItem = {
+  urlNormalized: string;
+  sentAt: string;
+  title: string;
+};
+
+export type TopicPushState = {
+  version: 1;
+  sentLog: TopicPushSentLogItem[];
+  updatedAt: string;
+};
+
+export type TopicPushConfigPayload = {
+  config: TopicPushConfig;
+  state: TopicPushState;
+  configStore: DataStoreDescriptor;
+  stateStore: DataStoreDescriptor;
+};
+
 export type EvolutionGoalStatus = "pending" | "running" | "waiting_retry" | "succeeded" | "failed";
 
 export type EvolutionGoalEvent = {
@@ -273,7 +340,7 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "messages" | "market" | "evolution";
+export type MenuKey = "system" | "messages" | "market" | "topic" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",
@@ -301,4 +368,42 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
     timeoutMs: 20000,
     fallbackToLocal: true
   }
+};
+
+export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
+  version: 1,
+  sources: [],
+  topics: {
+    llm_apps: [],
+    agents: [],
+    multimodal: [],
+    reasoning: [],
+    rag: [],
+    eval: [],
+    on_device: [],
+    safety: []
+  },
+  filters: {
+    timeWindowHours: 24,
+    minTitleLength: 8,
+    blockedDomains: [],
+    blockedKeywordsInTitle: [],
+    maxPerDomain: 2,
+    dedup: {
+      titleSimilarityThreshold: 0.9,
+      urlNormalization: true
+    }
+  },
+  dailyQuota: {
+    total: 10,
+    engineering: 7,
+    news: 2,
+    ecosystem: 1
+  }
+};
+
+export const DEFAULT_TOPIC_PUSH_STATE: TopicPushState = {
+  version: 1,
+  sentLog: [],
+  updatedAt: ""
 };

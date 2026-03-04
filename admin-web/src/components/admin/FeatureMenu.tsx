@@ -45,6 +45,13 @@ export function FeatureMenu(props: FeatureMenuProps) {
           </Button>
           <Button
             type="button"
+            variant={props.activeMenu === "topic" ? "default" : "outline"}
+            onClick={() => props.onChange("topic")}
+          >
+            Topic Push
+          </Button>
+          <Button
+            type="button"
             variant={props.activeMenu === "evolution" ? "default" : "outline"}
             onClick={() => props.onChange("evolution")}
           >

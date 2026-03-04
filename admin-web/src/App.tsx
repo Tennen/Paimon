@@ -5,9 +5,12 @@ import { FeatureMenu } from "@/components/admin/FeatureMenu";
 import { MarketSection } from "@/components/admin/MarketSection";
 import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
+import { TopicPushSection } from "@/components/admin/TopicPushSection";
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
+  DEFAULT_TOPIC_PUSH_CONFIG,
+  DEFAULT_TOPIC_PUSH_STATE,
   DEFAULT_MARKET_ANALYSIS_CONFIG,
   DEFAULT_MARKET_PORTFOLIO,
   EMPTY_TASK_FORM,
@@ -29,6 +32,11 @@ import {
   PushUser,
   ScheduledTask,
   TaskFormState,
+  TopicPushCategory,
+  TopicPushConfig,
+  TopicPushConfigPayload,
+  TopicPushSource,
+  TopicPushState,
   UserFormState
 } from "@/types/admin";
 
@@ -82,6 +90,10 @@ export default function App() {
   const [marketSearchInputs, setMarketSearchInputs] = useState<string[]>([]);
   const [marketSearchResults, setMarketSearchResults] = useState<MarketSecuritySearchItem[][]>([]);
   const [searchingMarketFundIndex, setSearchingMarketFundIndex] = useState<number | null>(null);
+  const [topicPushConfig, setTopicPushConfig] = useState<TopicPushConfig>(DEFAULT_TOPIC_PUSH_CONFIG);
+  const [topicPushState, setTopicPushState] = useState<TopicPushState>(DEFAULT_TOPIC_PUSH_STATE);
+  const [savingTopicPushConfig, setSavingTopicPushConfig] = useState(false);
+  const [clearingTopicPushState, setClearingTopicPushState] = useState(false);
 
   const [evolutionSnapshot, setEvolutionSnapshot] = useState<EvolutionStateSnapshot | null>(null);
   const [loadingEvolution, setLoadingEvolution] = useState(false);
@@ -180,6 +192,7 @@ export default function App() {
         loadTasks(),
         loadMarketConfig(),
         loadMarketRuns(),
+        loadTopicPushConfig(),
         loadEvolutionState({ silent: true })
       ]);
       setNotice(null);
@@ -244,6 +257,12 @@ export default function App() {
   async function loadMarketRuns(): Promise<void> {
     const payload = await request<{ runs: MarketRunSummary[] }>("/admin/api/market/runs?limit=12");
     setMarketRuns(Array.isArray(payload.runs) ? payload.runs : []);
+  }
+
+  async function loadTopicPushConfig(): Promise<void> {
+    const payload = await request<TopicPushConfigPayload>("/admin/api/topic-push/config");
+    setTopicPushConfig(normalizeTopicPushConfig(payload.config ?? DEFAULT_TOPIC_PUSH_CONFIG));
+    setTopicPushState(normalizeTopicPushState(payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
   }
 
   async function loadEvolutionState(options?: { silent?: boolean }): Promise<void> {
@@ -955,6 +974,99 @@ export default function App() {
     }
   }
 
+  function handleTopicSourceChange(index: number, patch: Partial<TopicPushSource>): void {
+    setTopicPushConfig((prev) => {
+      const nextSources = prev.sources.map((item, rowIndex) => {
+        if (rowIndex !== index) {
+          return item;
+        }
+        return normalizeTopicPushSource({ ...item, ...patch }, rowIndex);
+      });
+      return {
+        ...prev,
+        sources: nextSources
+      };
+    });
+  }
+
+  function handleAddTopicSource(): void {
+    setTopicPushConfig((prev) => {
+      const baseId = `source-${prev.sources.length + 1}`;
+      const dedupId = buildNextTopicSourceId(baseId, prev.sources.map((item) => item.id));
+      return {
+        ...prev,
+        sources: prev.sources.concat([
+          {
+            id: dedupId,
+            name: "",
+            category: "engineering",
+            feedUrl: "",
+            weight: 1,
+            enabled: true
+          }
+        ])
+      };
+    });
+  }
+
+  function handleRemoveTopicSource(index: number): void {
+    setTopicPushConfig((prev) => ({
+      ...prev,
+      sources: prev.sources.filter((_, rowIndex) => rowIndex !== index)
+    }));
+  }
+
+  async function handleSaveTopicPushConfig(): Promise<void> {
+    const normalizedConfig = normalizeTopicPushConfig(topicPushConfig);
+    const invalid = normalizedConfig.sources.find((item) => !item.id || !item.name || !item.feedUrl);
+    if (invalid) {
+      setNotice({ type: "error", title: `RSS 源字段不完整: ${invalid.id || "(id为空)"}` });
+      return;
+    }
+
+    const idSet = new Set<string>();
+    for (const source of normalizedConfig.sources) {
+      if (idSet.has(source.id)) {
+        setNotice({ type: "error", title: `RSS 源 id 重复: ${source.id}` });
+        return;
+      }
+      idSet.add(source.id);
+    }
+
+    setSavingTopicPushConfig(true);
+    try {
+      const payload = await request<{ ok: boolean; config: TopicPushConfig }>("/admin/api/topic-push/config", {
+        method: "PUT",
+        body: JSON.stringify({
+          config: normalizedConfig
+        })
+      });
+      setTopicPushConfig(normalizeTopicPushConfig(payload.config ?? normalizedConfig));
+      await loadTopicPushConfig();
+      setNotice({ type: "success", title: "Topic Push 配置已保存" });
+    } catch (error) {
+      notifyError("保存 Topic Push 配置失败", error);
+    } finally {
+      setSavingTopicPushConfig(false);
+    }
+  }
+
+  async function handleClearTopicPushState(): Promise<void> {
+    setClearingTopicPushState(true);
+    try {
+      const payload = await request<{ ok: boolean; state: TopicPushState }>("/admin/api/topic-push/state/clear", {
+        method: "POST",
+        body: "{}"
+      });
+      setTopicPushState(normalizeTopicPushState(payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
+      setNotice({ type: "success", title: "Topic Push sent log 已清空" });
+    } catch (error) {
+      notifyError("清空 Topic Push sent log 失败", error);
+    } finally {
+      setClearingTopicPushState(false);
+    }
+  }
+
   async function handleSubmitEvolutionGoal(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const goal = evolutionGoalDraft.trim();
@@ -1125,6 +1237,21 @@ export default function App() {
         />
       ) : null}
 
+      {activeMenu === "topic" ? (
+        <TopicPushSection
+          topicPushConfig={topicPushConfig}
+          topicPushState={topicPushState}
+          savingTopicPushConfig={savingTopicPushConfig}
+          clearingTopicPushState={clearingTopicPushState}
+          onSourceChange={handleTopicSourceChange}
+          onAddSource={handleAddTopicSource}
+          onRemoveSource={handleRemoveTopicSource}
+          onSaveConfig={() => void handleSaveTopicPushConfig()}
+          onRefresh={() => void loadTopicPushConfig()}
+          onClearSentLog={() => void handleClearTopicPushState()}
+        />
+      ) : null}
+
       {activeMenu === "messages" ? (
         <MessagesSection
           users={users}
@@ -1216,6 +1343,165 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
       fallbackToLocal
     }
   };
+}
+
+function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): TopicPushConfig {
+  const fallback = DEFAULT_TOPIC_PUSH_CONFIG;
+  const source = config ?? fallback;
+  const rawSources = Array.isArray(source.sources) ? source.sources : [];
+  const sources = rawSources.map((item, index) => normalizeTopicPushSource(item, index));
+
+  const topicKeys: Array<keyof TopicPushConfig["topics"]> = [
+    "llm_apps",
+    "agents",
+    "multimodal",
+    "reasoning",
+    "rag",
+    "eval",
+    "on_device",
+    "safety"
+  ];
+  const topics = topicKeys.reduce<TopicPushConfig["topics"]>((acc, key) => {
+    const list = Array.isArray(source.topics?.[key]) ? source.topics[key] : [];
+    acc[key] = Array.from(new Set(list.map((item) => String(item ?? "").trim()).filter(Boolean)));
+    return acc;
+  }, {
+    llm_apps: [],
+    agents: [],
+    multimodal: [],
+    reasoning: [],
+    rag: [],
+    eval: [],
+    on_device: [],
+    safety: []
+  });
+
+  const filters = source.filters ?? fallback.filters;
+  const dailyQuota = source.dailyQuota ?? fallback.dailyQuota;
+
+  return {
+    version: 1,
+    sources,
+    topics,
+    filters: {
+      timeWindowHours: clampNumberValue(filters.timeWindowHours, 24, 1, 168),
+      minTitleLength: clampNumberValue(filters.minTitleLength, 8, 1, 80),
+      blockedDomains: Array.isArray(filters.blockedDomains) ? filters.blockedDomains.map((item) => String(item ?? "").trim()).filter(Boolean) : [],
+      blockedKeywordsInTitle: Array.isArray(filters.blockedKeywordsInTitle)
+        ? filters.blockedKeywordsInTitle.map((item) => String(item ?? "").trim()).filter(Boolean)
+        : [],
+      maxPerDomain: clampNumberValue(filters.maxPerDomain, 2, 1, 10),
+      dedup: {
+        titleSimilarityThreshold: clampFloatValue(filters.dedup?.titleSimilarityThreshold, 0.9, 0.5, 1),
+        urlNormalization: typeof filters.dedup?.urlNormalization === "boolean" ? filters.dedup.urlNormalization : true
+      }
+    },
+    dailyQuota: {
+      total: clampNumberValue(dailyQuota.total, 10, 1, 40),
+      engineering: clampNumberValue(dailyQuota.engineering, 7, 0, 40),
+      news: clampNumberValue(dailyQuota.news, 2, 0, 40),
+      ecosystem: clampNumberValue(dailyQuota.ecosystem, 1, 0, 40)
+    }
+  };
+}
+
+function normalizeTopicPushSource(source: Partial<TopicPushSource> | null | undefined, index: number): TopicPushSource {
+  const id = normalizeTopicSourceId(String(source?.id ?? ""));
+  const category = normalizeTopicPushCategory(source?.category);
+  const weight = Number(source?.weight);
+  return {
+    id: id || `source-${index + 1}`,
+    name: String(source?.name ?? "").trim(),
+    category,
+    feedUrl: String(source?.feedUrl ?? "").trim(),
+    weight: Number.isFinite(weight) ? clampFloatValue(weight, 1, 0.1, 5) : 1,
+    enabled: typeof source?.enabled === "boolean" ? source.enabled : true
+  };
+}
+
+function normalizeTopicPushCategory(raw: unknown): TopicPushCategory {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "news") {
+    return "news";
+  }
+  if (value === "ecosystem") {
+    return "ecosystem";
+  }
+  return "engineering";
+}
+
+function normalizeTopicSourceId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+}
+
+function buildNextTopicSourceId(baseId: string, existingIds: string[]): string {
+  const normalizedBase = normalizeTopicSourceId(baseId) || "source";
+  const used = new Set(existingIds.map((item) => normalizeTopicSourceId(item)));
+  if (!used.has(normalizedBase)) {
+    return normalizedBase;
+  }
+
+  for (let i = 2; i < 1000; i += 1) {
+    const candidate = `${normalizedBase}-${i}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  return `${normalizedBase}-${Date.now()}`;
+}
+
+function normalizeTopicPushState(state: TopicPushState | null | undefined): TopicPushState {
+  const source = state ?? DEFAULT_TOPIC_PUSH_STATE;
+  const sentLog = Array.isArray(source.sentLog)
+    ? source.sentLog
+        .map((item) => ({
+          urlNormalized: String(item?.urlNormalized ?? "").trim(),
+          sentAt: String(item?.sentAt ?? "").trim(),
+          title: String(item?.title ?? "").trim()
+        }))
+        .filter((item) => Boolean(item.urlNormalized))
+    : [];
+
+  return {
+    version: 1,
+    sentLog: sentLog.slice(0, 5000),
+    updatedAt: String(source.updatedAt ?? "").trim()
+  };
+}
+
+function clampNumberValue(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  const rounded = Math.floor(value);
+  if (rounded < min) {
+    return min;
+  }
+  if (rounded > max) {
+    return max;
+  }
+  return rounded;
+}
+
+function clampFloatValue(raw: unknown, fallback: number, min: number, max: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return fallback;
+  }
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return Math.round(value * 100) / 100;
 }
 
 function isValidMarketFund(fund: MarketFundHolding): boolean {

@@ -27,6 +27,12 @@ import { ScheduledTask } from "../scheduler/taskStore";
 import { EvolutionEngine } from "../integrations/evolution-operator/evolutionEngine";
 import { EvolutionCodexConfigService } from "../integrations/evolution-operator/codexConfigService";
 import { EvolutionOperatorService } from "../integrations/evolution-operator/service";
+import {
+  clearTopicPushSentLog,
+  getTopicPushConfig,
+  getTopicPushState,
+  setTopicPushConfig
+} from "../integrations/topic-push/service";
 
 const execAsync = promisify(exec);
 
@@ -115,6 +121,8 @@ const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
 const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
+const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
+const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 
@@ -790,6 +798,60 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({
           ok: false,
           error: (error as Error).message ?? "failed to bootstrap market tasks"
+        });
+      }
+    });
+
+    app.get("/admin/api/topic-push/config", (_req: Request, res: ExResponse) => {
+      const config = getTopicPushConfig();
+      const state = getTopicPushState();
+      res.json({
+        config,
+        state,
+        configStore: describeStore(TOPIC_PUSH_CONFIG_STORE),
+        stateStore: describeStore(TOPIC_PUSH_STATE_STORE)
+      });
+    });
+
+    app.put("/admin/api/topic-push/config", (req: Request, res: ExResponse) => {
+      if (!req.body || typeof req.body !== "object") {
+        res.status(400).json({ error: "invalid topic-push config payload" });
+        return;
+      }
+
+      const body = req.body as Record<string, unknown>;
+      const payload = "config" in body ? body.config : req.body;
+
+      if (!payload || typeof payload !== "object") {
+        res.status(400).json({ error: "missing topic-push config payload" });
+        return;
+      }
+
+      try {
+        const config = setTopicPushConfig(payload);
+        res.json({
+          ok: true,
+          config
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to save topic-push config"
+        });
+      }
+    });
+
+    app.post("/admin/api/topic-push/state/clear", (_req: Request, res: ExResponse) => {
+      try {
+        const state = clearTopicPushSentLog();
+        res.json({
+          ok: true,
+          state
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to clear topic-push state"
         });
       }
     });

@@ -12,7 +12,9 @@ export const DATA_STORE = {
   SCHEDULER_USERS: "scheduler.users",
   MARKET_PORTFOLIO: "market.portfolio",
   MARKET_CONFIG: "market.config",
-  MARKET_STATE: "market.state"
+  MARKET_STATE: "market.state",
+  TOPIC_PUSH_CONFIG: "topic-push.config",
+  TOPIC_PUSH_STATE: "topic-push.state"
 } as const;
 
 export type DataStoreName = typeof DATA_STORE[keyof typeof DATA_STORE];
@@ -25,7 +27,9 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.SCHEDULER_USERS]: "push-users.json",
   [DATA_STORE.MARKET_PORTFOLIO]: "market-analysis/portfolio.json",
   [DATA_STORE.MARKET_CONFIG]: "market-analysis/config.json",
-  [DATA_STORE.MARKET_STATE]: "market-analysis/state.json"
+  [DATA_STORE.MARKET_STATE]: "market-analysis/state.json",
+  [DATA_STORE.TOPIC_PUSH_CONFIG]: "topic-push/config.json",
+  [DATA_STORE.TOPIC_PUSH_STATE]: "topic-push/state.json"
 };
 
 type StoreEntry = {
