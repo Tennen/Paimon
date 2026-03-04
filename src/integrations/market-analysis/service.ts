@@ -43,6 +43,11 @@ export async function execute(input) {
     return { text: formatPortfolio(portfolio) };
   }
 
+  if (command.kind === "portfolio_add") {
+    const result = addPortfolioHolding(command.holding);
+    return { text: formatPortfolioAddResult(result) };
+  }
+
   if (command.kind === "status") {
     return { text: formatStatus(readState()) };
   }
@@ -86,6 +91,14 @@ function parseCommand(input) {
     return { kind: "portfolio" };
   }
 
+  const addPayload = extractPortfolioAddPayload(body);
+  if (addPayload) {
+    return {
+      kind: "portfolio_add",
+      holding: parsePortfolioHoldingPayload(addPayload)
+    };
+  }
+
   const withExplanation = !/--no-llm\b/i.test(body);
 
   const explicitPhase = detectPhaseFromText(body);
@@ -118,6 +131,51 @@ function parseCommand(input) {
     kind: "run",
     phase: inferPhaseFromLocalTime(),
     withExplanation
+  };
+}
+
+function extractPortfolioAddPayload(body) {
+  const matched = String(body || "").match(
+    /^(?:(?:portfolio|holdings|position|持仓)\s+)?(?:add|new|append|create|新增|添加)\s+(.+)$/i
+  );
+  if (!matched || !matched[1]) {
+    return "";
+  }
+  return matched[1].trim();
+}
+
+function parsePortfolioHoldingPayload(payload) {
+  const tokens = String(payload || "")
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (tokens.length < 3) {
+    throw new Error("添加持仓参数不足。示例: /market add 510300 100 4.12 沪深300ETF");
+  }
+
+  const code = normalizeCode(tokens[0]);
+  const quantity = toNumber(tokens[1]);
+  const avgCost = toNumber(tokens[2]);
+  const name = normalizeAssetName(tokens.slice(3).join(" "));
+
+  if (!code) {
+    throw new Error("持仓代码无效。示例: /market add 510300 100 4.12 沪深300ETF");
+  }
+
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error("持仓数量必须是大于 0 的数字。示例: /market add 510300 100 4.12");
+  }
+
+  if (!Number.isFinite(avgCost) || avgCost < 0) {
+    throw new Error("持仓成本必须是大于等于 0 的数字。示例: /market add 510300 100 4.12");
+  }
+
+  return {
+    code,
+    name,
+    quantity: round(quantity, 4),
+    avgCost: round(avgCost, 4)
   };
 }
 
@@ -981,6 +1039,72 @@ function readPortfolio() {
   return normalized;
 }
 
+function addPortfolioHolding(holdingInput) {
+  ensureStorage();
+
+  const code = normalizeCode(holdingInput && holdingInput.code);
+  const quantity = toNumber(holdingInput && holdingInput.quantity);
+  const avgCost = toNumber(holdingInput && holdingInput.avgCost);
+  const name = normalizeAssetName(holdingInput && holdingInput.name);
+
+  if (!code) {
+    throw new Error("持仓代码无效。");
+  }
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    throw new Error("持仓数量必须是大于 0 的数字。");
+  }
+  if (!Number.isFinite(avgCost) || avgCost < 0) {
+    throw new Error("持仓成本必须是大于等于 0 的数字。");
+  }
+
+  const portfolio = readPortfolio();
+  const funds = Array.isArray(portfolio.funds) ? portfolio.funds.slice() : [];
+  const index = funds.findIndex((item) => item && item.code === code);
+
+  let action = "added";
+  let updatedHolding = null;
+
+  if (index >= 0) {
+    const existing = funds[index];
+    const existingQuantity = Math.max(0, toNumber(existing.quantity));
+    const existingAvgCost = Math.max(0, toNumber(existing.avgCost));
+    const nextQuantity = round(existingQuantity + quantity, 4);
+    const nextAvgCost = nextQuantity > 0
+      ? round(((existingQuantity * existingAvgCost) + (quantity * avgCost)) / nextQuantity, 4)
+      : round(avgCost, 4);
+
+    updatedHolding = {
+      code,
+      name: name || normalizeAssetName(existing.name),
+      quantity: nextQuantity,
+      avgCost: nextAvgCost
+    };
+    funds[index] = updatedHolding;
+    action = "updated";
+  } else {
+    updatedHolding = {
+      code,
+      name,
+      quantity: round(quantity, 4),
+      avgCost: round(avgCost, 4)
+    };
+    funds.push(updatedHolding);
+  }
+
+  const nextPortfolio = normalizePortfolio({
+    ...portfolio,
+    funds
+  });
+  setStore(MARKET_PORTFOLIO_STORE, nextPortfolio);
+
+  const normalizedHolding = nextPortfolio.funds.find((item) => item.code === code) || updatedHolding;
+  return {
+    action,
+    holding: normalizedHolding,
+    portfolio: nextPortfolio
+  };
+}
+
 function readAnalysisConfig() {
   ensureStorage();
   const parsed = getStore(MARKET_CONFIG_STORE);
@@ -1157,6 +1281,21 @@ function formatPortfolio(portfolio) {
   return lines.join("\n");
 }
 
+function formatPortfolioAddResult(result) {
+  const holding = result && result.holding ? result.holding : {};
+  const actionText = result && result.action === "updated" ? "持仓已更新。" : "持仓已新增。";
+  const holdingLabel = holding.name ? `${holding.code} (${holding.name})` : `${holding.code || "-"}`;
+
+  return [
+    actionText,
+    `标的: ${holdingLabel}`,
+    `数量: ${formatNumber(holding.quantity)}`,
+    `平均成本: ${formatNumber(holding.avgCost)}`,
+    "",
+    formatPortfolio(result.portfolio || { funds: [], cash: 0 })
+  ].join("\n");
+}
+
 function formatStatus(state) {
   const recent = Array.isArray(state.recentRuns) ? state.recentRuns : [];
   if (recent.length === 0) {
@@ -1224,6 +1363,7 @@ function buildHelpText() {
     "/market close          运行 15:15 收盘分析",
     "/market status         查看最近一次运行结果",
     "/market portfolio      查看当前持仓配置",
+    "/market add <code> <quantity> <avgCost> [name]    添加/加仓持仓（同 code 自动加权成本）",
     "",
     "配置存储键:",
     `- 持仓: ${MARKET_PORTFOLIO_STORE}`,
