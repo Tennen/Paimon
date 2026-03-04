@@ -13,7 +13,7 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
     },
     {
       name: "skill.topic-push",
-      description: "Generate AI engineering daily digest from RSS feeds with configurable source CRUD.",
+      description: "Generate topic-specific daily digest from RSS feeds with profile isolation and source CRUD.",
       operations: [
         {
           op: "execute",

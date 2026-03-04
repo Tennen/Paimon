@@ -1,7 +1,7 @@
 ---
 name: topic-push
 description: Generate daily AI engineering digest from configurable RSS sources, with source CRUD via direct command.
-keywords: ["topic push", "rss", "digest", "ai news", "engineering", "日报", "新闻推送", "订阅", "source"]
+keywords: ["topic push", "rss", "digest", "ai news", "engineering", "日报", "新闻推送", "订阅", "source", "profile", "batch"]
 preferToolResult: true
 tool: skill.topic-push
 action: execute
@@ -11,13 +11,20 @@ params: ["input"]
 # Topic Push Skill
 
 Use this skill to generate a daily AI digest and manage RSS sources.
+It also supports multi-profile isolation (for example AI profile vs non-AI profile) so subscriptions and dedup state do not mix.
 
 Direct commands:
 
 - `/topic`
 - `/topic run`
+- `/topic run --profile ai-engineering`
+- `/topic profile list`
+- `/topic profile add --name "AI Daily" --id ai-engineering`
+- `/topic profile add --name "Crypto Daily" --id crypto --clone-from ai-engineering`
+- `/topic profile use crypto`
 - `/topic source list`
-- `/topic source add --name "OpenAI Blog" --category engineering --url https://openai.com/blog/rss.xml`
+- `/topic source list --profile crypto`
+- `/topic source add --name "OpenAI Blog" --category engineering --url https://openai.com/blog/rss.xml --profile ai-engineering`
 - `/topic source update <id> --weight 1.2 --enabled true`
 - `/topic source enable <id>` / `/topic source disable <id>`
 - `/topic source delete <id>`

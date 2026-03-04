@@ -67,6 +67,28 @@ export type TopicPushState = {
   updatedAt: string;
 };
 
+type TopicPushProfileConfig = {
+  id: string;
+  name: string;
+  config: TopicPushConfig;
+};
+
+type TopicPushProfileState = {
+  id: string;
+  state: TopicPushState;
+};
+
+type TopicPushConfigStore = {
+  version: 2;
+  activeProfileId: string;
+  profiles: TopicPushProfileConfig[];
+};
+
+type TopicPushStateStore = {
+  version: 2;
+  profiles: TopicPushProfileState[];
+};
+
 type FeedEntry = {
   title: string;
   link: string;
@@ -106,12 +128,13 @@ type SelectedItem = {
 };
 
 type ParsedCommand =
-  | { kind: "run" }
+  | { kind: "run"; profileId?: string }
   | { kind: "help" }
-  | { kind: "sources_list" }
-  | { kind: "sources_get"; id: string }
+  | { kind: "sources_list"; profileId?: string }
+  | { kind: "sources_get"; id: string; profileId?: string }
   | {
       kind: "sources_add";
+      profileId?: string;
       payload: {
         id?: string;
         name: string;
@@ -124,6 +147,7 @@ type ParsedCommand =
   | {
       kind: "sources_update";
       id: string;
+      profileId?: string;
       patch: {
         name?: string;
         category?: TopicPushCategory;
@@ -132,11 +156,30 @@ type ParsedCommand =
         enabled?: boolean;
       };
     }
-  | { kind: "sources_delete"; id: string }
-  | { kind: "sources_toggle"; id: string; enabled: boolean }
-  | { kind: "config_show" }
-  | { kind: "state_show" }
-  | { kind: "state_clear_sent" };
+  | { kind: "sources_delete"; id: string; profileId?: string }
+  | { kind: "sources_toggle"; id: string; enabled: boolean; profileId?: string }
+  | { kind: "profiles_list" }
+  | { kind: "profiles_get"; id: string }
+  | {
+      kind: "profiles_add";
+      payload: {
+        id?: string;
+        name: string;
+        cloneFrom?: string;
+      };
+    }
+  | {
+      kind: "profiles_update";
+      id: string;
+      patch: {
+        name?: string;
+      };
+    }
+  | { kind: "profiles_use"; id: string }
+  | { kind: "profiles_delete"; id: string }
+  | { kind: "config_show"; profileId?: string }
+  | { kind: "state_show"; profileId?: string }
+  | { kind: "state_clear_sent"; profileId?: string };
 
 type DigestRunResult = {
   now: string;
@@ -196,6 +239,8 @@ const ENGINEERING_SIGNAL_KEYWORDS = [
 const SENT_LOG_RETENTION_DAYS = 120;
 const SENT_LOG_MAX_ITEMS = 5000;
 const FEED_FETCH_TIMEOUT_MS = 12000;
+const DEFAULT_PROFILE_ID = "ai-engineering";
+const DEFAULT_PROFILE_NAME = "AI Engineering";
 
 const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
 const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
@@ -434,6 +479,28 @@ const DEFAULT_STATE: TopicPushState = {
   updatedAt: ""
 };
 
+const DEFAULT_CONFIG_STORE: TopicPushConfigStore = {
+  version: 2,
+  activeProfileId: DEFAULT_PROFILE_ID,
+  profiles: [
+    {
+      id: DEFAULT_PROFILE_ID,
+      name: DEFAULT_PROFILE_NAME,
+      config: DEFAULT_CONFIG
+    }
+  ]
+};
+
+const DEFAULT_STATE_STORE: TopicPushStateStore = {
+  version: 2,
+  profiles: [
+    {
+      id: DEFAULT_PROFILE_ID,
+      state: DEFAULT_STATE
+    }
+  ]
+};
+
 export async function execute(input: string): Promise<{ text: string; result?: unknown }> {
   try {
     ensureTopicPushStorage();
@@ -443,33 +510,48 @@ export async function execute(input: string): Promise<{ text: string; result?: u
       case "help":
         return { text: buildHelpText() };
       case "sources_list":
-        return { text: formatSources(readConfig().sources) };
+        return { text: formatSources(readConfig(command.profileId).sources, command.profileId) };
       case "sources_get":
-        return { text: formatSingleSource(command.id) };
+        return { text: formatSingleSource(command.id, command.profileId) };
       case "sources_add":
-        return { text: handleAddSource(command.payload) };
+        return { text: handleAddSource(command.payload, command.profileId) };
       case "sources_update":
-        return { text: handleUpdateSource(command.id, command.patch) };
+        return { text: handleUpdateSource(command.id, command.patch, command.profileId) };
       case "sources_delete":
-        return { text: handleDeleteSource(command.id) };
+        return { text: handleDeleteSource(command.id, command.profileId) };
       case "sources_toggle":
-        return { text: handleToggleSource(command.id, command.enabled) };
+        return { text: handleToggleSource(command.id, command.enabled, command.profileId) };
+      case "profiles_list":
+        return { text: formatProfiles() };
+      case "profiles_get":
+        return { text: formatSingleProfile(command.id) };
+      case "profiles_add":
+        return { text: handleAddProfile(command.payload) };
+      case "profiles_update":
+        return { text: handleUpdateProfile(command.id, command.patch) };
+      case "profiles_use":
+        return { text: handleUseProfile(command.id) };
+      case "profiles_delete":
+        return { text: handleDeleteProfile(command.id) };
       case "config_show":
-        return { text: formatConfig(readConfig()) };
+        return { text: formatConfig(readConfig(command.profileId), command.profileId) };
       case "state_show":
-        return { text: formatState(readState()) };
+        return { text: formatState(readState(command.profileId), command.profileId) };
       case "state_clear_sent":
-        return { text: handleClearSentLog() };
+        return { text: handleClearSentLog(command.profileId) };
       case "run": {
         const now = new Date();
-        const config = readConfig();
-        const state = readState();
+        const config = readConfig(command.profileId);
+        const state = readState(command.profileId);
+        const profile = getProfileMeta(command.profileId);
         const run = await runDigest(config, state, now);
         const nextState = mergeSentLog(state, run.selected, now);
-        writeState(nextState);
+        writeState(nextState, profile.id);
         return {
-          text: formatDigest(run),
+          text: formatDigest(run, profile),
           result: {
+            profileId: profile.id,
+            profileName: profile.name,
             selectedCount: run.selected.length,
             selectedByCategory: run.selectedByCategory,
             fetchedSources: run.fetchedSources,
@@ -521,26 +603,99 @@ export function clearTopicPushSentLog(): TopicPushState {
 }
 
 function ensureTopicPushStorage(): void {
-  registerStore(TOPIC_PUSH_CONFIG_STORE, () => DEFAULT_CONFIG);
-  registerStore(TOPIC_PUSH_STATE_STORE, () => DEFAULT_STATE);
+  registerStore(TOPIC_PUSH_CONFIG_STORE, () => DEFAULT_CONFIG_STORE);
+  registerStore(TOPIC_PUSH_STATE_STORE, () => DEFAULT_STATE_STORE);
 }
 
-function readConfig(): TopicPushConfig {
+function readConfig(profileId?: string): TopicPushConfig {
+  const store = readConfigStore();
+  const profile = getProfileById(store, profileId);
+  return profile.config;
+}
+
+function writeConfig(config: TopicPushConfig, profileId?: string): void {
+  const store = readConfigStore();
+  const profile = getProfileById(store, profileId);
+  profile.config = normalizeConfig(config);
+  writeConfigStore(store);
+}
+
+function readState(profileId?: string): TopicPushState {
+  const configStore = readConfigStore();
+  const profile = getProfileById(configStore, profileId);
+  const stateStore = readStateStore();
+  const entry = stateStore.profiles.find((item) => item.id === profile.id);
+  return entry?.state ? normalizeState(entry.state) : cloneDefaultState();
+}
+
+function writeState(state: TopicPushState, profileId?: string): void {
+  const configStore = readConfigStore();
+  const profile = getProfileById(configStore, profileId);
+  const stateStore = readStateStore();
+  const index = stateStore.profiles.findIndex((item) => item.id === profile.id);
+  const normalized = normalizeState(state);
+  if (index < 0) {
+    stateStore.profiles.push({ id: profile.id, state: normalized });
+  } else {
+    stateStore.profiles[index] = { id: profile.id, state: normalized };
+  }
+  writeStateStore(stateStore);
+}
+
+function readConfigStore(): TopicPushConfigStore {
   const parsed = getStore<unknown>(TOPIC_PUSH_CONFIG_STORE);
-  return normalizeConfig(parsed);
+  return normalizeConfigStore(parsed);
 }
 
-function writeConfig(config: TopicPushConfig): void {
-  setStore(TOPIC_PUSH_CONFIG_STORE, normalizeConfig(config));
+function writeConfigStore(store: TopicPushConfigStore): void {
+  setStore(TOPIC_PUSH_CONFIG_STORE, normalizeConfigStore(store));
 }
 
-function readState(): TopicPushState {
+function readStateStore(): TopicPushStateStore {
   const parsed = getStore<unknown>(TOPIC_PUSH_STATE_STORE);
-  return normalizeState(parsed);
+  return normalizeStateStore(parsed);
 }
 
-function writeState(state: TopicPushState): void {
-  setStore(TOPIC_PUSH_STATE_STORE, normalizeState(state));
+function writeStateStore(store: TopicPushStateStore): void {
+  setStore(TOPIC_PUSH_STATE_STORE, normalizeStateStore(store));
+}
+
+function getProfileById(store: TopicPushConfigStore, requestedId?: string): TopicPushProfileConfig {
+  const normalized = normalizeProfileId(requestedId ?? "");
+  if (normalized) {
+    const found = store.profiles.find((item) => item.id === normalized);
+    if (!found) {
+      throw new Error(`profile not found: ${normalized}`);
+    }
+    return found;
+  }
+
+  const active = store.profiles.find((item) => item.id === store.activeProfileId);
+  if (active) {
+    return active;
+  }
+
+  if (store.profiles.length > 0) {
+    return store.profiles[0];
+  }
+
+  throw new Error("no topic profile configured");
+}
+
+function getProfileMeta(profileId?: string): {
+  id: string;
+  name: string;
+  config: TopicPushConfig;
+  isActive: boolean;
+} {
+  const store = readConfigStore();
+  const profile = getProfileById(store, profileId);
+  return {
+    id: profile.id,
+    name: profile.name,
+    config: profile.config,
+    isActive: profile.id === store.activeProfileId
+  };
 }
 
 async function runDigest(config: TopicPushConfig, state: TopicPushState, now: Date): Promise<DigestRunResult> {
@@ -1256,23 +1411,34 @@ function parseCommand(input: string): ParsedCommand {
   }
 
   if (["run", "digest", "push", "today", "今日"].includes(first)) {
-    return { kind: "run" };
+    const parsed = parseFlags(tokens.slice(1));
+    const profileId = readProfileId(parsed.flagValues, parsed.positionals[0]);
+    return { kind: "run", ...(profileId ? { profileId } : {}) };
   }
 
   if (["config", "settings", "配置"].includes(first)) {
-    return { kind: "config_show" };
+    const parsed = parseFlags(tokens.slice(1));
+    const profileId = readProfileId(parsed.flagValues, parsed.positionals[0]);
+    return { kind: "config_show", ...(profileId ? { profileId } : {}) };
   }
 
   if (["state", "status", "stats", "状态"].includes(first)) {
-    const second = tokens[1]?.toLowerCase();
+    const parsed = parseFlags(tokens.slice(1));
+    const second = parsed.positionals[0]?.toLowerCase();
     if (["clear", "reset", "clean", "清空"].includes(second ?? "")) {
-      return { kind: "state_clear_sent" };
+      const profileId = readProfileId(parsed.flagValues, parsed.positionals[1]);
+      return { kind: "state_clear_sent", ...(profileId ? { profileId } : {}) };
     }
-    return { kind: "state_show" };
+    const profileId = readProfileId(parsed.flagValues, parsed.positionals[0]);
+    return { kind: "state_show", ...(profileId ? { profileId } : {}) };
   }
 
   if (["source", "sources", "rss", "feeds", "源"].includes(first)) {
     return parseSourceCommand(tokens.slice(1));
+  }
+
+  if (["profile", "profiles", "entity", "entities", "batch", "分组", "实体", "批次"].includes(first)) {
+    return parseProfileCommand(tokens.slice(1));
   }
 
   if (!fromSlash) {
@@ -1290,9 +1456,10 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
   const op = tokens[0].toLowerCase();
   const args = tokens.slice(1);
   const parsed = parseFlags(args);
+  const profileId = readProfileId(parsed.flagValues);
 
   if (["list", "ls", "all", "列表"].includes(op)) {
-    return { kind: "sources_list" };
+    return { kind: "sources_list", ...(profileId ? { profileId } : {}) };
   }
 
   if (["get", "show", "详情"].includes(op)) {
@@ -1305,7 +1472,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
     if (!id) {
       throw new Error("source get 需要 id，例如: /topic source get openai-blog");
     }
-    return { kind: "sources_get", id };
+    return { kind: "sources_get", id, ...(profileId ? { profileId } : {}) };
   }
 
   if (["delete", "remove", "rm", "del", "删除"].includes(op)) {
@@ -1318,7 +1485,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
     if (!id) {
       throw new Error("source delete 需要 id，例如: /topic source delete openai-blog");
     }
-    return { kind: "sources_delete", id };
+    return { kind: "sources_delete", id, ...(profileId ? { profileId } : {}) };
   }
 
   if (["enable", "启用"].includes(op)) {
@@ -1326,7 +1493,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
     if (!id) {
       throw new Error("source enable 需要 id，例如: /topic source enable openai-blog");
     }
-    return { kind: "sources_toggle", id, enabled: true };
+    return { kind: "sources_toggle", id, enabled: true, ...(profileId ? { profileId } : {}) };
   }
 
   if (["disable", "停用"].includes(op)) {
@@ -1334,7 +1501,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
     if (!id) {
       throw new Error("source disable 需要 id，例如: /topic source disable openai-blog");
     }
-    return { kind: "sources_toggle", id, enabled: false };
+    return { kind: "sources_toggle", id, enabled: false, ...(profileId ? { profileId } : {}) };
   }
 
   if (["add", "create", "新增"].includes(op)) {
@@ -1351,6 +1518,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
 
     return {
       kind: "sources_add",
+      ...(profileId ? { profileId } : {}),
       payload: {
         ...(id ? { id } : {}),
         name,
@@ -1413,11 +1581,111 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
     return {
       kind: "sources_update",
       id,
+      ...(profileId ? { profileId } : {}),
       patch
     };
   }
 
   throw new Error(`unknown source command: ${op}`);
+}
+
+function parseProfileCommand(tokens: string[]): ParsedCommand {
+  if (tokens.length === 0) {
+    return { kind: "profiles_list" };
+  }
+
+  const op = tokens[0].toLowerCase();
+  const args = tokens.slice(1);
+  const parsed = parseFlags(args);
+
+  if (["list", "ls", "all", "列表"].includes(op)) {
+    return { kind: "profiles_list" };
+  }
+
+  if (["get", "show", "详情"].includes(op)) {
+    const id = normalizeProfileId(
+      parsed.positionals[0]
+      ?? readFlagString(parsed.flagValues, "id")
+      ?? readFlagString(parsed.flagValues, "profile-id")
+      ?? ""
+    );
+    if (!id) {
+      throw new Error("profile get 需要 id，例如: /topic profile get ai-engineering");
+    }
+    return { kind: "profiles_get", id };
+  }
+
+  if (["use", "switch", "activate", "切换"].includes(op)) {
+    const id = normalizeProfileId(
+      parsed.positionals[0]
+      ?? readFlagString(parsed.flagValues, "id")
+      ?? readFlagString(parsed.flagValues, "profile-id")
+      ?? ""
+    );
+    if (!id) {
+      throw new Error("profile use 需要 id，例如: /topic profile use ai-engineering");
+    }
+    return { kind: "profiles_use", id };
+  }
+
+  if (["delete", "remove", "rm", "del", "删除"].includes(op)) {
+    const id = normalizeProfileId(
+      parsed.positionals[0]
+      ?? readFlagString(parsed.flagValues, "id")
+      ?? readFlagString(parsed.flagValues, "profile-id")
+      ?? ""
+    );
+    if (!id) {
+      throw new Error("profile delete 需要 id，例如: /topic profile delete ai-engineering");
+    }
+    return { kind: "profiles_delete", id };
+  }
+
+  if (["add", "create", "新增"].includes(op)) {
+    const name = normalizeText(readFlagString(parsed.flagValues, "name"));
+    const id = normalizeText(readFlagString(parsed.flagValues, "id") ?? readFlagString(parsed.flagValues, "profile-id"));
+    const cloneFrom = normalizeText(
+      readFlagString(parsed.flagValues, "clone-from")
+      ?? readFlagString(parsed.flagValues, "clone")
+      ?? readFlagString(parsed.flagValues, "from")
+    );
+    if (!name) {
+      throw new Error("profile add 参数不足，示例: /topic profile add --name \"AI 日报\" [--id ai-engineering]");
+    }
+    return {
+      kind: "profiles_add",
+      payload: {
+        name,
+        ...(id ? { id } : {}),
+        ...(cloneFrom ? { cloneFrom } : {})
+      }
+    };
+  }
+
+  if (["update", "edit", "修改"].includes(op)) {
+    const id = normalizeProfileId(
+      parsed.positionals[0]
+      ?? readFlagString(parsed.flagValues, "id")
+      ?? readFlagString(parsed.flagValues, "profile-id")
+      ?? ""
+    );
+    const name = normalizeText(readFlagString(parsed.flagValues, "name"));
+    if (!id) {
+      throw new Error("profile update 需要 id，例如: /topic profile update ai-engineering --name \"AI Digest\"");
+    }
+    if (!name) {
+      throw new Error("profile update 目前仅支持 --name");
+    }
+    return {
+      kind: "profiles_update",
+      id,
+      patch: {
+        name
+      }
+    };
+  }
+
+  throw new Error(`unknown profile command: ${op}`);
 }
 
 function handleAddSource(payload: {
@@ -1427,8 +1695,9 @@ function handleAddSource(payload: {
   feedUrl: string;
   weight?: number;
   enabled?: boolean;
-}): string {
-  const config = readConfig();
+}, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
+  const config = readConfig(profile.id);
 
   const source = normalizeSource(
     {
@@ -1451,8 +1720,8 @@ function handleAddSource(payload: {
   }
 
   config.sources.push(source);
-  writeConfig(config);
-  return `已新增 RSS 源: ${source.id} (${source.category})\n${source.name}\n${source.feedUrl}`;
+  writeConfig(config, profile.id);
+  return `已新增 RSS 源: ${source.id} (${source.category}) [profile=${profile.id}]\n${source.name}\n${source.feedUrl}`;
 }
 
 function handleUpdateSource(
@@ -1463,9 +1732,11 @@ function handleUpdateSource(
     feedUrl?: string;
     weight?: number;
     enabled?: boolean;
-  }
+  },
+  profileId?: string
 ): string {
-  const config = readConfig();
+  const profile = getProfileMeta(profileId);
+  const config = readConfig(profile.id);
   const index = config.sources.findIndex((item) => item.id === id);
   if (index < 0) {
     throw new Error(`source not found: ${id}`);
@@ -1489,42 +1760,46 @@ function handleUpdateSource(
   }
 
   config.sources[index] = next;
-  writeConfig(config);
-  return `已更新 RSS 源: ${next.id}\n${next.name}\n${next.feedUrl}`;
+  writeConfig(config, profile.id);
+  return `已更新 RSS 源: ${next.id} [profile=${profile.id}]\n${next.name}\n${next.feedUrl}`;
 }
 
-function handleDeleteSource(id: string): string {
-  const config = readConfig();
+function handleDeleteSource(id: string, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
+  const config = readConfig(profile.id);
   const next = config.sources.filter((item) => item.id !== id);
   if (next.length === config.sources.length) {
     throw new Error(`source not found: ${id}`);
   }
 
   config.sources = next;
-  writeConfig(config);
-  return `已删除 RSS 源: ${id}`;
+  writeConfig(config, profile.id);
+  return `已删除 RSS 源: ${id} [profile=${profile.id}]`;
 }
 
-function handleToggleSource(id: string, enabled: boolean): string {
-  const config = readConfig();
+function handleToggleSource(id: string, enabled: boolean, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
+  const config = readConfig(profile.id);
   const source = config.sources.find((item) => item.id === id);
   if (!source) {
     throw new Error(`source not found: ${id}`);
   }
 
   source.enabled = enabled;
-  writeConfig(config);
-  return `已${enabled ? "启用" : "停用"} RSS 源: ${source.id}`;
+  writeConfig(config, profile.id);
+  return `已${enabled ? "启用" : "停用"} RSS 源: ${source.id} [profile=${profile.id}]`;
 }
 
-function formatSingleSource(id: string): string {
-  const config = readConfig();
+function formatSingleSource(id: string, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
+  const config = readConfig(profile.id);
   const source = config.sources.find((item) => item.id === id);
   if (!source) {
     throw new Error(`source not found: ${id}`);
   }
 
   return [
+    `profile: ${profile.id} (${profile.name})`,
     `RSS Source: ${source.id}`,
     `name: ${source.name}`,
     `category: ${source.category}`,
@@ -1534,18 +1809,167 @@ function formatSingleSource(id: string): string {
   ].join("\n");
 }
 
-function handleClearSentLog(): string {
-  const state = getTopicPushState();
+function handleClearSentLog(profileId?: string): string {
+  const profile = getProfileMeta(profileId);
+  const state = readState(profile.id);
   const size = state.sentLog.length;
-  clearTopicPushSentLog();
-  return `已清空 sent log，共删除 ${size} 条记录。`;
+  writeState({
+    version: 1,
+    sentLog: [],
+    updatedAt: new Date().toISOString()
+  }, profile.id);
+  return `已清空 sent log，共删除 ${size} 条记录。[profile=${profile.id}]`;
 }
 
-function formatSources(sources: TopicPushSource[]): string {
+function handleAddProfile(payload: { id?: string; name: string; cloneFrom?: string }): string {
+  const configStore = readConfigStore();
+  const stateStore = readStateStore();
+
+  const name = normalizeText(payload.name);
+  if (!name) {
+    throw new Error("profile name cannot be empty");
+  }
+
+  const idRaw = payload.id ? payload.id : name;
+  const id = normalizeProfileId(idRaw);
+  if (!id) {
+    throw new Error("invalid profile id");
+  }
+
+  if (configStore.profiles.some((item) => item.id === id)) {
+    throw new Error(`profile already exists: ${id}`);
+  }
+
+  let baseConfig = cloneDefaultConfig();
+  const cloneFromId = normalizeProfileId(payload.cloneFrom ?? "");
+  if (cloneFromId) {
+    const base = configStore.profiles.find((item) => item.id === cloneFromId);
+    if (!base) {
+      throw new Error(`cloneFrom profile not found: ${cloneFromId}`);
+    }
+    baseConfig = normalizeConfig(base.config);
+  }
+
+  configStore.profiles.push({
+    id,
+    name,
+    config: baseConfig
+  });
+  stateStore.profiles.push({
+    id,
+    state: cloneDefaultState()
+  });
+  writeConfigStore(configStore);
+  writeStateStore(stateStore);
+
+  return `已新增 profile: ${id}\nname: ${name}\nclone_from: ${cloneFromId || "(default template)"}`;
+}
+
+function handleUpdateProfile(id: string, patch: { name?: string }): string {
+  const normalizedId = normalizeProfileId(id);
+  if (!normalizedId) {
+    throw new Error("invalid profile id");
+  }
+
+  const configStore = readConfigStore();
+  const profile = configStore.profiles.find((item) => item.id === normalizedId);
+  if (!profile) {
+    throw new Error(`profile not found: ${normalizedId}`);
+  }
+
+  const name = normalizeText(patch.name);
+  if (!name) {
+    throw new Error("profile update requires --name");
+  }
+
+  profile.name = name;
+  writeConfigStore(configStore);
+  return `已更新 profile: ${profile.id}\nname: ${profile.name}`;
+}
+
+function handleUseProfile(id: string): string {
+  const normalizedId = normalizeProfileId(id);
+  if (!normalizedId) {
+    throw new Error("invalid profile id");
+  }
+
+  const configStore = readConfigStore();
+  if (!configStore.profiles.some((item) => item.id === normalizedId)) {
+    throw new Error(`profile not found: ${normalizedId}`);
+  }
+
+  configStore.activeProfileId = normalizedId;
+  writeConfigStore(configStore);
+  return `已切换 active profile: ${normalizedId}`;
+}
+
+function handleDeleteProfile(id: string): string {
+  const normalizedId = normalizeProfileId(id);
+  if (!normalizedId) {
+    throw new Error("invalid profile id");
+  }
+
+  const configStore = readConfigStore();
+  const stateStore = readStateStore();
+  if (!configStore.profiles.some((item) => item.id === normalizedId)) {
+    throw new Error(`profile not found: ${normalizedId}`);
+  }
+  if (configStore.profiles.length <= 1) {
+    throw new Error("cannot delete the last profile");
+  }
+
+  configStore.profiles = configStore.profiles.filter((item) => item.id !== normalizedId);
+  stateStore.profiles = stateStore.profiles.filter((item) => item.id !== normalizedId);
+  if (configStore.activeProfileId === normalizedId) {
+    configStore.activeProfileId = configStore.profiles[0].id;
+  }
+
+  writeConfigStore(configStore);
+  writeStateStore(stateStore);
+
+  return `已删除 profile: ${normalizedId}\nactive_profile: ${configStore.activeProfileId}`;
+}
+
+function formatProfiles(): string {
+  const configStore = readConfigStore();
+  const stateStore = readStateStore();
+  const lines = [
+    `Topic Push Profiles (${configStore.profiles.length})`,
+    `active: ${configStore.activeProfileId}`
+  ];
+
+  for (const profile of configStore.profiles.slice().sort((a, b) => a.id.localeCompare(b.id))) {
+    const state = stateStore.profiles.find((item) => item.id === profile.id)?.state ?? cloneDefaultState();
+    const enabledCount = profile.config.sources.filter((item) => item.enabled).length;
+    lines.push(
+      `- ${profile.id}${profile.id === configStore.activeProfileId ? " *" : ""} | ${profile.name}`,
+      `  sources=${enabledCount}/${profile.config.sources.length}, sent_log=${state.sentLog.length}`
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function formatSingleProfile(id: string): string {
+  const profile = getProfileMeta(id);
+  const state = readState(profile.id);
+  return [
+    `Topic Push Profile: ${profile.id}`,
+    `name: ${profile.name}`,
+    `active: ${profile.isActive ? "true" : "false"}`,
+    `sources: ${profile.config.sources.length}`,
+    `enabled_sources: ${profile.config.sources.filter((item) => item.enabled).length}`,
+    `sent_log: ${state.sentLog.length}`
+  ].join("\n");
+}
+
+function formatSources(sources: TopicPushSource[], profileId?: string): string {
+  const profile = getProfileMeta(profileId);
   const sorted = sources.slice().sort((left, right) => left.id.localeCompare(right.id));
   const enabledCount = sorted.filter((item) => item.enabled).length;
 
   const lines = [
+    `profile: ${profile.id} (${profile.name})`,
     `Topic Push RSS Sources (${enabledCount}/${sorted.length} enabled)`
   ];
 
@@ -1564,13 +1988,15 @@ function formatSources(sources: TopicPushSource[]): string {
   return lines.join("\n");
 }
 
-function formatConfig(config: TopicPushConfig): string {
+function formatConfig(config: TopicPushConfig, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
   const topicStats = TOPIC_KEYS
     .map((key) => `${key}:${config.topics[key].length}`)
     .join(" ");
 
   return [
     "Topic Push Config",
+    `profile: ${profile.id} (${profile.name})`,
     `sources: ${config.sources.length} (enabled=${config.sources.filter((item) => item.enabled).length})`,
     `quota: total=${config.dailyQuota.total}, engineering=${config.dailyQuota.engineering}, news=${config.dailyQuota.news}, ecosystem=${config.dailyQuota.ecosystem}`,
     `filters: window=${config.filters.timeWindowHours}h, minTitleLength=${config.filters.minTitleLength}, maxPerDomain=${config.filters.maxPerDomain}`,
@@ -1581,7 +2007,8 @@ function formatConfig(config: TopicPushConfig): string {
   ].join("\n");
 }
 
-function formatState(state: TopicPushState): string {
+function formatState(state: TopicPushState, profileId?: string): string {
+  const profile = getProfileMeta(profileId);
   const latest = state.sentLog[0];
   const latestText = latest
     ? `${formatLocalTime(latest.sentAt)} | ${latest.title} | ${latest.urlNormalized}`
@@ -1589,15 +2016,16 @@ function formatState(state: TopicPushState): string {
 
   return [
     "Topic Push State",
+    `profile: ${profile.id} (${profile.name})`,
     `sent_log_size: ${state.sentLog.length}`,
     `updated_at: ${state.updatedAt || "(empty)"}`,
     `latest: ${latestText}`
   ].join("\n");
 }
 
-function formatDigest(run: DigestRunResult): string {
+function formatDigest(run: DigestRunResult, profile: { id: string; name: string }): string {
   const lines: string[] = [];
-  lines.push(`AI Engineering Daily Digest (${formatLocalDate(run.now)})`);
+  lines.push(`${profile.name} Daily Digest (${formatLocalDate(run.now)})`);
 
   if (run.selected.length === 0) {
     lines.push("\n今天没有筛出新的可推送条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。");
@@ -1620,17 +2048,141 @@ function formatDigest(run: DigestRunResult): string {
 function buildHelpText(): string {
   return [
     "Topic Push 用法",
-    "- /topic 或 /topic run: 拉取 RSS 并生成当日简报",
-    "- /topic source list: 查看 RSS 源",
-    "- /topic source get <id>: 查看单个源",
-    "- /topic source add --name \"OpenAI Blog\" --category engineering --url https://openai.com/blog/rss.xml [--id openai-blog] [--weight 1.2] [--enabled true]",
-    "- /topic source update <id> --name ... --category ... --url ... --weight ... --enabled true|false",
-    "- /topic source enable <id> / disable <id>",
-    "- /topic source delete <id>",
-    "- /topic config: 查看当前筛选与配额配置",
-    "- /topic state: 查看 sent log 状态",
-    "- /topic state clear: 清空 sent log（允许重复推送历史链接）"
+    "- /topic 或 /topic run [--profile <id>]: 拉取 RSS 并生成该实体当日简报",
+    "- /topic profile list|get|add|update|use|delete: 管理分组实体（profile）",
+    "- /topic profile add --name \"AI Daily\" [--id ai-daily] [--clone-from ai-engineering]",
+    "- /topic profile use <id>: 切换默认实体",
+    "- /topic source list [--profile <id>]: 查看 RSS 源",
+    "- /topic source get <id> [--profile <id>]: 查看单个源",
+    "- /topic source add --name \"OpenAI Blog\" --category engineering --url https://openai.com/blog/rss.xml [--id openai-blog] [--weight 1.2] [--enabled true] [--profile <id>]",
+    "- /topic source update <id> --name ... --category ... --url ... --weight ... --enabled true|false [--profile <id>]",
+    "- /topic source enable <id> / disable <id> [--profile <id>]",
+    "- /topic source delete <id> [--profile <id>]",
+    "- /topic config [--profile <id>]: 查看筛选与配额配置",
+    "- /topic state [--profile <id>]: 查看 sent log 状态",
+    "- /topic state clear [--profile <id>]: 清空 sent log（允许重复推送历史链接）"
   ].join("\n");
+}
+
+function normalizeConfigStore(input: unknown): TopicPushConfigStore {
+  const source = asRecord(input);
+  if (!source || !Array.isArray(source.profiles)) {
+    return {
+      version: 2,
+      activeProfileId: DEFAULT_PROFILE_ID,
+      profiles: [
+        {
+          id: DEFAULT_PROFILE_ID,
+          name: DEFAULT_PROFILE_NAME,
+          config: normalizeConfig(input)
+        }
+      ]
+    };
+  }
+
+  const normalizedProfilesRaw = toArray(source.profiles)
+    .map((item, index) => normalizeConfigProfile(item, index))
+    .filter((item): item is TopicPushProfileConfig => Boolean(item));
+  const normalizedProfiles: TopicPushProfileConfig[] = [];
+  const idSet = new Set<string>();
+  for (const profile of normalizedProfilesRaw) {
+    if (idSet.has(profile.id)) {
+      continue;
+    }
+    idSet.add(profile.id);
+    normalizedProfiles.push(profile);
+  }
+
+  if (normalizedProfiles.length === 0) {
+    return cloneDefaultConfigStore();
+  }
+
+  const activeRaw = normalizeProfileId(source.activeProfileId);
+  const activeProfileId = activeRaw && normalizedProfiles.some((item) => item.id === activeRaw)
+    ? activeRaw
+    : normalizedProfiles[0].id;
+
+  return {
+    version: 2,
+    activeProfileId,
+    profiles: normalizedProfiles
+  };
+}
+
+function normalizeConfigProfile(input: unknown, index: number): TopicPushProfileConfig | null {
+  const source = asRecord(input);
+  if (!source) {
+    return null;
+  }
+
+  const name = normalizeText(source.name);
+  const idRaw = normalizeText(source.id) || name || `profile-${index + 1}`;
+  const id = normalizeProfileId(idRaw);
+  if (!id) {
+    return null;
+  }
+
+  const config = normalizeConfig(source.config ?? source);
+  return {
+    id,
+    name: name || `Profile ${index + 1}`,
+    config
+  };
+}
+
+function normalizeStateStore(input: unknown): TopicPushStateStore {
+  const source = asRecord(input);
+  if (!source || !Array.isArray(source.profiles)) {
+    return {
+      version: 2,
+      profiles: [
+        {
+          id: DEFAULT_PROFILE_ID,
+          state: normalizeState(input)
+        }
+      ]
+    };
+  }
+
+  const normalizedProfilesRaw = toArray(source.profiles)
+    .map((item, index) => normalizeStateProfile(item, index))
+    .filter((item): item is TopicPushProfileState => Boolean(item));
+  const normalizedProfiles: TopicPushProfileState[] = [];
+  const idSet = new Set<string>();
+  for (const profile of normalizedProfilesRaw) {
+    if (idSet.has(profile.id)) {
+      continue;
+    }
+    idSet.add(profile.id);
+    normalizedProfiles.push(profile);
+  }
+
+  if (normalizedProfiles.length === 0) {
+    return cloneDefaultStateStore();
+  }
+
+  return {
+    version: 2,
+    profiles: normalizedProfiles
+  };
+}
+
+function normalizeStateProfile(input: unknown, index: number): TopicPushProfileState | null {
+  const source = asRecord(input);
+  if (!source) {
+    return null;
+  }
+
+  const idRaw = normalizeText(source.id) || `profile-${index + 1}`;
+  const id = normalizeProfileId(idRaw);
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    state: normalizeState(source.state ?? source)
+  };
 }
 
 function normalizeConfig(input: unknown): TopicPushConfig {
@@ -2233,6 +2785,15 @@ function normalizeSourceId(raw: string): string {
   return normalized;
 }
 
+function normalizeProfileId(raw: unknown): string {
+  const normalized = normalizeText(raw)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+  return normalized;
+}
+
 function buildSourceId(name: string, feedUrl: string, index: number): string {
   const fromName = normalizeSourceId(name);
   if (fromName) {
@@ -2463,6 +3024,15 @@ function readFlagString(flags: Map<string, string | true>, key: string): string 
   return typeof value === "string" ? value : undefined;
 }
 
+function readProfileId(flags: Map<string, string | true>, positional?: string): string | undefined {
+  const raw = readFlagString(flags, "profile")
+    ?? readFlagString(flags, "profile-id")
+    ?? positional
+    ?? "";
+  const normalized = normalizeProfileId(raw);
+  return normalized || undefined;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) {
     return null;
@@ -2501,6 +3071,40 @@ function cloneDefaultConfig(): TopicPushConfig {
       }
     },
     dailyQuota: { ...DEFAULT_CONFIG.dailyQuota }
+  };
+}
+
+function cloneDefaultState(): TopicPushState {
+  return {
+    version: 1,
+    sentLog: [],
+    updatedAt: ""
+  };
+}
+
+function cloneDefaultConfigStore(): TopicPushConfigStore {
+  return {
+    version: 2,
+    activeProfileId: DEFAULT_PROFILE_ID,
+    profiles: [
+      {
+        id: DEFAULT_PROFILE_ID,
+        name: DEFAULT_PROFILE_NAME,
+        config: cloneDefaultConfig()
+      }
+    ]
+  };
+}
+
+function cloneDefaultStateStore(): TopicPushStateStore {
+  return {
+    version: 2,
+    profiles: [
+      {
+        id: DEFAULT_PROFILE_ID,
+        state: cloneDefaultState()
+      }
+    ]
   };
 }
 
