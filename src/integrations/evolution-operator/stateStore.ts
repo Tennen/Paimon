@@ -1,10 +1,7 @@
-import fs from "fs";
-import path from "path";
 import {
   DATA_STORE,
   DataStoreDescriptor,
   getStore,
-  getStoreFilePathForDebug,
   registerStore,
   ensureDir,
   resolveDataPath,
@@ -55,7 +52,6 @@ export class EvolutionStateStore {
   };
 
   constructor() {
-    this.migrateLegacyState(path.resolve(process.cwd(), "state"));
     this.stores = {
       state: registerStore(this.storeKeys.state, () => createDefaultEvolutionState()),
       retryQueue: registerStore(this.storeKeys.retryQueue, () => createDefaultRetryQueueState()),
@@ -148,42 +144,6 @@ export class EvolutionStateStore {
   private ensureArtifacts(): void {
     ensureDir(this.artifacts.workspaceDir);
     ensureDir(this.artifacts.codexOutputDir);
-  }
-
-  private migrateLegacyState(legacyDir: string): void {
-    const targetDir = this.artifacts.workspaceDir;
-    if (legacyDir === targetDir || !fs.existsSync(legacyDir)) {
-      return;
-    }
-
-    ensureDir(targetDir);
-    const legacyFiles = [
-      { store: this.storeKeys.state, legacyFile: "evolution.json" },
-      { store: this.storeKeys.retryQueue, legacyFile: "retry_queue.json" },
-      { store: this.storeKeys.metrics, legacyFile: "metrics.json" }
-    ] as const;
-
-    for (const item of legacyFiles) {
-      const from = path.join(legacyDir, item.legacyFile);
-      const to = getStoreFilePathForDebug(item.store);
-      if (!fs.existsSync(from) || fs.existsSync(to)) {
-        continue;
-      }
-      try {
-        fs.copyFileSync(from, to);
-      } catch {
-        // Keep startup resilient; defaults will be created later if copy fails.
-      }
-    }
-
-    const legacyCodexDir = path.join(legacyDir, "codex");
-    if (fs.existsSync(legacyCodexDir) && !fs.existsSync(this.artifacts.codexOutputDir)) {
-      try {
-        fs.cpSync(legacyCodexDir, this.artifacts.codexOutputDir, { recursive: true });
-      } catch {
-        // No-op: codex output can be regenerated and is non-critical runtime data.
-      }
-    }
   }
 }
 

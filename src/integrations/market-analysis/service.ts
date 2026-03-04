@@ -1,14 +1,16 @@
 // @ts-nocheck
-const fs = require("fs");
-const path = require("path");
-const chatgptBridge = require("../chatgpt-bridge/service");
+import * as chatgptBridge from "../chatgpt-bridge/service";
+import {
+  DATA_STORE,
+  getStore,
+  registerStore,
+  setStore
+} from "../../storage/persistence";
 
-const ROOT_DIR = process.cwd();
-const DATA_DIR = path.join(ROOT_DIR, "data", "market-analysis");
-const RUNS_DIR = path.join(DATA_DIR, "runs");
-const PORTFOLIO_FILE = path.join(DATA_DIR, "portfolio.json");
-const CONFIG_FILE = path.join(DATA_DIR, "config.json");
-const STATE_FILE = path.join(DATA_DIR, "state.json");
+const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
+const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
+const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
+const MARKET_RUNS_STORE = DATA_STORE.MARKET_RUNS;
 
 const DEFAULT_INDEX_CODES = ["000300", "000001", "399001"];
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -916,19 +918,19 @@ function persistRun(input) {
     optionalNewsContext: input.optionalNewsContext
   };
 
-  const fileName = `${timestamp.replace(/[:.]/g, "-")}_${input.phase}_${id}.json`;
-  const runPath = path.join(RUNS_DIR, fileName);
-  writeJsonAtomic(runPath, run);
+  const runsStore = readRunsStore();
+  runsStore.runs[id] = run;
+  runsStore.runs = pruneRunsByCreatedAt(runsStore.runs, 120);
+  setStore(MARKET_RUNS_STORE, runsStore);
 
-  const summary = summarizeRun(run, fileName);
+  const summary = summarizeRun(run);
 
   const state = readState();
   state.latestRunId = id;
   state.latestByPhase = state.latestByPhase || { midday: null, close: null };
   state.latestByPhase[input.phase] = {
     id,
-    createdAt: timestamp,
-    file: fileName
+    createdAt: timestamp
   };
   state.recentRuns = [summary]
     .concat(Array.isArray(state.recentRuns) ? state.recentRuns : [])
@@ -941,18 +943,16 @@ function persistRun(input) {
     .slice(0, 80);
   state.updatedAt = timestamp;
 
-  writeJsonAtomic(STATE_FILE, state);
+  setStore(MARKET_STATE_STORE, state);
 
   return {
     id,
-    file: fileName,
-    path: runPath,
     createdAt: timestamp,
     summary
   };
 }
 
-function summarizeRun(run, fileName) {
+function summarizeRun(run) {
   const signals = Array.isArray(run.signalResult && run.signalResult.assetSignals)
     ? run.signalResult.assetSignals
     : [];
@@ -970,91 +970,72 @@ function summarizeRun(run, fileName) {
     })),
     explanationSummary: run.explanation && typeof run.explanation.summary === "string"
       ? run.explanation.summary
-      : "",
-    file: fileName
+      : ""
   };
 }
 
 function readPortfolio() {
   ensureStorage();
-
-  let parsed = null;
-  if (fs.existsSync(PORTFOLIO_FILE)) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(PORTFOLIO_FILE, "utf8"));
-    } catch (_error) {
-      parsed = null;
-    }
-  }
-
+  const parsed = getStore(MARKET_PORTFOLIO_STORE);
   const normalized = normalizePortfolio(parsed);
-  if (!fs.existsSync(PORTFOLIO_FILE)) {
-    writeJsonAtomic(PORTFOLIO_FILE, normalized);
-  }
-
   return normalized;
 }
 
 function readAnalysisConfig() {
   ensureStorage();
-
-  let parsed = null;
-  if (fs.existsSync(CONFIG_FILE)) {
-    try {
-      parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-    } catch (_error) {
-      parsed = null;
-    }
-  }
-
+  const parsed = getStore(MARKET_CONFIG_STORE);
   const normalized = normalizeAnalysisConfig(parsed);
-  if (!fs.existsSync(CONFIG_FILE)) {
-    writeJsonAtomic(CONFIG_FILE, normalized);
-  }
-
   return normalized;
 }
 
 function readState() {
   ensureStorage();
-
-  if (!fs.existsSync(STATE_FILE)) {
-    return {
-      version: 1,
-      latestRunId: "",
-      latestByPhase: {
-        midday: null,
-        close: null
-      },
-      recentRuns: [],
-      updatedAt: ""
-    };
+  const parsed = getStore(MARKET_STATE_STORE);
+  if (!parsed || typeof parsed !== "object") {
+    return buildDefaultState();
   }
+  return {
+    version: 1,
+    latestRunId: typeof parsed.latestRunId === "string" ? parsed.latestRunId : "",
+    latestByPhase: {
+      midday: parsed.latestByPhase && parsed.latestByPhase.midday ? parsed.latestByPhase.midday : null,
+      close: parsed.latestByPhase && parsed.latestByPhase.close ? parsed.latestByPhase.close : null
+    },
+    recentRuns: Array.isArray(parsed.recentRuns) ? parsed.recentRuns : [],
+    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : ""
+  };
+}
 
-  try {
-    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-    return {
-      version: 1,
-      latestRunId: typeof parsed.latestRunId === "string" ? parsed.latestRunId : "",
-      latestByPhase: {
-        midday: parsed.latestByPhase && parsed.latestByPhase.midday ? parsed.latestByPhase.midday : null,
-        close: parsed.latestByPhase && parsed.latestByPhase.close ? parsed.latestByPhase.close : null
-      },
-      recentRuns: Array.isArray(parsed.recentRuns) ? parsed.recentRuns : [],
-      updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : ""
-    };
-  } catch (_error) {
-    return {
-      version: 1,
-      latestRunId: "",
-      latestByPhase: {
-        midday: null,
-        close: null
-      },
-      recentRuns: [],
-      updatedAt: ""
-    };
+function readRunsStore() {
+  ensureStorage();
+  const parsed = getStore(MARKET_RUNS_STORE);
+  if (!parsed || typeof parsed !== "object") {
+    return buildDefaultRunsStore();
   }
+  const runs = parsed.runs && typeof parsed.runs === "object"
+    ? parsed.runs
+    : {};
+  return {
+    version: 1,
+    runs
+  };
+}
+
+function pruneRunsByCreatedAt(input, maxSize) {
+  const entries = Object.entries(input || {});
+  entries.sort((left, right) => {
+    const leftRun = left[1] && typeof left[1] === "object" ? left[1] : {};
+    const rightRun = right[1] && typeof right[1] === "object" ? right[1] : {};
+    const leftTime = Date.parse(leftRun.createdAt || "");
+    const rightTime = Date.parse(rightRun.createdAt || "");
+    return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+  });
+
+  const next = {};
+  for (const [runId, run] of entries.slice(0, Math.max(1, maxSize))) {
+    next[runId] = run;
+  }
+  return next;
 }
 
 function normalizePortfolio(input) {
@@ -1163,7 +1144,7 @@ function formatPortfolio(portfolio) {
 
   if (portfolio.funds.length === 0) {
     lines.push("持仓: (空)");
-    lines.push(`配置文件: ${PORTFOLIO_FILE}`);
+    lines.push(`持仓存储键: ${MARKET_PORTFOLIO_STORE}`);
     return lines.join("\n");
   }
 
@@ -1171,7 +1152,7 @@ function formatPortfolio(portfolio) {
   for (const item of portfolio.funds) {
     lines.push(`- ${item.code} | quantity=${formatNumber(item.quantity)} | avgCost=${formatNumber(item.avgCost)}`);
   }
-  lines.push(`配置文件: ${PORTFOLIO_FILE}`);
+  lines.push(`持仓存储键: ${MARKET_PORTFOLIO_STORE}`);
 
   return lines.join("\n");
 }
@@ -1181,7 +1162,7 @@ function formatStatus(state) {
   if (recent.length === 0) {
     return [
       "尚无 Market Analysis 运行记录。",
-      `运行后记录会写入: ${RUNS_DIR}`
+      `运行状态存储键: ${MARKET_STATE_STORE}`
     ].join("\n");
   }
 
@@ -1197,10 +1178,6 @@ function formatStatus(state) {
 
   if (latest.explanationSummary) {
     lines.push(`解释: ${latest.explanationSummary}`);
-  }
-
-  if (latest.file) {
-    lines.push(`快照文件: ${path.join(RUNS_DIR, latest.file)}`);
   }
 
   return lines.join("\n");
@@ -1248,45 +1225,42 @@ function buildHelpText() {
     "/market status         查看最近一次运行结果",
     "/market portfolio      查看当前持仓配置",
     "",
-    "配置文件:",
-    `- 持仓: ${PORTFOLIO_FILE}`,
-    `- 运行快照目录: ${RUNS_DIR}`
+    "配置存储键:",
+    `- 持仓: ${MARKET_PORTFOLIO_STORE}`,
+    `- 分析配置: ${MARKET_CONFIG_STORE}`,
+    `- 状态: ${MARKET_STATE_STORE}`,
+    `- 快照明细: ${MARKET_RUNS_STORE}`
   ].join("\n");
 }
 
-function ensureStorage() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.mkdirSync(RUNS_DIR, { recursive: true });
-
-  if (!fs.existsSync(PORTFOLIO_FILE)) {
-    writeJsonAtomic(PORTFOLIO_FILE, {
-      funds: [],
-      cash: 0
-    });
-  }
-
-  if (!fs.existsSync(CONFIG_FILE)) {
-    writeJsonAtomic(CONFIG_FILE, DEFAULT_ANALYSIS_CONFIG);
-  }
-
-  if (!fs.existsSync(STATE_FILE)) {
-    writeJsonAtomic(STATE_FILE, {
-      version: 1,
-      latestRunId: "",
-      latestByPhase: {
-        midday: null,
-        close: null
-      },
-      recentRuns: [],
-      updatedAt: ""
-    });
-  }
+function buildDefaultState() {
+  return {
+    version: 1,
+    latestRunId: "",
+    latestByPhase: {
+      midday: null,
+      close: null
+    },
+    recentRuns: [],
+    updatedAt: ""
+  };
 }
 
-function writeJsonAtomic(filePath, payload) {
-  const tempFile = `${filePath}.tmp`;
-  fs.writeFileSync(tempFile, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-  fs.renameSync(tempFile, filePath);
+function buildDefaultRunsStore() {
+  return {
+    version: 1,
+    runs: {}
+  };
+}
+
+function ensureStorage() {
+  registerStore(MARKET_PORTFOLIO_STORE, () => ({
+    funds: [],
+    cash: 0
+  }));
+  registerStore(MARKET_CONFIG_STORE, () => normalizeAnalysisConfig(DEFAULT_ANALYSIS_CONFIG));
+  registerStore(MARKET_STATE_STORE, () => buildDefaultState());
+  registerStore(MARKET_RUNS_STORE, () => buildDefaultRunsStore());
 }
 
 async function fetchJson(url, timeoutMs, init) {

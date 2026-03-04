@@ -432,7 +432,7 @@ export function MarketSection(props: MarketSectionProps) {
           <div className="mono">portfolio store: {props.marketConfig?.portfolioStore?.name ?? "-"}</div>
           <div className="mono">config store: {props.marketConfig?.configStore?.name ?? "-"}</div>
           <div className="mono">state store: {props.marketConfig?.stateStore?.name ?? "-"}</div>
-          <div className="mono">runs store: {props.marketConfig?.runsStore ?? "-"}</div>
+          <div className="mono">runs store: {props.marketConfig?.runsStore?.name ?? "-"}</div>
         </div>
 
         <Table>

@@ -10,10 +10,8 @@ import { EnvConfigStore } from "../config/envConfigStore";
 import {
   DATA_STORE,
   describeStore,
-  ensureDir,
   getStore,
   registerStore,
-  resolveDataPath,
   setStore
 } from "../storage/persistence";
 import {
@@ -116,8 +114,6 @@ type RunMarketOncePayloadParseResult =
   | { payload: RunMarketOncePayload; error?: undefined }
   | { payload?: undefined; error: string };
 
-const MARKET_DATA_DIR = resolveDataPath("market-analysis");
-const MARKET_RUNS_DIR = path.join(MARKET_DATA_DIR, "runs");
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
 const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
@@ -643,7 +639,7 @@ export class AdminIngressAdapter implements IngressAdapter {
         portfolioStore: describeStore(MARKET_PORTFOLIO_STORE),
         configStore: describeStore(MARKET_CONFIG_STORE),
         stateStore: describeStore(MARKET_STATE_STORE),
-        runsStore: "market.runs"
+        runsStore: describeStore(DATA_STORE.MARKET_RUNS)
       });
     });
 
@@ -1165,7 +1161,7 @@ function listMarketRunSummaries(limit: number, phase?: MarketPhase): MarketRunSu
   let summaries = state.recentRuns;
 
   if (summaries.length === 0) {
-    summaries = loadMarketRunSummariesFromFiles(Math.max(limit * 3, 24));
+    summaries = loadMarketRunSummariesFromStore(Math.max(limit * 3, 24));
   }
 
   const filtered = phase ? summaries.filter((item) => item.phase === phase) : summaries.slice();
@@ -1185,80 +1181,83 @@ function readMarketStateFile(): MarketStateFile {
   return normalizeMarketState(parsed);
 }
 
-function loadMarketRunSummariesFromFiles(limit: number): MarketRunSummary[] {
-  if (!fs.existsSync(MARKET_RUNS_DIR)) {
+function loadMarketRunSummariesFromStore(limit: number): MarketRunSummary[] {
+  ensureMarketStorage();
+  const parsed = getStore<unknown>(DATA_STORE.MARKET_RUNS);
+  if (!parsed || typeof parsed !== "object") {
     return [];
   }
 
-  const files = fs.readdirSync(MARKET_RUNS_DIR)
-    .filter((file) => file.endsWith(".json"))
-    .sort((a, b) => b.localeCompare(a))
-    .slice(0, limit);
+  const source = parsed as { runs?: unknown };
+  const runs = source.runs && typeof source.runs === "object"
+    ? source.runs as Record<string, unknown>
+    : {};
 
   const summaries: MarketRunSummary[] = [];
-  for (const file of files) {
-    const summary = readMarketRunSummaryFromFile(file);
+  for (const [runId, run] of Object.entries(runs)) {
+    if (!run || typeof run !== "object") {
+      continue;
+    }
+    const summary = normalizeMarketRunSummaryFromRecord(run as Record<string, unknown>, runId);
     if (summary) {
       summaries.push(summary);
     }
   }
-  return summaries;
+
+  summaries.sort((a, b) => {
+    const left = Date.parse(a.createdAt);
+    const right = Date.parse(b.createdAt);
+    return (Number.isFinite(right) ? right : 0) - (Number.isFinite(left) ? left : 0);
+  });
+
+  return summaries.slice(0, limit);
 }
 
-function readMarketRunSummaryFromFile(fileName: string): MarketRunSummary | null {
-  const fullPath = path.join(MARKET_RUNS_DIR, fileName);
-  if (!fs.existsSync(fullPath)) {
+function normalizeMarketRunSummaryFromRecord(
+  parsed: Record<string, unknown>,
+  fallbackId: string
+): MarketRunSummary | null {
+  const phase = parseMarketPhase(parsed.phase);
+  if (!phase) {
     return null;
   }
 
-  try {
-    const parsed = JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<string, unknown>;
-    const phase = parseMarketPhase(parsed.phase);
-    if (!phase) {
-      return null;
-    }
+  const signalResult = parsed.signalResult && typeof parsed.signalResult === "object"
+    ? parsed.signalResult as Record<string, unknown>
+    : {};
+  const assetSignals = Array.isArray(signalResult.assetSignals)
+    ? signalResult.assetSignals
+    : [];
 
-    const signalResult = parsed.signalResult && typeof parsed.signalResult === "object"
-      ? parsed.signalResult as Record<string, unknown>
-      : {};
+  const compactSignals = assetSignals
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+      const value = item as Record<string, unknown>;
+      const code = typeof value.code === "string" ? value.code : "";
+      const signal = typeof value.signal === "string" ? value.signal : "";
+      if (!code || !signal) {
+        return null;
+      }
+      return { code, signal };
+    })
+    .filter((item): item is { code: string; signal: string } => Boolean(item));
 
-    const assetSignals = Array.isArray(signalResult.assetSignals)
-      ? signalResult.assetSignals
-      : [];
+  const explanation = parsed.explanation && typeof parsed.explanation === "object"
+    ? parsed.explanation as Record<string, unknown>
+    : {};
 
-    const compactSignals = assetSignals
-      .map((item) => {
-        if (!item || typeof item !== "object") {
-          return null;
-        }
-        const value = item as Record<string, unknown>;
-        const code = typeof value.code === "string" ? value.code : "";
-        const signal = typeof value.signal === "string" ? value.signal : "";
-        if (!code || !signal) {
-          return null;
-        }
-        return { code, signal };
-      })
-      .filter((item): item is { code: string; signal: string } => Boolean(item));
-
-    const explanation = parsed.explanation && typeof parsed.explanation === "object"
-      ? parsed.explanation as Record<string, unknown>
-      : {};
-
-    return {
-      id: typeof parsed.id === "string" ? parsed.id : fileName.replace(/\.json$/i, ""),
-      createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
-      phase,
-      marketState: typeof signalResult.marketState === "string" ? signalResult.marketState : "",
-      benchmark: typeof signalResult.benchmark === "string" ? signalResult.benchmark : "",
-      assetSignalCount: compactSignals.length,
-      signals: compactSignals.slice(0, 8),
-      explanationSummary: typeof explanation.summary === "string" ? explanation.summary : "",
-      file: fileName
-    };
-  } catch {
-    return null;
-  }
+  return {
+    id: typeof parsed.id === "string" ? parsed.id : fallbackId,
+    createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+    phase,
+    marketState: typeof signalResult.marketState === "string" ? signalResult.marketState : "",
+    benchmark: typeof signalResult.benchmark === "string" ? signalResult.benchmark : "",
+    assetSignalCount: compactSignals.length,
+    signals: compactSignals.slice(0, 8),
+    explanationSummary: typeof explanation.summary === "string" ? explanation.summary : ""
+  };
 }
 
 function buildDefaultMarketState(): MarketStateFile {
@@ -1808,11 +1807,10 @@ function extractSixDigitCode(raw: string): string {
 }
 
 function ensureMarketStorage(): void {
-  ensureDir(MARKET_DATA_DIR);
-  ensureDir(MARKET_RUNS_DIR);
   registerStore(MARKET_PORTFOLIO_STORE, () => DEFAULT_MARKET_PORTFOLIO);
   registerStore(MARKET_CONFIG_STORE, () => DEFAULT_MARKET_ANALYSIS_CONFIG);
   registerStore(MARKET_STATE_STORE, () => buildDefaultMarketState());
+  registerStore(DATA_STORE.MARKET_RUNS, () => ({ version: 1, runs: {} }));
 }
 
 function roundTo(value: number, digits: number): number {
@@ -1836,10 +1834,7 @@ function parseOptionalBoolean(value: unknown): boolean | undefined {
 }
 
 function readEnvValues(envPath: string): Record<string, string> {
-  if (!fs.existsSync(envPath)) {
-    return {};
-  }
-  const content = fs.readFileSync(envPath, "utf-8");
+  const content = readEnvText(envPath);
   return dotenv.parse(content);
 }
 
@@ -1854,14 +1849,7 @@ function setEnvValue(envPath: string, key: string, value: string): void {
     throw new Error(`${key} cannot be empty`);
   }
 
-  const dir = path.dirname(envPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  const lines = fs.existsSync(envPath)
-    ? fs.readFileSync(envPath, "utf-8").split(/\r?\n/)
-    : [];
+  const lines = readEnvText(envPath).split(/\r?\n/);
 
   const escapedValue = formatEnvValue(text);
   const targetPrefix = `${key}=`;
@@ -1887,17 +1875,12 @@ function setEnvValue(envPath: string, key: string, value: string): void {
     lines.push(`${targetPrefix}${escapedValue}`);
   }
 
-  fs.writeFileSync(envPath, `${lines.join("\n").replace(/\n+$/, "\n")}`, "utf-8");
+  writeEnvText(envPath, `${lines.join("\n").replace(/\n+$/, "\n")}`);
   process.env[key] = text;
 }
 
 function unsetEnvValue(envPath: string, key: string): void {
-  if (!fs.existsSync(envPath)) {
-    delete process.env[key];
-    return;
-  }
-
-  const lines = fs.readFileSync(envPath, "utf-8").split(/\r?\n/);
+  const lines = readEnvText(envPath).split(/\r?\n/);
   const nextLines = lines.filter((line) => {
     if (!line || /^\s*#/.test(line)) {
       return true;
@@ -1905,8 +1888,26 @@ function unsetEnvValue(envPath: string, key: string): void {
     const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
     return match?.[1] !== key;
   });
-  fs.writeFileSync(envPath, `${nextLines.join("\n").replace(/\n+$/, "\n")}`, "utf-8");
+  writeEnvText(envPath, `${nextLines.join("\n").replace(/\n+$/, "\n")}`);
   delete process.env[key];
+}
+
+function readEnvText(envPath: string): string {
+  registerStore(DATA_STORE.ENV_CONFIG, {
+    init: () => "",
+    codec: "text",
+    filePath: envPath
+  });
+  return getStore<string>(DATA_STORE.ENV_CONFIG);
+}
+
+function writeEnvText(envPath: string, content: string): void {
+  registerStore(DATA_STORE.ENV_CONFIG, {
+    init: () => "",
+    codec: "text",
+    filePath: envPath
+  });
+  setStore(DATA_STORE.ENV_CONFIG, content);
 }
 
 function formatEnvValue(value: string): string {

@@ -1,6 +1,5 @@
-import fs from "fs";
-import path from "path";
 import type { LLMProvider } from "./engines/llm/llm";
+import { appendStore, DATA_STORE, registerStore } from "./storage/persistence";
 
 export type AuditEntry = {
   requestId: string;
@@ -19,18 +18,21 @@ export type AuditEntry = {
   fallback?: boolean;
 };
 
-const AUDIT_PATH = path.resolve(process.cwd(), "data", "audit.jsonl");
+const AUDIT_STORE = DATA_STORE.AUDIT_LOG;
+let auditStoreRegistered = false;
 
 export function writeAudit(entry: AuditEntry): void {
-  const dir = path.dirname(AUDIT_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!auditStoreRegistered) {
+    registerStore(AUDIT_STORE, {
+      init: () => "",
+      codec: "text"
+    });
+    auditStoreRegistered = true;
   }
-
   const line = JSON.stringify({
     ...entry,
     "action.type": entry.actionType,
     ts: new Date().toISOString()
   });
-  fs.appendFileSync(AUDIT_PATH, line + "\n", "utf-8");
+  appendStore(AUDIT_STORE, `${line}\n`);
 }

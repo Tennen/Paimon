@@ -1,12 +1,18 @@
-import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
+import { DATA_STORE, getStore, registerStore, setStore } from "../storage/persistence";
 
 export class EnvConfigStore {
   private readonly envPath: string;
+  private readonly storeName = DATA_STORE.ENV_CONFIG;
 
   constructor(envPath?: string) {
     this.envPath = path.resolve(process.cwd(), envPath ?? process.env.ENV_FILE ?? ".env");
+    registerStore(this.storeName, {
+      init: () => "",
+      codec: "text",
+      filePath: this.envPath
+    });
   }
 
   getPath(): string {
@@ -14,7 +20,7 @@ export class EnvConfigStore {
   }
 
   getModel(): string {
-    const values = this.readAll();
+    const values = this.getAll();
     return values.OLLAMA_MODEL ?? process.env.OLLAMA_MODEL ?? "";
   }
 
@@ -26,23 +32,19 @@ export class EnvConfigStore {
     this.setValue("OLLAMA_MODEL", value);
   }
 
-  private readAll(): Record<string, string> {
-    if (!fs.existsSync(this.envPath)) {
-      return {};
-    }
-    const content = fs.readFileSync(this.envPath, "utf-8");
+  getAll(): Record<string, string> {
+    const content = getStore<string>(this.storeName);
     return dotenv.parse(content);
   }
 
-  private setValue(key: string, value: string): void {
-    const dir = path.dirname(this.envPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+  getValue(key: string): string {
+    const values = this.getAll();
+    return values[key] ?? process.env[key] ?? "";
+  }
 
-    const lines = fs.existsSync(this.envPath)
-      ? fs.readFileSync(this.envPath, "utf-8").split(/\r?\n/)
-      : [];
+  setValue(key: string, value: string): void {
+    const raw = getStore<string>(this.storeName);
+    const lines = raw.split(/\r?\n/);
 
     const escapedValue = formatEnvValue(value);
     const targetPrefix = `${key}=`;
@@ -68,8 +70,22 @@ export class EnvConfigStore {
       lines.push(`${targetPrefix}${escapedValue}`);
     }
 
-    fs.writeFileSync(this.envPath, `${lines.join("\n").replace(/\n+$/, "\n")}`, "utf-8");
+    setStore(this.storeName, `${lines.join("\n").replace(/\n+$/, "\n")}`);
     process.env[key] = value;
+  }
+
+  unsetValue(key: string): void {
+    const raw = getStore<string>(this.storeName);
+    const lines = raw.split(/\r?\n/);
+    const nextLines = lines.filter((line) => {
+      if (!line || /^\s*#/.test(line)) {
+        return true;
+      }
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      return match?.[1] !== key;
+    });
+    setStore(this.storeName, `${nextLines.join("\n").replace(/\n+$/, "\n")}`);
+    delete process.env[key];
   }
 }
 

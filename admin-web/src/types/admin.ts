@@ -1,6 +1,7 @@
 export type DataStoreDescriptor = {
   name: string;
   driver: string;
+  codec?: "json" | "text";
 };
 
 export type AdminConfig = {
@@ -72,7 +73,7 @@ export type MarketConfig = {
   portfolioStore: DataStoreDescriptor;
   configStore: DataStoreDescriptor;
   stateStore: DataStoreDescriptor;
-  runsStore: string;
+  runsStore: DataStoreDescriptor;
 };
 
 export type MarketPhase = "midday" | "close";
