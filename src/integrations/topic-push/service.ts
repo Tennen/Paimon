@@ -1397,7 +1397,7 @@ function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestIte
 }
 
 function sanitizePlanningText(value: unknown, maxLength: number): string {
-  const text = normalizeText(value)
+  const text = stripFeedMetadataNoise(normalizeText(value))
     .replace(/article\s*url\s*:\s*https?:\/\/\S+/gi, " ")
     .replace(/source\s*url\s*:\s*https?:\/\/\S+/gi, " ")
     .replace(/https?:\/\/\S+/gi, " ")
@@ -2955,12 +2955,25 @@ function toText(value: unknown): string {
   return "";
 }
 
+function stripFeedMetadataNoise(text: string): string {
+  if (!text) {
+    return "";
+  }
+
+  return text
+    .replace(/comments?\s*url\s*:\s*https?:\/\/\S+/gi, " ")
+    .replace(/comments?\s*url\s*:/gi, " ")
+    .replace(/#\s*comments?\s*:\s*\d+\b/gi, " ")
+    .replace(/\bcomments?\s*:\s*\d+\b/gi, " ")
+    .replace(/\bpoints?\s*:\s*\d+\b/gi, " ");
+}
+
 function normalizeSummary(text: string): string {
   if (!text) {
     return "";
   }
 
-  const withoutTags = text
+  const withoutTags = stripFeedMetadataNoise(text)
     .replace(/<!\[CDATA\[|\]\]>/g, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
