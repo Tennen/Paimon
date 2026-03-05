@@ -36,6 +36,7 @@ import {
   TopicPushConfig,
   TopicPushProfile,
   TopicPushProfilesPayload,
+  TopicPushSummaryEngine,
   TopicPushSource,
   TopicPushState,
   UserFormState
@@ -1126,6 +1127,13 @@ export default function App() {
     });
   }
 
+  function handleTopicSummaryEngineChange(value: TopicPushSummaryEngine): void {
+    setTopicPushConfig((prev) => ({
+      ...prev,
+      summaryEngine: value
+    }));
+  }
+
   function handleAddTopicSource(): void {
     setTopicPushConfig((prev) => {
       const baseId = `source-${prev.sources.length + 1}`;
@@ -1403,6 +1411,7 @@ export default function App() {
           onRenameProfile={() => void handleRenameTopicProfile()}
           onUseProfile={() => void handleUseTopicProfile()}
           onDeleteProfile={() => void handleDeleteTopicProfile()}
+          onSummaryEngineChange={handleTopicSummaryEngineChange}
           onSourceChange={handleTopicSourceChange}
           onAddSource={handleAddTopicSource}
           onRemoveSource={handleRemoveTopicSource}
@@ -1538,9 +1547,11 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
 
   const filters = source.filters ?? fallback.filters;
   const dailyQuota = source.dailyQuota ?? fallback.dailyQuota;
+  const summaryEngine = source.summaryEngine === "gpt_plugin" ? "gpt_plugin" : "local";
 
   return {
     version: 1,
+    summaryEngine,
     sources,
     topics,
     filters: {

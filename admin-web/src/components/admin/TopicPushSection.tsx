@@ -30,6 +30,7 @@ import {
   TopicPushCategory,
   TopicPushConfig,
   TopicPushProfile,
+  TopicPushSummaryEngine,
   TopicPushSource,
   TopicPushState
 } from "@/types/admin";
@@ -48,6 +49,7 @@ type TopicPushSectionProps = {
   onRenameProfile: () => void;
   onUseProfile: () => void;
   onDeleteProfile: () => void;
+  onSummaryEngineChange: (value: TopicPushSummaryEngine) => void;
   onSourceChange: (index: number, patch: Partial<TopicPushSource>) => void;
   onAddSource: () => void;
   onRemoveSource: (index: number) => void;
@@ -60,6 +62,11 @@ const CATEGORY_OPTIONS: Array<{ value: TopicPushCategory; label: string }> = [
   { value: "engineering", label: "engineering" },
   { value: "news", label: "news" },
   { value: "ecosystem", label: "ecosystem" }
+];
+
+const SUMMARY_ENGINE_OPTIONS: Array<{ value: TopicPushSummaryEngine; label: string }> = [
+  { value: "local", label: "local（本地模型）" },
+  { value: "gpt_plugin", label: "gpt_plugin（GPT Bridge）" }
 ];
 
 export function TopicPushSection(props: TopicPushSectionProps) {
@@ -122,7 +129,25 @@ export function TopicPushSection(props: TopicPushSectionProps) {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label>摘要引擎</Label>
+            <Select
+              value={props.topicPushConfig.summaryEngine}
+              onValueChange={(value) => props.onSummaryEngineChange(value as TopicPushSummaryEngine)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择摘要引擎" />
+              </SelectTrigger>
+              <SelectContent>
+                {SUMMARY_ENGINE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="space-y-1.5">
             <Label>配额</Label>
             <div className="rounded-md border px-3 py-2 text-sm text-muted-foreground">

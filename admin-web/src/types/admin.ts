@@ -187,8 +187,11 @@ export type TopicPushDailyQuota = {
   ecosystem: number;
 };
 
+export type TopicPushSummaryEngine = "local" | "gpt_plugin";
+
 export type TopicPushConfig = {
   version: 1;
+  summaryEngine: TopicPushSummaryEngine;
   sources: TopicPushSource[];
   topics: Record<TopicPushTopicKey, string[]>;
   filters: TopicPushFilters;
@@ -383,6 +386,7 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
 
 export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
   version: 1,
+  summaryEngine: "local",
   sources: [],
   topics: {
     llm_apps: [],

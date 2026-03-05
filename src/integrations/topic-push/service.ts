@@ -4,6 +4,7 @@ import { jsonrepair } from "jsonrepair";
 import { DATA_STORE, getStore, registerStore, setStore } from "../../storage/persistence";
 import { ollamaChat } from "../../engines/llm/ollama/client";
 import { llamaServerChat } from "../../engines/llm/llama-server/client";
+import * as chatgptBridge from "../chatgpt-bridge/service";
 
 export const directCommands = ["/topic"];
 
@@ -47,8 +48,11 @@ export type TopicPushDailyQuota = {
   ecosystem: number;
 };
 
+export type TopicPushSummaryEngine = "local" | "gpt_plugin";
+
 export type TopicPushConfig = {
   version: 1;
+  summaryEngine: TopicPushSummaryEngine;
   sources: TopicPushSource[];
   topics: Record<TopicKey, string[]>;
   filters: TopicPushFilters;
@@ -490,6 +494,7 @@ const DEFAULT_TOPIC_KEYWORDS: Record<TopicKey, string[]> = {
 
 const DEFAULT_CONFIG: TopicPushConfig = {
   version: 1,
+  summaryEngine: "local",
   sources: DEFAULT_SOURCES,
   topics: DEFAULT_TOPIC_KEYWORDS,
   filters: {
@@ -818,7 +823,7 @@ async function runDigest(
       digestSummary: buildDigestSummary(item.candidate)
     }));
 
-  const selected = await refineSelectedItemsWithPlanningModel(selectedRaw, targetLanguage);
+  const selected = await refineSelectedItemsWithPlanningModel(selectedRaw, targetLanguage, config.summaryEngine);
 
   const selectedByCategory = {
     engineering: selected.filter((item) => item.candidate.category === "engineering").length,
@@ -1200,7 +1205,8 @@ function pickFromBucket(
 
 async function refineSelectedItemsWithPlanningModel(
   selected: SelectedItem[],
-  targetLanguage: string
+  targetLanguage: string,
+  summaryEngine: TopicPushSummaryEngine
 ): Promise<SelectedItem[]> {
   if (selected.length === 0) {
     return selected;
@@ -1211,7 +1217,7 @@ async function refineSelectedItemsWithPlanningModel(
   }
 
   try {
-    const patches = await generatePlanningDigestPatchMap(selected, targetLanguage);
+    const patches = await generatePlanningDigestPatchMap(selected, targetLanguage, summaryEngine);
     if (patches.size === 0) {
       return selected;
     }
@@ -1249,7 +1255,8 @@ async function refineSelectedItemsWithPlanningModel(
 
 async function generatePlanningDigestPatchMap(
   selected: SelectedItem[],
-  targetLanguage: string
+  targetLanguage: string,
+  summaryEngine: TopicPushSummaryEngine
 ): Promise<Map<string, PlanningDigestItemPatch>> {
   const input = selected.map((item) => ({
     id: item.candidate.id,
@@ -1291,11 +1298,19 @@ async function generatePlanningDigestPatchMap(
     2
   );
 
-  const raw = await chatWithPlanningModel(systemPrompt, userPrompt);
+  const raw = await chatWithPlanningModel(systemPrompt, userPrompt, summaryEngine);
   return parsePlanningDigestPatchMap(raw);
 }
 
-async function chatWithPlanningModel(systemPrompt: string, userPrompt: string): Promise<string> {
+async function chatWithPlanningModel(
+  systemPrompt: string,
+  userPrompt: string,
+  summaryEngine: TopicPushSummaryEngine
+): Promise<string> {
+  if (summaryEngine === "gpt_plugin") {
+    return chatWithGptPluginBridge(systemPrompt, userPrompt);
+  }
+
   const provider = normalizeLlmProvider(process.env.LLM_PROVIDER);
 
   if (provider === "llama-server") {
@@ -1341,6 +1356,64 @@ async function chatWithPlanningModel(systemPrompt: string, userPrompt: string): 
       { role: "user", content: userPrompt }
     ]
   });
+}
+
+async function chatWithGptPluginBridge(systemPrompt: string, userPrompt: string): Promise<string> {
+  const bridgeHandler = chatgptBridge;
+  if (!bridgeHandler || typeof bridgeHandler.execute !== "function") {
+    throw new Error("gpt_plugin bridge execute() is missing");
+  }
+
+  const timeoutMs = parsePositiveInteger(
+    process.env.TOPIC_PUSH_GPT_PLUGIN_TIMEOUT_MS,
+    parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000)
+  );
+  const bridgeInput = `/gpt new ${buildGptPluginPlanningPrompt(systemPrompt, userPrompt)}`;
+  const response = await withTimeout(
+    Promise.resolve(bridgeHandler.execute(bridgeInput)),
+    timeoutMs,
+    "gpt_plugin request timeout"
+  );
+  const text = extractTextFromBridgeResponse(response);
+  if (!text) {
+    throw new Error("gpt_plugin returned empty response");
+  }
+  return text;
+}
+
+function buildGptPluginPlanningPrompt(systemPrompt: string, userPrompt: string): string {
+  return [
+    "You are preparing output for an automated parser.",
+    "Return strict JSON only. Do not include markdown, code fences, or explanations.",
+    "<system_prompt>",
+    systemPrompt,
+    "</system_prompt>",
+    "<user_prompt>",
+    userPrompt,
+    "</user_prompt>"
+  ].join("\n");
+}
+
+function extractTextFromBridgeResponse(response: unknown): string {
+  if (typeof response === "string") {
+    return response.trim();
+  }
+
+  const record = asRecord(response);
+  if (!record) {
+    return "";
+  }
+
+  const directText = normalizeText(record.text);
+  if (directText) {
+    return directText;
+  }
+
+  const output = asRecord(record.output);
+  if (!output) {
+    return "";
+  }
+  return normalizeText(output.text);
 }
 
 function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestItemPatch> {
@@ -1516,6 +1589,36 @@ function normalizeLlmProvider(raw: string | undefined): "ollama" | "llama-server
     return "llama-server";
   }
   return "ollama";
+}
+
+function normalizeSummaryEngine(raw: unknown): TopicPushSummaryEngine {
+  const value = normalizeText(raw).toLowerCase();
+  if ([
+    "gpt_plugin",
+    "gpt-plugin",
+    "gptplugin",
+    "chatgpt-bridge",
+    "chatgpt_bridge",
+    "bridge"
+  ].includes(value)) {
+    return "gpt_plugin";
+  }
+  return "local";
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 function parsePositiveInteger(raw: unknown, fallback: number): number {
@@ -2207,6 +2310,7 @@ function formatConfig(config: TopicPushConfig, profileId?: string): string {
   return [
     "Topic Push Config",
     `profile: ${profile.id} (${profile.name})`,
+    `summary_engine: ${config.summaryEngine}`,
     `sources: ${config.sources.length} (enabled=${config.sources.filter((item) => item.enabled).length})`,
     `quota: total=${config.dailyQuota.total}, engineering=${config.dailyQuota.engineering}, news=${config.dailyQuota.news}, ecosystem=${config.dailyQuota.ecosystem}`,
     `filters: window=${config.filters.timeWindowHours}h, minTitleLength=${config.filters.minTitleLength}, maxPerDomain=${config.filters.maxPerDomain}`,
@@ -2406,6 +2510,12 @@ function normalizeConfig(input: unknown): TopicPushConfig {
     return cloneDefaultConfig();
   }
 
+  const summaryEngine = normalizeSummaryEngine(
+    source.summaryEngine
+    ?? source.summary_engine
+    ?? source.analysisEngine
+    ?? source.engine
+  );
   const normalizedSources = normalizeSources(source.sources);
   const normalizedTopics = normalizeTopics(source.topics);
   const normalizedFilters = normalizeFilters(source.filters);
@@ -2413,6 +2523,7 @@ function normalizeConfig(input: unknown): TopicPushConfig {
 
   return {
     version: 1,
+    summaryEngine,
     sources: normalizedSources,
     topics: normalizedTopics,
     filters: normalizedFilters,
@@ -2962,7 +3073,7 @@ function stripFeedMetadataNoise(text: string): string {
 
   return text
     .replace(/comments?\s*url\s*:\s*https?:\/\/\S+/gi, " ")
-    .replace(/comments?\s*url\s*:/gi, " ")
+    .replace(/comments?\s*url\s*:\s*(?=(?:points?|#\s*comments?|comments?)\s*:|$)/gi, " ")
     .replace(/#\s*comments?\s*:\s*\d+\b/gi, " ")
     .replace(/\bcomments?\s*:\s*\d+\b/gi, " ")
     .replace(/\bpoints?\s*:\s*\d+\b/gi, " ");
@@ -3298,6 +3409,7 @@ function toArray(value: unknown): unknown[] {
 function cloneDefaultConfig(): TopicPushConfig {
   return {
     version: 1,
+    summaryEngine: DEFAULT_CONFIG.summaryEngine,
     sources: DEFAULT_SOURCES.map((item) => ({ ...item })),
     topics: createDefaultTopics(),
     filters: {
