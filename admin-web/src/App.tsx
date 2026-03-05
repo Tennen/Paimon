@@ -34,7 +34,8 @@ import {
   TaskFormState,
   TopicPushCategory,
   TopicPushConfig,
-  TopicPushConfigPayload,
+  TopicPushProfile,
+  TopicPushProfilesPayload,
   TopicPushSource,
   TopicPushState,
   UserFormState
@@ -92,6 +93,10 @@ export default function App() {
   const [searchingMarketFundIndex, setSearchingMarketFundIndex] = useState<number | null>(null);
   const [topicPushConfig, setTopicPushConfig] = useState<TopicPushConfig>(DEFAULT_TOPIC_PUSH_CONFIG);
   const [topicPushState, setTopicPushState] = useState<TopicPushState>(DEFAULT_TOPIC_PUSH_STATE);
+  const [topicPushProfiles, setTopicPushProfiles] = useState<TopicPushProfile[]>([]);
+  const [topicPushActiveProfileId, setTopicPushActiveProfileId] = useState("");
+  const [topicPushSelectedProfileId, setTopicPushSelectedProfileId] = useState("");
+  const [savingTopicPushProfileAction, setSavingTopicPushProfileAction] = useState(false);
   const [savingTopicPushConfig, setSavingTopicPushConfig] = useState(false);
   const [clearingTopicPushState, setClearingTopicPushState] = useState(false);
 
@@ -260,9 +265,21 @@ export default function App() {
   }
 
   async function loadTopicPushConfig(): Promise<void> {
-    const payload = await request<TopicPushConfigPayload>("/admin/api/topic-push/config");
-    setTopicPushConfig(normalizeTopicPushConfig(payload.config ?? DEFAULT_TOPIC_PUSH_CONFIG));
-    setTopicPushState(normalizeTopicPushState(payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
+    const payload = await request<TopicPushProfilesPayload>("/admin/api/topic-push/config");
+    const normalized = normalizeTopicPushProfilesPayload(payload);
+    setTopicPushProfiles(normalized.profiles);
+    setTopicPushActiveProfileId(normalized.activeProfileId);
+
+    const selectedId = normalized.profiles.some((item) => item.id === topicPushSelectedProfileId)
+      ? topicPushSelectedProfileId
+      : normalized.activeProfileId;
+    setTopicPushSelectedProfileId(selectedId);
+
+    const selectedProfile = normalized.profiles.find((item) => item.id === selectedId)
+      ?? normalized.profiles[0]
+      ?? null;
+    setTopicPushConfig(normalizeTopicPushConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_PUSH_CONFIG));
+    setTopicPushState(normalizeTopicPushState(selectedProfile?.state ?? payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
   }
 
   async function loadEvolutionState(options?: { silent?: boolean }): Promise<void> {
@@ -974,6 +991,126 @@ export default function App() {
     }
   }
 
+  function handleTopicProfileSelect(profileId: string): void {
+    const target = topicPushProfiles.find((item) => item.id === profileId);
+    if (!target) {
+      return;
+    }
+    setTopicPushSelectedProfileId(target.id);
+    setTopicPushConfig(normalizeTopicPushConfig(target.config));
+    setTopicPushState(normalizeTopicPushState(target.state));
+  }
+
+  async function handleAddTopicProfile(): Promise<void> {
+    const name = window.prompt("请输入 profile 名称");
+    const normalizedName = String(name ?? "").trim();
+    if (!normalizedName) {
+      return;
+    }
+
+    const rawId = window.prompt("请输入 profile id（可留空自动生成）");
+    const normalizedId = normalizeTopicProfileId(String(rawId ?? "").trim());
+    const cloneFrom = topicPushSelectedProfileId || topicPushActiveProfileId;
+
+    setSavingTopicPushProfileAction(true);
+    try {
+      await request<{ ok: boolean }>("/admin/api/topic-push/profiles", {
+        method: "POST",
+        body: JSON.stringify({
+          name: normalizedName,
+          ...(normalizedId ? { id: normalizedId } : {}),
+          ...(cloneFrom ? { cloneFrom } : {})
+        })
+      });
+      await loadTopicPushConfig();
+      setNotice({ type: "success", title: "Topic Push profile 已创建" });
+    } catch (error) {
+      notifyError("创建 Topic Push profile 失败", error);
+    } finally {
+      setSavingTopicPushProfileAction(false);
+    }
+  }
+
+  async function handleRenameTopicProfile(): Promise<void> {
+    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    if (!selected) {
+      setNotice({ type: "error", title: "请先选择 profile" });
+      return;
+    }
+
+    const name = window.prompt("请输入新的 profile 名称", selected.name);
+    const normalizedName = String(name ?? "").trim();
+    if (!normalizedName || normalizedName === selected.name) {
+      return;
+    }
+
+    setSavingTopicPushProfileAction(true);
+    try {
+      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: normalizedName })
+      });
+      await loadTopicPushConfig();
+      setNotice({ type: "success", title: "Topic Push profile 已重命名" });
+    } catch (error) {
+      notifyError("重命名 Topic Push profile 失败", error);
+    } finally {
+      setSavingTopicPushProfileAction(false);
+    }
+  }
+
+  async function handleUseTopicProfile(): Promise<void> {
+    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    if (!selected) {
+      setNotice({ type: "error", title: "请先选择 profile" });
+      return;
+    }
+    if (selected.id === topicPushActiveProfileId) {
+      return;
+    }
+
+    setSavingTopicPushProfileAction(true);
+    try {
+      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}/use`, {
+        method: "POST",
+        body: "{}"
+      });
+      await loadTopicPushConfig();
+      setNotice({ type: "success", title: "已切换 active profile" });
+    } catch (error) {
+      notifyError("切换 Topic Push profile 失败", error);
+    } finally {
+      setSavingTopicPushProfileAction(false);
+    }
+  }
+
+  async function handleDeleteTopicProfile(): Promise<void> {
+    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    if (!selected) {
+      setNotice({ type: "error", title: "请先选择 profile" });
+      return;
+    }
+
+    const confirmed = window.confirm(`确认删除 profile "${selected.id}" 吗？`);
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingTopicPushProfileAction(true);
+    try {
+      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}`, {
+        method: "DELETE",
+        body: "{}"
+      });
+      await loadTopicPushConfig();
+      setNotice({ type: "success", title: "Topic Push profile 已删除" });
+    } catch (error) {
+      notifyError("删除 Topic Push profile 失败", error);
+    } finally {
+      setSavingTopicPushProfileAction(false);
+    }
+  }
+
   function handleTopicSourceChange(index: number, patch: Partial<TopicPushSource>): void {
     setTopicPushConfig((prev) => {
       const nextSources = prev.sources.map((item, rowIndex) => {
@@ -1017,6 +1154,12 @@ export default function App() {
   }
 
   async function handleSaveTopicPushConfig(): Promise<void> {
+    const profileId = topicPushSelectedProfileId || topicPushActiveProfileId;
+    if (!profileId) {
+      setNotice({ type: "error", title: "请先选择 profile" });
+      return;
+    }
+
     const normalizedConfig = normalizeTopicPushConfig(topicPushConfig);
     const invalid = normalizedConfig.sources.find((item) => !item.id || !item.name || !item.feedUrl);
     if (invalid) {
@@ -1038,6 +1181,7 @@ export default function App() {
       const payload = await request<{ ok: boolean; config: TopicPushConfig }>("/admin/api/topic-push/config", {
         method: "PUT",
         body: JSON.stringify({
+          profileId,
           config: normalizedConfig
         })
       });
@@ -1052,13 +1196,20 @@ export default function App() {
   }
 
   async function handleClearTopicPushState(): Promise<void> {
+    const profileId = topicPushSelectedProfileId || topicPushActiveProfileId;
+    if (!profileId) {
+      setNotice({ type: "error", title: "请先选择 profile" });
+      return;
+    }
+
     setClearingTopicPushState(true);
     try {
       const payload = await request<{ ok: boolean; state: TopicPushState }>("/admin/api/topic-push/state/clear", {
         method: "POST",
-        body: "{}"
+        body: JSON.stringify({ profileId })
       });
       setTopicPushState(normalizeTopicPushState(payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
+      await loadTopicPushConfig();
       setNotice({ type: "success", title: "Topic Push sent log 已清空" });
     } catch (error) {
       notifyError("清空 Topic Push sent log 失败", error);
@@ -1239,10 +1390,19 @@ export default function App() {
 
       {activeMenu === "topic" ? (
         <TopicPushSection
+          topicPushProfiles={topicPushProfiles}
+          topicPushActiveProfileId={topicPushActiveProfileId}
+          topicPushSelectedProfileId={topicPushSelectedProfileId}
           topicPushConfig={topicPushConfig}
           topicPushState={topicPushState}
+          savingTopicPushProfileAction={savingTopicPushProfileAction}
           savingTopicPushConfig={savingTopicPushConfig}
           clearingTopicPushState={clearingTopicPushState}
+          onSelectProfile={handleTopicProfileSelect}
+          onAddProfile={() => void handleAddTopicProfile()}
+          onRenameProfile={() => void handleRenameTopicProfile()}
+          onUseProfile={() => void handleUseTopicProfile()}
+          onDeleteProfile={() => void handleDeleteTopicProfile()}
           onSourceChange={handleTopicSourceChange}
           onAddSource={handleAddTopicSource}
           onRemoveSource={handleRemoveTopicSource}
@@ -1397,10 +1557,10 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
       }
     },
     dailyQuota: {
-      total: clampNumberValue(dailyQuota.total, 10, 1, 40),
-      engineering: clampNumberValue(dailyQuota.engineering, 7, 0, 40),
-      news: clampNumberValue(dailyQuota.news, 2, 0, 40),
-      ecosystem: clampNumberValue(dailyQuota.ecosystem, 1, 0, 40)
+      total: clampNumberValue(dailyQuota.total, fallback.dailyQuota.total, 1, 40),
+      engineering: clampNumberValue(dailyQuota.engineering, fallback.dailyQuota.engineering, 0, 40),
+      news: clampNumberValue(dailyQuota.news, fallback.dailyQuota.news, 0, 40),
+      ecosystem: clampNumberValue(dailyQuota.ecosystem, fallback.dailyQuota.ecosystem, 0, 40)
     }
   };
 }
@@ -1473,6 +1633,69 @@ function normalizeTopicPushState(state: TopicPushState | null | undefined): Topi
     sentLog: sentLog.slice(0, 5000),
     updatedAt: String(source.updatedAt ?? "").trim()
   };
+}
+
+function normalizeTopicPushProfilesPayload(
+  payload: TopicPushProfilesPayload | null | undefined
+): { activeProfileId: string; profiles: TopicPushProfile[] } {
+  const source = payload ?? {
+    activeProfileId: "",
+    profiles: []
+  } as TopicPushProfilesPayload;
+
+  const rawProfiles = Array.isArray(source.profiles) ? source.profiles : [];
+  const profiles: TopicPushProfile[] = [];
+  const idSet = new Set<string>();
+
+  for (let i = 0; i < rawProfiles.length; i += 1) {
+    const item = rawProfiles[i];
+    const normalizedId = normalizeTopicProfileId(String(item?.id ?? ""));
+    const id = normalizedId || `profile-${i + 1}`;
+    if (idSet.has(id)) {
+      continue;
+    }
+    idSet.add(id);
+    profiles.push({
+      id,
+      name: String(item?.name ?? id).trim() || id,
+      isActive: Boolean(item?.isActive),
+      config: normalizeTopicPushConfig(item?.config ?? DEFAULT_TOPIC_PUSH_CONFIG),
+      state: normalizeTopicPushState(item?.state ?? DEFAULT_TOPIC_PUSH_STATE)
+    });
+  }
+
+  if (profiles.length === 0) {
+    const fallbackId = "ai-engineering";
+    profiles.push({
+      id: fallbackId,
+      name: "AI Engineering",
+      isActive: true,
+      config: normalizeTopicPushConfig(source.config ?? DEFAULT_TOPIC_PUSH_CONFIG),
+      state: normalizeTopicPushState(source.state ?? DEFAULT_TOPIC_PUSH_STATE)
+    });
+  }
+
+  const activeFromPayload = normalizeTopicProfileId(String(source.activeProfileId ?? ""));
+  const activeId = profiles.some((item) => item.id === activeFromPayload)
+    ? activeFromPayload
+    : (profiles.find((item) => item.isActive)?.id ?? profiles[0].id);
+
+  return {
+    activeProfileId: activeId,
+    profiles: profiles.map((item) => ({
+      ...item,
+      isActive: item.id === activeId
+    }))
+  };
+}
+
+function normalizeTopicProfileId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function clampNumberValue(raw: unknown, fallback: number, min: number, max: number): number {

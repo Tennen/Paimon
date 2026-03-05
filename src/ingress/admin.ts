@@ -26,10 +26,15 @@ import { EvolutionEngine } from "../integrations/evolution-operator/evolutionEng
 import { EvolutionCodexConfigService } from "../integrations/evolution-operator/codexConfigService";
 import { EvolutionOperatorService } from "../integrations/evolution-operator/service";
 import {
+  addTopicPushProfile,
   clearTopicPushSentLog,
+  deleteTopicPushProfile,
   getTopicPushConfig,
+  getTopicPushSnapshot,
   getTopicPushState,
-  setTopicPushConfig
+  setTopicPushConfig,
+  updateTopicPushProfile,
+  useTopicPushProfile
 } from "../integrations/topic-push/service";
 
 const execAsync = promisify(exec);
@@ -113,6 +118,16 @@ type RunMarketOncePayload = {
 type RunMarketOncePayloadParseResult =
   | { payload: RunMarketOncePayload; error?: undefined }
   | { payload?: undefined; error: string };
+
+type TopicPushProfileCreatePayload = {
+  name: string;
+  id?: string;
+  cloneFrom?: string;
+};
+
+type TopicPushProfileUpdatePayload = {
+  name: string;
+};
 
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
@@ -799,9 +814,13 @@ export class AdminIngressAdapter implements IngressAdapter {
     });
 
     app.get("/admin/api/topic-push/config", (_req: Request, res: ExResponse) => {
-      const config = getTopicPushConfig();
-      const state = getTopicPushState();
+      const snapshot = getTopicPushSnapshot();
+      const activeProfileId = snapshot.activeProfileId;
+      const config = getTopicPushConfig(activeProfileId);
+      const state = getTopicPushState(activeProfileId);
       res.json({
+        activeProfileId,
+        profiles: snapshot.profiles,
         config,
         state,
         configStore: describeStore(TOPIC_PUSH_CONFIG_STORE),
@@ -817,6 +836,8 @@ export class AdminIngressAdapter implements IngressAdapter {
 
       const body = req.body as Record<string, unknown>;
       const payload = "config" in body ? body.config : req.body;
+      const profileIdRaw = typeof body.profileId === "string" ? body.profileId.trim() : "";
+      const profileId = profileIdRaw || undefined;
 
       if (!payload || typeof payload !== "object") {
         res.status(400).json({ error: "missing topic-push config payload" });
@@ -824,10 +845,13 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
 
       try {
-        const config = setTopicPushConfig(payload);
+        const config = setTopicPushConfig(payload, profileId);
+        const snapshot = getTopicPushSnapshot();
         res.json({
           ok: true,
-          config
+          profileId: profileId ?? snapshot.activeProfileId,
+          config,
+          snapshot
         });
       } catch (error) {
         res.status(400).json({
@@ -837,17 +861,108 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
-    app.post("/admin/api/topic-push/state/clear", (_req: Request, res: ExResponse) => {
+    app.post("/admin/api/topic-push/state/clear", (req: Request, res: ExResponse) => {
+      const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
+      const profileIdRaw = typeof body.profileId === "string" ? body.profileId.trim() : "";
+      const profileId = profileIdRaw || undefined;
       try {
-        const state = clearTopicPushSentLog();
+        const state = clearTopicPushSentLog(profileId);
+        const snapshot = getTopicPushSnapshot();
         res.json({
           ok: true,
-          state
+          profileId: profileId ?? snapshot.activeProfileId,
+          state,
+          snapshot
         });
       } catch (error) {
         res.status(500).json({
           ok: false,
           error: (error as Error).message ?? "failed to clear topic-push state"
+        });
+      }
+    });
+
+    app.post("/admin/api/topic-push/profiles", (req: Request, res: ExResponse) => {
+      const payload = parseTopicPushProfileCreatePayload(req.body);
+      if (!payload) {
+        res.status(400).json({ error: "invalid topic-push profile create payload" });
+        return;
+      }
+
+      try {
+        const snapshot = addTopicPushProfile(payload);
+        res.json({
+          ok: true,
+          snapshot
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to add topic-push profile"
+        });
+      }
+    });
+
+    app.put("/admin/api/topic-push/profiles/:id", (req: Request, res: ExResponse) => {
+      const id = String(req.params.id ?? "").trim();
+      const payload = parseTopicPushProfileUpdatePayload(req.body);
+      if (!id || !payload) {
+        res.status(400).json({ error: "invalid topic-push profile update payload" });
+        return;
+      }
+
+      try {
+        const snapshot = updateTopicPushProfile(id, payload);
+        res.json({
+          ok: true,
+          snapshot
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to update topic-push profile"
+        });
+      }
+    });
+
+    app.post("/admin/api/topic-push/profiles/:id/use", (req: Request, res: ExResponse) => {
+      const id = String(req.params.id ?? "").trim();
+      if (!id) {
+        res.status(400).json({ error: "invalid topic-push profile id" });
+        return;
+      }
+
+      try {
+        const snapshot = useTopicPushProfile(id);
+        res.json({
+          ok: true,
+          snapshot
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to switch topic-push profile"
+        });
+      }
+    });
+
+    app.delete("/admin/api/topic-push/profiles/:id", (req: Request, res: ExResponse) => {
+      const id = String(req.params.id ?? "").trim();
+      if (!id) {
+        res.status(400).json({ error: "invalid topic-push profile id" });
+        return;
+      }
+
+      try {
+        const snapshot = deleteTopicPushProfile(id);
+        res.json({
+          ok: true,
+          snapshot
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to delete topic-push profile"
         });
       }
     });
@@ -1079,6 +1194,37 @@ function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayloadParseR
   }
 
   return { payload: { userId, phase } };
+}
+
+function parseTopicPushProfileCreatePayload(rawBody: unknown): TopicPushProfileCreatePayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+  const body = rawBody as Record<string, unknown>;
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) {
+    return null;
+  }
+
+  const id = typeof body.id === "string" ? body.id.trim() : "";
+  const cloneFrom = typeof body.cloneFrom === "string" ? body.cloneFrom.trim() : "";
+  return {
+    name,
+    ...(id ? { id } : {}),
+    ...(cloneFrom ? { cloneFrom } : {})
+  };
+}
+
+function parseTopicPushProfileUpdatePayload(rawBody: unknown): TopicPushProfileUpdatePayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+  const body = rawBody as Record<string, unknown>;
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) {
+    return null;
+  }
+  return { name };
 }
 
 function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarketTasksPayload): ScheduledTask[] {

@@ -67,6 +67,29 @@ export type TopicPushState = {
   updatedAt: string;
 };
 
+export type TopicPushProfileSnapshot = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  config: TopicPushConfig;
+  state: TopicPushState;
+};
+
+export type TopicPushSnapshot = {
+  activeProfileId: string;
+  profiles: TopicPushProfileSnapshot[];
+};
+
+export type TopicPushProfileCreateInput = {
+  id?: string;
+  name: string;
+  cloneFrom?: string;
+};
+
+export type TopicPushProfileUpdateInput = {
+  name?: string;
+};
+
 type TopicPushProfileConfig = {
   id: string;
   name: string;
@@ -593,37 +616,87 @@ export async function execute(
   }
 }
 
-export function getTopicPushConfig(): TopicPushConfig {
+export function getTopicPushConfig(profileId?: string): TopicPushConfig {
   ensureTopicPushStorage();
-  return readConfig();
+  return readConfig(profileId);
 }
 
-export function setTopicPushConfig(input: unknown): TopicPushConfig {
+export function setTopicPushConfig(input: unknown, profileId?: string): TopicPushConfig {
   ensureTopicPushStorage();
   const config = normalizeConfig(input);
-  writeConfig(config);
+  writeConfig(config, profileId);
   return config;
 }
 
-export function getTopicPushState(): TopicPushState {
+export function getTopicPushState(profileId?: string): TopicPushState {
   ensureTopicPushStorage();
-  return readState();
+  return readState(profileId);
 }
 
-export function clearTopicPushSentLog(): TopicPushState {
+export function clearTopicPushSentLog(profileId?: string): TopicPushState {
   ensureTopicPushStorage();
   const next: TopicPushState = {
     version: 1,
     sentLog: [],
     updatedAt: new Date().toISOString()
   };
-  writeState(next);
+  writeState(next, profileId);
   return next;
+}
+
+export function getTopicPushSnapshot(): TopicPushSnapshot {
+  ensureTopicPushStorage();
+  return buildTopicPushSnapshot();
+}
+
+export function addTopicPushProfile(input: TopicPushProfileCreateInput): TopicPushSnapshot {
+  ensureTopicPushStorage();
+  handleAddProfile(input);
+  return buildTopicPushSnapshot();
+}
+
+export function updateTopicPushProfile(id: string, patch: TopicPushProfileUpdateInput): TopicPushSnapshot {
+  ensureTopicPushStorage();
+  handleUpdateProfile(id, patch);
+  return buildTopicPushSnapshot();
+}
+
+export function useTopicPushProfile(id: string): TopicPushSnapshot {
+  ensureTopicPushStorage();
+  handleUseProfile(id);
+  return buildTopicPushSnapshot();
+}
+
+export function deleteTopicPushProfile(id: string): TopicPushSnapshot {
+  ensureTopicPushStorage();
+  handleDeleteProfile(id);
+  return buildTopicPushSnapshot();
 }
 
 function ensureTopicPushStorage(): void {
   registerStore(TOPIC_PUSH_CONFIG_STORE, () => DEFAULT_CONFIG_STORE);
   registerStore(TOPIC_PUSH_STATE_STORE, () => DEFAULT_STATE_STORE);
+}
+
+function buildTopicPushSnapshot(): TopicPushSnapshot {
+  const configStore = readConfigStore();
+  const stateStore = readStateStore();
+
+  const profiles = configStore.profiles.map((profile) => {
+    const state = stateStore.profiles.find((item) => item.id === profile.id)?.state ?? cloneDefaultState();
+    return {
+      id: profile.id,
+      name: profile.name,
+      isActive: profile.id === configStore.activeProfileId,
+      config: normalizeConfig(profile.config),
+      state: normalizeState(state)
+    };
+  });
+
+  return {
+    activeProfileId: configStore.activeProfileId,
+    profiles
+  };
 }
 
 function readConfig(profileId?: string): TopicPushConfig {

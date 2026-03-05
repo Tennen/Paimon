@@ -207,7 +207,17 @@ export type TopicPushState = {
   updatedAt: string;
 };
 
-export type TopicPushConfigPayload = {
+export type TopicPushProfile = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  config: TopicPushConfig;
+  state: TopicPushState;
+};
+
+export type TopicPushProfilesPayload = {
+  activeProfileId: string;
+  profiles: TopicPushProfile[];
   config: TopicPushConfig;
   state: TopicPushState;
   configStore: DataStoreDescriptor;
@@ -396,10 +406,10 @@ export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
     }
   },
   dailyQuota: {
-    total: 10,
-    engineering: 7,
-    news: 2,
-    ecosystem: 1
+    total: 20,
+    engineering: 12,
+    news: 5,
+    ecosystem: 3
   }
 };
 

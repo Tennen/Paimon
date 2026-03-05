@@ -29,15 +29,25 @@ import { formatDateTime } from "@/lib/adminFormat";
 import {
   TopicPushCategory,
   TopicPushConfig,
+  TopicPushProfile,
   TopicPushSource,
   TopicPushState
 } from "@/types/admin";
 
 type TopicPushSectionProps = {
+  topicPushProfiles: TopicPushProfile[];
+  topicPushActiveProfileId: string;
+  topicPushSelectedProfileId: string;
   topicPushConfig: TopicPushConfig;
   topicPushState: TopicPushState;
+  savingTopicPushProfileAction: boolean;
   savingTopicPushConfig: boolean;
   clearingTopicPushState: boolean;
+  onSelectProfile: (id: string) => void;
+  onAddProfile: () => void;
+  onRenameProfile: () => void;
+  onUseProfile: () => void;
+  onDeleteProfile: () => void;
   onSourceChange: (index: number, patch: Partial<TopicPushSource>) => void;
   onAddSource: () => void;
   onRemoveSource: (index: number) => void;
@@ -54,6 +64,7 @@ const CATEGORY_OPTIONS: Array<{ value: TopicPushCategory; label: string }> = [
 
 export function TopicPushSection(props: TopicPushSectionProps) {
   const enabledCount = props.topicPushConfig.sources.filter((item) => item.enabled).length;
+  const selectedProfile = props.topicPushProfiles.find((item) => item.id === props.topicPushSelectedProfileId) ?? null;
 
   return (
     <Card>
@@ -62,6 +73,55 @@ export function TopicPushSection(props: TopicPushSectionProps) {
         <CardDescription>配置 RSS 源并管理去重推送状态（定时任务消息建议填写 /topic run）</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>Profile</Label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Select value={props.topicPushSelectedProfileId} onValueChange={props.onSelectProfile}>
+              <SelectTrigger className="w-[320px]">
+                <SelectValue placeholder="选择 profile" />
+              </SelectTrigger>
+              <SelectContent>
+                {props.topicPushProfiles.length === 0 ? (
+                  <SelectItem value="__empty__" disabled>
+                    (empty)
+                  </SelectItem>
+                ) : (
+                  props.topicPushProfiles.map((profile) => (
+                    <SelectItem key={profile.id} value={profile.id}>
+                      {profile.id}{profile.isActive ? " (active)" : ""} - {profile.name}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <Button type="button" variant="outline" disabled={props.savingTopicPushProfileAction} onClick={props.onAddProfile}>
+              新增 profile
+            </Button>
+            <Button type="button" variant="outline" disabled={props.savingTopicPushProfileAction || !selectedProfile} onClick={props.onRenameProfile}>
+              重命名
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={props.savingTopicPushProfileAction || !selectedProfile || selectedProfile.id === props.topicPushActiveProfileId}
+              onClick={props.onUseProfile}
+            >
+              设为 active
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={props.savingTopicPushProfileAction || !selectedProfile || props.topicPushProfiles.length <= 1}
+              onClick={props.onDeleteProfile}
+            >
+              删除 profile
+            </Button>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            active_profile: {props.topicPushActiveProfileId || "-"} | 当前编辑: {selectedProfile ? `${selectedProfile.id} (${selectedProfile.name})` : "-"}
+          </div>
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1.5">
             <Label>配额</Label>
