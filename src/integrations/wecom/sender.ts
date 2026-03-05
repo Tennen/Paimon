@@ -1,4 +1,3 @@
-import { URLSearchParams } from "url";
 import { fetch } from "undici";
 import { Response } from "../../types";
 
@@ -21,6 +20,9 @@ type TokenResponse = {
   errcode?: number;
   errmsg?: string;
 };
+
+const WECOM_TEXT_MAX_BYTES = normalizePositiveInteger(process.env.WECOM_TEXT_MAX_BYTES, 1800);
+const UTF8_ENCODER = new TextEncoder();
 
 export class WeComSender {
   private readonly config: WeComSenderConfig;
@@ -140,7 +142,10 @@ export class WeComSender {
 
   async sendResponse(toUser: string, response: Response): Promise<void> {
     if (response.text) {
-      await this.sendText(toUser, response.text);
+      const chunks = splitTextByUtf8Bytes(response.text, WECOM_TEXT_MAX_BYTES);
+      for (const chunk of chunks) {
+        await this.sendText(toUser, chunk);
+      }
     }
 
     const images = collectResponseImages(response);
@@ -181,6 +186,108 @@ export class WeComSender {
     this.tokenCache = { value: data.access_token, expiresAt: now + ttlMs };
     return data.access_token;
   }
+}
+
+function splitTextByUtf8Bytes(content: string, maxBytes: number): string[] {
+  const text = String(content ?? "").trim();
+  if (!text) {
+    return [];
+  }
+
+  if (getUtf8Bytes(text) <= maxBytes) {
+    return [text];
+  }
+
+  const lines = text.split(/\r?\n/);
+  const chunks: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    const normalized = current.trim();
+    if (normalized) {
+      chunks.push(normalized);
+    }
+    current = "";
+  };
+
+  const appendPart = (part: string) => {
+    if (!part) {
+      return;
+    }
+    const candidate = current ? `${current}\n${part}` : part;
+    if (getUtf8Bytes(candidate) <= maxBytes) {
+      current = candidate;
+      return;
+    }
+
+    if (current) {
+      pushCurrent();
+    }
+
+    if (getUtf8Bytes(part) <= maxBytes) {
+      current = part;
+      return;
+    }
+
+    const hardChunks = splitHardByUtf8Bytes(part, maxBytes);
+    for (let i = 0; i < hardChunks.length; i += 1) {
+      const hardChunk = hardChunks[i];
+      if (i === hardChunks.length - 1) {
+        current = hardChunk;
+      } else {
+        chunks.push(hardChunk);
+      }
+    }
+  };
+
+  for (const line of lines) {
+    appendPart(line);
+  }
+  if (current) {
+    pushCurrent();
+  }
+
+  return chunks.length > 0 ? chunks : [text];
+}
+
+function splitHardByUtf8Bytes(text: string, maxBytes: number): string[] {
+  const out: string[] = [];
+  let current = "";
+
+  for (const ch of text) {
+    const next = current + ch;
+    if (getUtf8Bytes(next) <= maxBytes) {
+      current = next;
+      continue;
+    }
+
+    if (current) {
+      out.push(current);
+    }
+    current = ch;
+
+    if (getUtf8Bytes(current) > maxBytes) {
+      out.push(current);
+      current = "";
+    }
+  }
+
+  if (current) {
+    out.push(current);
+  }
+  return out;
+}
+
+function getUtf8Bytes(text: string): number {
+  return UTF8_ENCODER.encode(text).length;
+}
+
+function normalizePositiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+  return Math.floor(value);
 }
 
 function collectResponseImages(response: Response): Array<{ data: string; filename?: string; contentType?: string }> {

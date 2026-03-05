@@ -9,7 +9,15 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
   registry.register(
     {
       name: "skill.topic-push",
-      execute: (op, args) => executeInputTool(op, args, async (input) => executeTopicPush(input))
+      execute: (op, args, context) =>
+        executeInputTool(
+          op,
+          args,
+          async (input) =>
+            executeTopicPush(input, {
+              targetLanguage: detectUserLanguage(input, context)
+            })
+        )
     },
     {
       name: "skill.topic-push",
@@ -83,4 +91,44 @@ function registerDirectCommands(
       acceptedDelayMs: route.acceptedDelayMs
     });
   }
+}
+
+function detectUserLanguage(input: string, context: Record<string, unknown>): string {
+  const explicit = readExplicitLanguageFlag(input);
+  if (explicit) {
+    return explicit;
+  }
+
+  const memory = typeof context.memory === "string" ? context.memory : "";
+  const sample = `${input}\n${memory.slice(-4000)}`;
+  const zhCount = (sample.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const enCount = (sample.match(/[a-zA-Z]/g) ?? []).length;
+
+  if (zhCount > 0 && zhCount * 2 >= enCount) {
+    return "zh-CN";
+  }
+  if (enCount > 0) {
+    return "en";
+  }
+  return "zh-CN";
+}
+
+function readExplicitLanguageFlag(input: string): string | null {
+  const text = String(input ?? "");
+  const match = text.match(/--(?:lang|language)\s+([a-zA-Z-]+)/i)
+    ?? text.match(/--(?:lang|language)=([a-zA-Z-]+)/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  const raw = match[1].trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  if (raw.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (raw.startsWith("en")) {
+    return "en";
+  }
+  return raw;
 }

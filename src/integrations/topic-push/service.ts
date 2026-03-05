@@ -120,9 +120,16 @@ type Candidate = {
   domain: string;
 };
 
+type TopicDigestItemType = "news" | "deep_read";
+
+export type TopicPushExecuteOptions = {
+  targetLanguage?: string;
+};
+
 type SelectedItem = {
   candidate: Candidate;
-  whyItMatters: string;
+  digestType: TopicDigestItemType;
+  digestSummary: string;
   rank: number;
   fallbackFill: boolean;
 };
@@ -196,8 +203,9 @@ type DigestRunResult = {
 
 type PlanningDigestItemPatch = {
   id: string;
-  titleCn?: string;
-  whyCn?: string;
+  titleLocalized?: string;
+  digestType?: TopicDigestItemType;
+  digestSummary?: string;
   topicTags?: TopicKey[];
 };
 
@@ -241,6 +249,13 @@ const SENT_LOG_MAX_ITEMS = 5000;
 const FEED_FETCH_TIMEOUT_MS = 12000;
 const DEFAULT_PROFILE_ID = "ai-engineering";
 const DEFAULT_PROFILE_NAME = "AI Engineering";
+const LEGACY_DAILY_QUOTA = {
+  total: 10,
+  engineering: 7,
+  news: 2,
+  ecosystem: 1
+} as const;
+const DEFAULT_TARGET_LANGUAGE = "zh-CN";
 
 const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
 const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
@@ -466,10 +481,10 @@ const DEFAULT_CONFIG: TopicPushConfig = {
     }
   },
   dailyQuota: {
-    total: 10,
-    engineering: 7,
-    news: 2,
-    ecosystem: 1
+    total: 20,
+    engineering: 12,
+    news: 5,
+    ecosystem: 3
   }
 };
 
@@ -501,10 +516,14 @@ const DEFAULT_STATE_STORE: TopicPushStateStore = {
   ]
 };
 
-export async function execute(input: string): Promise<{ text: string; result?: unknown }> {
+export async function execute(
+  input: string,
+  options?: TopicPushExecuteOptions
+): Promise<{ text: string; result?: unknown }> {
   try {
     ensureTopicPushStorage();
     const command = parseCommand(input);
+    const targetLanguage = normalizeDigestLanguage(options?.targetLanguage);
 
     switch (command.kind) {
       case "help":
@@ -544,11 +563,11 @@ export async function execute(input: string): Promise<{ text: string; result?: u
         const config = readConfig(command.profileId);
         const state = readState(command.profileId);
         const profile = getProfileMeta(command.profileId);
-        const run = await runDigest(config, state, now);
+        const run = await runDigest(config, state, now, targetLanguage);
         const nextState = mergeSentLog(state, run.selected, now);
         writeState(nextState, profile.id);
         return {
-          text: formatDigest(run, profile),
+          text: formatDigest(run, profile, targetLanguage),
           result: {
             profileId: profile.id,
             profileName: profile.name,
@@ -698,7 +717,12 @@ function getProfileMeta(profileId?: string): {
   };
 }
 
-async function runDigest(config: TopicPushConfig, state: TopicPushState, now: Date): Promise<DigestRunResult> {
+async function runDigest(
+  config: TopicPushConfig,
+  state: TopicPushState,
+  now: Date,
+  targetLanguage: string
+): Promise<DigestRunResult> {
   const enabledSources = config.sources.filter((source) => source.enabled);
   if (enabledSources.length === 0) {
     throw new Error("No enabled RSS source, use /topic source add or enable first");
@@ -713,14 +737,15 @@ async function runDigest(config: TopicPushConfig, state: TopicPushState, now: Da
   const sentSet = new Set(state.sentLog.map((entry) => entry.urlNormalized));
   const unsent = deduped.filter((item) => !sentSet.has(item.urlNormalized));
 
-  const selectedRaw = selectCandidates(unsent, config.dailyQuota, config.filters.maxPerDomain)
+  const selectedRaw: SelectedItem[] = selectCandidates(unsent, config.dailyQuota, config.filters.maxPerDomain)
     .map((item, index) => ({
       ...item,
       rank: index + 1,
-      whyItMatters: buildWhyItMatters(item.candidate)
+      digestType: getDefaultDigestType(item.candidate),
+      digestSummary: buildDigestSummary(item.candidate)
     }));
 
-  const selected = await refineSelectedItemsWithPlanningModel(selectedRaw);
+  const selected = await refineSelectedItemsWithPlanningModel(selectedRaw, targetLanguage);
 
   const selectedByCategory = {
     engineering: selected.filter((item) => item.candidate.category === "engineering").length,
@@ -1000,13 +1025,37 @@ function selectCandidates(candidates: Candidate[], quota: TopicPushDailyQuota, m
 
   const used = new Set<string>();
   const domainCounter = new Map<string, number>();
-  const selected: Array<Omit<SelectedItem, "rank" | "whyItMatters">> = [];
+  const selected: Array<Omit<SelectedItem, "rank" | "digestType" | "digestSummary">> = [];
 
-  pickFromBucket(buckets.engineering, normalizeQuotaNumber(quota.engineering, 7), false, selected, used, domainCounter, maxDomain);
-  pickFromBucket(buckets.news, normalizeQuotaNumber(quota.news, 2), false, selected, used, domainCounter, maxDomain);
-  pickFromBucket(buckets.ecosystem, normalizeQuotaNumber(quota.ecosystem, 1), false, selected, used, domainCounter, maxDomain);
+  pickFromBucket(
+    buckets.engineering,
+    normalizeQuotaNumber(quota.engineering, DEFAULT_CONFIG.dailyQuota.engineering),
+    false,
+    selected,
+    used,
+    domainCounter,
+    maxDomain
+  );
+  pickFromBucket(
+    buckets.news,
+    normalizeQuotaNumber(quota.news, DEFAULT_CONFIG.dailyQuota.news),
+    false,
+    selected,
+    used,
+    domainCounter,
+    maxDomain
+  );
+  pickFromBucket(
+    buckets.ecosystem,
+    normalizeQuotaNumber(quota.ecosystem, DEFAULT_CONFIG.dailyQuota.ecosystem),
+    false,
+    selected,
+    used,
+    domainCounter,
+    maxDomain
+  );
 
-  const total = normalizeQuotaNumber(quota.total, 10);
+  const total = normalizeQuotaNumber(quota.total, DEFAULT_CONFIG.dailyQuota.total);
   let needed = Math.max(0, total - selected.length);
 
   if (needed > 0) {
@@ -1031,7 +1080,8 @@ function selectCandidates(candidates: Candidate[], quota: TopicPushDailyQuota, m
     .map((item) => ({
       ...item,
       rank: 0,
-      whyItMatters: ""
+      digestType: getDefaultDigestType(item.candidate),
+      digestSummary: ""
     }));
 }
 
@@ -1039,7 +1089,7 @@ function pickFromBucket(
   bucket: Candidate[],
   count: number,
   fallbackFill: boolean,
-  selected: Array<Omit<SelectedItem, "rank" | "whyItMatters">>,
+  selected: Array<Omit<SelectedItem, "rank" | "digestType" | "digestSummary">>,
   used: Set<string>,
   domainCounter: Map<string, number>,
   maxPerDomain: number
@@ -1075,7 +1125,10 @@ function pickFromBucket(
   }
 }
 
-async function refineSelectedItemsWithPlanningModel(selected: SelectedItem[]): Promise<SelectedItem[]> {
+async function refineSelectedItemsWithPlanningModel(
+  selected: SelectedItem[],
+  targetLanguage: string
+): Promise<SelectedItem[]> {
   if (selected.length === 0) {
     return selected;
   }
@@ -1085,7 +1138,7 @@ async function refineSelectedItemsWithPlanningModel(selected: SelectedItem[]): P
   }
 
   try {
-    const patches = await generatePlanningDigestPatchMap(selected);
+    const patches = await generatePlanningDigestPatchMap(selected, targetLanguage);
     if (patches.size === 0) {
       return selected;
     }
@@ -1099,15 +1152,20 @@ async function refineSelectedItemsWithPlanningModel(selected: SelectedItem[]): P
       const nextTags = Array.isArray(patch.topicTags) && patch.topicTags.length > 0
         ? patch.topicTags
         : item.candidate.topicTags;
+      const digestType = patch.digestType ?? item.digestType;
+      const digestSummary = digestType === "deep_read"
+        ? (patch.digestSummary || item.digestSummary || buildDigestSummary(item.candidate))
+        : "";
 
       return {
         ...item,
         candidate: {
           ...item.candidate,
-          ...(patch.titleCn ? { title: patch.titleCn } : {}),
+          ...(patch.titleLocalized ? { title: patch.titleLocalized } : {}),
           topicTags: nextTags
         },
-        ...(patch.whyCn ? { whyItMatters: patch.whyCn } : {})
+        digestType,
+        digestSummary
       };
     });
   } catch (error) {
@@ -1116,7 +1174,10 @@ async function refineSelectedItemsWithPlanningModel(selected: SelectedItem[]): P
   }
 }
 
-async function generatePlanningDigestPatchMap(selected: SelectedItem[]): Promise<Map<string, PlanningDigestItemPatch>> {
+async function generatePlanningDigestPatchMap(
+  selected: SelectedItem[],
+  targetLanguage: string
+): Promise<Map<string, PlanningDigestItemPatch>> {
   const input = selected.map((item) => ({
     id: item.candidate.id,
     title: item.candidate.title,
@@ -1125,25 +1186,32 @@ async function generatePlanningDigestPatchMap(selected: SelectedItem[]): Promise
     published_at: item.candidate.publishedAt ?? "",
     topic_tags: item.candidate.topicTags,
     summary: item.candidate.summary,
-    why_draft: item.whyItMatters,
+    digest_type: item.digestType,
+    digest_summary: item.digestSummary,
     url: item.candidate.url
   }));
 
+  const languageLabel = formatDigestLanguageLabel(targetLanguage);
   const systemPrompt = [
-    "你是 AI 工程日报编辑。",
-    "任务：基于输入条目做中文整合与翻译，输出给工程读者。",
-    "要求：",
-    "1) title_cn: 生成简洁中文标题，保留必要英文专有名词（如产品名/模型名），不要出现 “Show HN:” 前缀。",
-    "2) why_cn: 生成 1 句话，强调工程价值与可复用点，长度 30-80 字。",
-    "3) topic_tags: 可选修正标签，但只能从 llm_apps/agents/multimodal/reasoning/rag/eval/on_device/safety 里选。",
-    "4) 不要输出链接，不要输出 'Article URL'，不要编造输入中不存在的信息。",
-    "输出必须是 JSON：",
-    "{\"items\":[{\"id\":\"...\",\"title_cn\":\"...\",\"why_cn\":\"...\",\"topic_tags\":[\"agents\"]}]}"
+    "You are an AI engineering digest editor.",
+    `Translate all user-facing text to ${languageLabel}.`,
+    "Task: For each item, produce a clean localized headline and classify it.",
+    "Rules:",
+    "1) title_localized: concise headline in target language. Keep proper nouns (product/model/company) when needed.",
+    "2) Remove noisy prefixes/tokens in title: [ecosystem], [engineering], [news], [source:], source:, Show HN:.",
+    "3) digest_type: must be one of news or deep_read.",
+    "4) If digest_type=news: this is one-line quick news, keep brief_summary empty.",
+    "5) If digest_type=deep_read: this is recommended deep reading, provide brief_summary in 1 concise sentence (<=80 Chinese chars or <=40 English words).",
+    "6) topic_tags may be corrected but must be selected from llm_apps/agents/multimodal/reasoning/rag/eval/on_device/safety.",
+    "7) Do not output links. Do not output markdown. Do not invent facts.",
+    "Output strict JSON only:",
+    "{\"items\":[{\"id\":\"...\",\"title_localized\":\"...\",\"digest_type\":\"news|deep_read\",\"brief_summary\":\"...\",\"topic_tags\":[\"agents\"]}]}"
   ].join("\n");
 
   const userPrompt = JSON.stringify(
     {
-      task: "将以下条目翻译并整合为中文日报文案",
+      task: "localize + classify digest items",
+      target_language: targetLanguage,
       items: input
     },
     null,
@@ -1219,16 +1287,35 @@ function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestIte
       continue;
     }
 
-    const titleCn = sanitizePlanningText(row.title_cn ?? row.titleCn ?? row.title, 160);
-    const whyCn = sanitizePlanningText(row.why_cn ?? row.whyCn ?? row.why, 160);
+    const titleLocalized = sanitizeDigestTitle(
+      row.title_localized ?? row.titleLocalized ?? row.title_cn ?? row.titleCn ?? row.title,
+      160
+    );
+    const digestType = normalizeDigestType(
+      row.digest_type ?? row.digestType ?? row.type ?? row.classification ?? row.item_type
+    );
+    const digestSummary = sanitizeDigestSummary(
+      row.brief_summary
+      ?? row.briefSummary
+      ?? row.summary_short
+      ?? row.digest_summary
+      ?? row.summary
+      ?? row.why_cn
+      ?? row.whyCn
+      ?? row.why,
+      160
+    );
     const topicTags = toArray(row.topic_tags ?? row.topicTags)
       .map((item) => normalizeTopicKey(item))
       .filter((item): item is TopicKey => Boolean(item));
 
     patches.set(id, {
       id,
-      ...(titleCn ? { titleCn } : {}),
-      ...(whyCn ? { whyCn } : {}),
+      ...(titleLocalized ? { titleLocalized } : {}),
+      ...(digestType ? { digestType } : {}),
+      ...((digestType === "deep_read" || (!digestType && digestSummary)) && digestSummary
+        ? { digestSummary }
+        : {}),
       ...(topicTags.length > 0 ? { topicTags } : {})
     });
   }
@@ -1239,11 +1326,43 @@ function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestIte
 function sanitizePlanningText(value: unknown, maxLength: number): string {
   const text = normalizeText(value)
     .replace(/article\s*url\s*:\s*https?:\/\/\S+/gi, " ")
+    .replace(/source\s*url\s*:\s*https?:\/\/\S+/gi, " ")
     .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/\[(?:source|ecosystem|engineering|news)\s*:?\]/gi, " ")
     .replace(/\s+/g, " ")
     .replace(/^[-*]\s*/g, "")
     .trim();
   return clampText(text, maxLength);
+}
+
+function sanitizeDigestTitle(value: unknown, maxLength: number): string {
+  const text = sanitizePlanningText(value, maxLength)
+    .replace(/^show\s*hn\s*:\s*/i, "")
+    .replace(/^source\s*:\s*/i, "")
+    .replace(/^\[(?:source|ecosystem|engineering|news)\s*:?\]\s*/i, "")
+    .trim();
+  return clampText(text, maxLength);
+}
+
+function sanitizeDigestSummary(value: unknown, maxLength: number): string {
+  const text = sanitizePlanningText(value, maxLength)
+    .replace(/^(?:why|summary|brief)\s*:\s*/i, "")
+    .trim();
+  return clampText(text, maxLength);
+}
+
+function normalizeDigestType(raw: unknown): TopicDigestItemType | null {
+  const value = normalizeText(raw).toLowerCase().replace(/[\s-]+/g, "_");
+  if (!value) {
+    return null;
+  }
+  if (["news", "brief", "brief_news", "quick_news", "one_line_news"].includes(value)) {
+    return "news";
+  }
+  if (["deep_read", "deepread", "deep", "recommended", "recommendation", "long_read", "analysis"].includes(value)) {
+    return "deep_read";
+  }
+  return null;
 }
 
 function parseJsonLike(raw: string): unknown {
@@ -1334,24 +1453,42 @@ function parsePositiveInteger(raw: unknown, fallback: number): number {
   return Math.floor(value);
 }
 
-function buildWhyItMatters(candidate: Candidate): string {
+function normalizeDigestLanguage(raw: unknown): string {
+  const envLanguage = normalizeText(process.env.TOPIC_PUSH_DEFAULT_LANGUAGE).toLowerCase();
+  const fallback = envLanguage || DEFAULT_TARGET_LANGUAGE;
+  const value = normalizeText(raw).toLowerCase() || fallback;
+
+  if (value.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (value.startsWith("en")) {
+    return "en";
+  }
+  return value.slice(0, 24);
+}
+
+function formatDigestLanguageLabel(language: string): string {
+  const value = normalizeDigestLanguage(language);
+  if (value === "zh-CN") {
+    return "Simplified Chinese";
+  }
+  if (value === "en") {
+    return "English";
+  }
+  return value;
+}
+
+function buildDigestSummary(candidate: Candidate): string {
   const summarySentence = firstSentence(candidate.summary);
   if (summarySentence) {
     return summarySentence;
   }
 
-  if (candidate.topicTags.length > 0) {
-    const tags = candidate.topicTags.join("/");
-    return `与 ${tags} 相关，偏向可复用的工程实践或生态变化。`;
-  }
+  return "";
+}
 
-  if (candidate.category === "engineering") {
-    return "工程实践向信息，可能包含实现细节、性能数据或上线经验。";
-  }
-  if (candidate.category === "news") {
-    return "行业动态向更新，可用于跟踪公司策略与产品节奏。";
-  }
-  return "生态工具向变化，适合追踪框架、工具链与社区趋势。";
+function getDefaultDigestType(candidate: Candidate): TopicDigestItemType {
+  return candidate.category === "news" ? "news" : "deep_read";
 }
 
 function mergeSentLog(state: TopicPushState, selected: SelectedItem[], now: Date): TopicPushState {
@@ -2023,23 +2160,28 @@ function formatState(state: TopicPushState, profileId?: string): string {
   ].join("\n");
 }
 
-function formatDigest(run: DigestRunResult, profile: { id: string; name: string }): string {
+function formatDigest(run: DigestRunResult, profile: { id: string; name: string }, targetLanguage: string): string {
+  const language = normalizeDigestLanguage(targetLanguage);
+  const summaryLabel = language === "en" ? "Summary" : "简述";
+  const emptyText = language === "en"
+    ? "No new items were selected today. Use /topic source list to check sources, or /topic state clear to reset dedup history."
+    : "今天没有筛出新的可推送条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。";
   const lines: string[] = [];
   lines.push(`${profile.name} Daily Digest (${formatLocalDate(run.now)})`);
 
   if (run.selected.length === 0) {
-    lines.push("\n今天没有筛出新的可推送条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。");
+    lines.push(`\n${emptyText}`);
     return lines.join("\n");
   }
 
   for (const item of run.selected) {
-    const tagsText = item.candidate.topicTags.length > 0 ? item.candidate.topicTags.join(",") : "-";
-    const published = item.candidate.publishedAt ? formatLocalTime(item.candidate.publishedAt) : "unknown";
+    const cleanTitle = sanitizeDigestTitle(item.candidate.title, 180) || item.candidate.title;
     lines.push("");
-    lines.push(`${item.rank}. [${item.candidate.category}${item.fallbackFill ? "|补位" : ""}] ${item.candidate.title}`);
-    lines.push(`   source: ${item.candidate.sourceName} | published: ${published} | tags: ${tagsText}`);
-    lines.push(`   why: ${item.whyItMatters}`);
-    lines.push(`   link: ${item.candidate.url}`);
+    lines.push(`${item.rank}. ${cleanTitle}`);
+    if (item.digestType === "deep_read" && item.digestSummary) {
+      lines.push(`   ${summaryLabel}: ${item.digestSummary}`);
+    }
+    lines.push(`   ${item.candidate.url}`);
   }
 
   return lines.join("\n");
@@ -2048,7 +2190,7 @@ function formatDigest(run: DigestRunResult, profile: { id: string; name: string 
 function buildHelpText(): string {
   return [
     "Topic Push 用法",
-    "- /topic 或 /topic run [--profile <id>]: 拉取 RSS 并生成该实体当日简报",
+    "- /topic 或 /topic run [--profile <id>] [--lang <zh-CN|en>]: 拉取 RSS 并生成该实体当日简报",
     "- /topic profile list|get|add|update|use|delete: 管理分组实体（profile）",
     "- /topic profile add --name \"AI Daily\" [--id ai-daily] [--clone-from ai-engineering]",
     "- /topic profile use <id>: 切换默认实体",
@@ -2336,12 +2478,25 @@ function normalizeDailyQuota(input: unknown): TopicPushDailyQuota {
     return { ...fallback };
   }
 
-  return {
+  const normalized = {
     total: clampInteger(source.total, fallback.total, 1, 40),
     engineering: clampInteger(source.engineering, fallback.engineering, 0, 40),
     news: clampInteger(source.news, fallback.news, 0, 40),
     ecosystem: clampInteger(source.ecosystem, fallback.ecosystem, 0, 40)
   };
+  return migrateLegacyDailyQuota(normalized);
+}
+
+function migrateLegacyDailyQuota(quota: TopicPushDailyQuota): TopicPushDailyQuota {
+  if (
+    quota.total === LEGACY_DAILY_QUOTA.total
+    && quota.engineering === LEGACY_DAILY_QUOTA.engineering
+    && quota.news === LEGACY_DAILY_QUOTA.news
+    && quota.ecosystem === LEGACY_DAILY_QUOTA.ecosystem
+  ) {
+    return { ...DEFAULT_CONFIG.dailyQuota };
+  }
+  return quota;
 }
 
 function normalizeState(input: unknown): TopicPushState {
