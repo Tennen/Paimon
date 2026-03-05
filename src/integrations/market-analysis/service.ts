@@ -714,12 +714,15 @@ async function generateExplanationViaLocalModel(signalResult, optionalNewsContex
         {
           role: "system",
           content: [
-            "你是市场分析解释器与建议助手。",
+            "你是A股持仓分析助手，给用户直接可执行的中文建议。",
             "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
-            "允许基于 signalResult 与可选新闻上下文，给出 1-3 条“可选建议举措”（用户可以不采纳）。",
-            "建议必须明确标注为“参考建议”，且不能与既有 signalResult 冲突。",
-            "请只输出 JSON，不要 markdown，不要额外字段：",
-            "{\"summary\":\"简短中文总结，最多6句话\",\"suggestions\":[\"参考建议1\",\"参考建议2\"]}"
+            "写作风格要求：自然、具体、克制；禁止套话和机器人口吻，例如“根据以上分析”“综合来看”“仅供参考请谨慎”等空泛词。",
+            "必须覆盖每个 assetSignals 持仓项，并且逐项给出：1) 股票名称与代码 2) 输入关键数据 3) 短期建议 4) 长期建议。",
+            "输入关键数据至少包含可用字段：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段必须写“数据缺失”。",
+            "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议必须明确为“增持/减持/持有(或观望)”之一，并附一句理由。",
+            "允许额外给出 1-3 条组合层面的“参考建议”，且不能与既有 signalResult 冲突。",
+            "请只输出 JSON，不要 markdown，不要额外说明，格式如下：",
+            "{\"summary\":\"整体结论，2-4句\",\"holdings\":[{\"code\":\"600519\",\"name\":\"贵州茅台\",\"input_data\":\"price=..., pctChange=..., ma5=..., ma10=..., ma20=..., volumeChangeRate=..., quantity=..., avgCost=..., positionPnLPct=...\",\"short_term_advice\":\"增持/减持/持有 + 一句理由\",\"long_term_advice\":\"增持/减持/持有 + 一句理由\"}],\"suggestions\":[\"参考建议1\",\"参考建议2\"]}"
           ].join("\n")
         },
         {
@@ -744,6 +747,7 @@ async function generateExplanationViaLocalModel(signalResult, optionalNewsContex
   return {
     summary: parsed.summary,
     suggestions: parsed.suggestions,
+    holdings: parsed.holdings,
     model,
     generatedAt: new Date().toISOString(),
     provider: "local"
@@ -812,13 +816,16 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
 
 function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
   return [
-    "你是市场分析解释器与建议助手。",
+    "你是A股持仓分析助手。",
     "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
-    "请直接输出给用户看的最终中文说明文案,不要 JSON,不要代码块,不要 markdown 标题。",
-    "文案必须包含且按顺序组织为三部分:1)信号结论 2)输入数据依据 3)参考建议。",
-    "信号结论必须明确提及 benchmark 与 assetSignals,并覆盖每个 assetSignals 项的 code/name/signal。",
-    "输入数据依据必须引用可用关键数据:price/changePct/ma5/ma10/ma20/volume/volumeChangeRate;若字段缺失、为空或非数值,必须明确说明“数据缺失/未提供”,不得跳过。",
-    "参考建议可给 1-3 条,必须明确标注为“参考建议”,且不能与既有 signalResult 冲突。",
+    "输出自然中文，不要JSON，不要代码块，不要markdown标题。",
+    "禁止空话和机器人口吻，例如“根据以上分析”“综合来看”“总体而言”“仅供参考请谨慎”等。",
+    "请按以下结构输出：",
+    "1) 整体信号结论：1-2句，明确提及 benchmark 与市场状态。",
+    "2) 持仓逐项解读：必须覆盖每个 assetSignals 项。每项都要写：股票名称+代码、输入关键数据、短期建议、长期建议。",
+    "3) 参考建议：1-3条组合层面的补充建议（可选），不得与既有 signalResult 冲突。",
+    "输入关键数据必须优先引用：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段写“数据缺失”。",
+    "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议动作用词必须明确为“增持/减持/持有(或观望)”并给出一句理由。",
     "文案不得编造任何输入中不存在的指标、数值或结论。",
     "输入数据(JSON):",
     JSON.stringify({
@@ -853,7 +860,8 @@ function normalizeExplanationOutput(raw) {
 
   return {
     summary: text.slice(0, 1200),
-    suggestions: extractSuggestionLines(text)
+    suggestions: extractSuggestionLines(text),
+    holdings: []
   };
 }
 
@@ -862,7 +870,8 @@ function tryParseExplanationJson(rawText) {
   if (!text) {
     return {
       summary: "",
-      suggestions: []
+      suggestions: [],
+      holdings: []
     };
   }
 
@@ -889,17 +898,76 @@ function tryParseExplanationJson(rawText) {
       .map((item) => String(item || "").trim())
       .filter(Boolean)
       .slice(0, 3);
+    const holdingsRaw = Array.isArray(parsed.holdings)
+      ? parsed.holdings
+      : Array.isArray(parsed.positions)
+        ? parsed.positions
+        : Array.isArray(parsed.assets)
+          ? parsed.assets
+          : [];
+    const holdings = normalizeExplanationHoldings(holdingsRaw);
 
-    if (!summary && suggestions.length === 0) {
+    if (!summary && suggestions.length === 0 && holdings.length === 0) {
       continue;
     }
     return {
       summary,
-      suggestions
+      suggestions,
+      holdings
     };
   }
 
   return null;
+}
+
+function normalizeExplanationHoldings(input) {
+  const rows = Array.isArray(input) ? input : [];
+  const out = [];
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      continue;
+    }
+    const item = row;
+    const code = String(item.code || item.symbol || "").trim().slice(0, 16);
+    const name = String(item.name || item.stock_name || item.asset_name || "").trim().slice(0, 64);
+    const inputData = String(
+      item.input_data
+      || item.inputData
+      || item.key_data
+      || item.keyData
+      || item.metrics
+      || ""
+    ).trim().slice(0, 500);
+    const shortTermAdvice = String(
+      item.short_term_advice
+      || item.shortTermAdvice
+      || item.short_term
+      || item.shortTerm
+      || ""
+    ).trim().slice(0, 240);
+    const longTermAdvice = String(
+      item.long_term_advice
+      || item.longTermAdvice
+      || item.long_term
+      || item.longTerm
+      || ""
+    ).trim().slice(0, 240);
+
+    if (!code && !name && !shortTermAdvice && !longTermAdvice) {
+      continue;
+    }
+
+    out.push({
+      code,
+      name,
+      inputData,
+      shortTermAdvice,
+      longTermAdvice
+    });
+  }
+
+  return out.slice(0, 24);
 }
 
 function stripJsonCodeFence(text) {
@@ -1340,6 +1408,22 @@ function buildRunResponseText(result) {
 
   if (result.explanation && result.explanation.summary) {
     lines.push(`解释: ${result.explanation.summary}`);
+  }
+
+  if (result.explanation && Array.isArray(result.explanation.holdings) && result.explanation.holdings.length > 0) {
+    lines.push("持仓逐项建议:");
+    for (const holding of result.explanation.holdings.slice(0, 24)) {
+      const code = String(holding.code || "").trim();
+      const name = String(holding.name || "").trim();
+      const label = name && code ? `${name}(${code})` : (name || code || "-");
+      const inputData = String(holding.inputData || "").trim();
+      const shortTermAdvice = String(holding.shortTermAdvice || "").trim();
+      const longTermAdvice = String(holding.longTermAdvice || "").trim();
+      lines.push(`- ${label}`);
+      lines.push(`  关键数据: ${inputData || "数据缺失"}`);
+      lines.push(`  短期(1-5日): ${shortTermAdvice || "未提供"}`);
+      lines.push(`  长期(1-3月): ${longTermAdvice || "未提供"}`);
+    }
   }
 
   if (result.explanation && Array.isArray(result.explanation.suggestions) && result.explanation.suggestions.length > 0) {
