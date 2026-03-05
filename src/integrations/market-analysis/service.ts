@@ -784,9 +784,10 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
   }
 
   const prompt = buildGptPluginExplanationPrompt(signalResult, optionalNewsContext);
+  const bridgeInput = `/gpt new ${prompt}`;
   try {
     const response = await withTimeout(
-      Promise.resolve(bridgeHandler.execute(prompt)),
+      Promise.resolve(bridgeHandler.execute(bridgeInput)),
       timeoutMs,
       "gpt_plugin request timeout"
     );
