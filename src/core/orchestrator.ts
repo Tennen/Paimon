@@ -5,7 +5,7 @@ import { writeAudit } from "../auditLogger";
 import { LLMRuntimeContext, LLMPlanMeta } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
-import { DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
+import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
 import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { sttRuntime } from "../engines/stt";
@@ -106,6 +106,60 @@ export class Orchestrator {
     envelope: Envelope,
     start: number
   ): Promise<Response | null> {
+    const shortcutMatched = this.toolRegistry.matchDirectShortcut(text);
+    if (shortcutMatched) {
+      if (shortcutMatched.async) {
+        const taskId = createAsyncTaskId(shortcutMatched.command);
+        const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
+        const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
+          this.executeAsyncDirectShortcut(shortcutMatched, text, envelope, taskEnvelope, Date.now())
+        );
+
+        try {
+          const settled = await waitForPromiseWithTimeout(executionPromise, shortcutMatched.acceptedDelayMs);
+          if (settled.completed) {
+            this.processed.set(envelope.requestId, settled.value.response);
+            return settled.value.response;
+          }
+        } catch (error) {
+          const fallback: Response = {
+            text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
+          };
+          this.processed.set(envelope.requestId, fallback);
+          this.appendMemory(envelope, text, fallback);
+          return fallback;
+        }
+
+        void executionPromise
+          .then(async ({ taskEnvelope: doneEnvelope, response }) => {
+            await this.callbackDispatcher.send(doneEnvelope, response);
+          })
+          .catch(async (error) => {
+            const fallback: Response = {
+              text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
+            };
+            this.processed.set(taskEnvelope.requestId, fallback);
+            this.appendMemory(taskEnvelope, text, fallback);
+            await this.callbackDispatcher.send(taskEnvelope, fallback);
+          });
+
+        const acceptedResponse: Response = {
+          text: shortcutMatched.acceptedText || "任务已受理，正在处理中，稍后回调结果。",
+          data: {
+            asyncTask: {
+              id: taskId,
+              status: "accepted"
+            }
+          }
+        };
+        this.processed.set(envelope.requestId, acceptedResponse);
+        this.appendMemory(envelope, text, acceptedResponse);
+        return acceptedResponse;
+      }
+
+      return this.executeDirectShortcut(shortcutMatched, text, memory, envelope, start);
+    }
+
     const matched = this.toolRegistry.matchDirectToolCall(text);
     if (!matched) {
       return null;
@@ -218,6 +272,49 @@ export class Orchestrator {
       "",
       matched.preferToolResult,
       text,
+      taskEnvelope,
+      start
+    );
+    return { taskEnvelope, response };
+  }
+
+  private async executeDirectShortcut(
+    matched: DirectShortcutMatch,
+    text: string,
+    memory: string,
+    envelope: Envelope,
+    start: number
+  ): Promise<Response> {
+    const result = await matched.execute({
+      command: matched.command,
+      input: text,
+      rest: matched.rest,
+      sessionId: envelope.sessionId,
+      memory
+    });
+    return this.respondStep(
+      result,
+      "",
+      "",
+      matched.preferToolResult,
+      text,
+      envelope,
+      start
+    );
+  }
+
+  private async executeAsyncDirectShortcut(
+    matched: DirectShortcutMatch,
+    text: string,
+    envelope: Envelope,
+    taskEnvelope: Envelope,
+    start: number
+  ): Promise<{ taskEnvelope: Envelope; response: Response }> {
+    const latestMemory = this.memoryStore.read(envelope.sessionId);
+    const response = await this.executeDirectShortcut(
+      matched,
+      text,
+      latestMemory,
       taskEnvelope,
       start
     );

@@ -59,10 +59,38 @@ export type DirectToolCallMatch = {
   acceptedDelayMs: number;
 };
 
+export type DirectShortcutContext = {
+  command: string;
+  input: string;
+  rest: string;
+  sessionId: string;
+  memory: string;
+};
+
+export type DirectShortcutRoute = {
+  command: string;
+  execute: (context: DirectShortcutContext) => Promise<ToolResult>;
+  preferToolResult?: boolean;
+  async?: boolean;
+  acceptedText?: string;
+  acceptedDelayMs?: number;
+};
+
+export type DirectShortcutMatch = {
+  command: string;
+  execute: (context: DirectShortcutContext) => Promise<ToolResult>;
+  preferToolResult: boolean;
+  async: boolean;
+  acceptedText: string;
+  acceptedDelayMs: number;
+  rest: string;
+};
+
 export class ToolRegistry {
   private handlers: ToolHandler[] = [];
   private schema: ToolSchemaItem[] = [];
   private directToolCalls: DirectToolCallRoute[] = [];
+  private directShortcuts: DirectShortcutRoute[] = [];
 
   register(handler: ToolHandler, schema?: ToolSchemaItem | ToolSchemaItem[]): void {
     this.handlers.push(handler);
@@ -105,8 +133,23 @@ export class ToolRegistry {
     this.directToolCalls.push(normalized);
   }
 
+  registerDirectShortcut(route: DirectShortcutRoute): void {
+    const command = normalizeDirectCommand(route.command);
+    if (!command || typeof route.execute !== "function") return;
+    const normalized: DirectShortcutRoute = {
+      ...route,
+      command
+    };
+    this.directShortcuts = this.directShortcuts.filter((item) => item.command !== command);
+    this.directShortcuts.push(normalized);
+  }
+
   listDirectToolCalls(): DirectToolCallRoute[] {
     return this.directToolCalls.slice();
+  }
+
+  listDirectShortcuts(): DirectShortcutRoute[] {
+    return this.directShortcuts.slice();
   }
 
   matchDirectToolCall(input: string): DirectToolCallMatch | null {
@@ -135,6 +178,30 @@ export class ToolRegistry {
       async: route.async ?? false,
       acceptedText: route.acceptedText ?? "任务已受理，正在处理中，稍后回调结果。",
       acceptedDelayMs: normalizeAcceptedDelayMs(route.acceptedDelayMs, route.async ?? false)
+    };
+  }
+
+  matchDirectShortcut(input: string): DirectShortcutMatch | null {
+    const raw = String(input ?? "").trim();
+    if (!raw.startsWith("/")) {
+      return null;
+    }
+
+    const commandToken = raw.split(/\s+/, 1)[0].toLowerCase();
+    const route = this.directShortcuts.find((item) => item.command === commandToken);
+    if (!route) {
+      return null;
+    }
+
+    const rest = raw.slice(commandToken.length).trim();
+    return {
+      command: commandToken,
+      execute: route.execute,
+      preferToolResult: route.preferToolResult ?? true,
+      async: route.async ?? false,
+      acceptedText: route.acceptedText ?? "任务已受理，正在处理中，稍后回调结果。",
+      acceptedDelayMs: normalizeAcceptedDelayMs(route.acceptedDelayMs, route.async ?? false),
+      rest
     };
   }
 }

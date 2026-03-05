@@ -19,6 +19,7 @@ import { EvolutionEngine } from "./integrations/evolution-operator/evolutionEngi
 import { EvolutionCodexConfigService } from "./integrations/evolution-operator/codexConfigService";
 import { EvolutionOperatorService } from "./integrations/evolution-operator/service";
 import { sttRuntime } from "./engines/stt";
+import { registerSystemShortcuts } from "./core/systemShortcuts";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -33,6 +34,7 @@ const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConf
 
 const registry = new ToolRegistry();
 loadTools(registry, { skillManager, evolutionService });
+registerSystemShortcuts(registry);
 const toolRouter = new ToolRouter(registry);
 const llmEngine = createLLMEngine();
 const callbackDispatcher = new CallbackDispatcher();
