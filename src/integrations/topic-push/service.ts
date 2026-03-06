@@ -49,10 +49,12 @@ export type TopicPushDailyQuota = {
 };
 
 export type TopicPushSummaryEngine = "local" | "gpt_plugin";
+export type TopicPushDigestLanguage = "auto" | "zh-CN" | "en";
 
 export type TopicPushConfig = {
   version: 1;
   summaryEngine: TopicPushSummaryEngine;
+  defaultLanguage: TopicPushDigestLanguage;
   sources: TopicPushSource[];
   topics: Record<TopicKey, string[]>;
   filters: TopicPushFilters;
@@ -150,7 +152,8 @@ type Candidate = {
 type TopicDigestItemType = "news" | "deep_read";
 
 export type TopicPushExecuteOptions = {
-  targetLanguage?: string;
+  explicitLanguage?: string;
+  inferredLanguage?: string;
 };
 
 type SelectedItem = {
@@ -495,6 +498,7 @@ const DEFAULT_TOPIC_KEYWORDS: Record<TopicKey, string[]> = {
 const DEFAULT_CONFIG: TopicPushConfig = {
   version: 1,
   summaryEngine: "local",
+  defaultLanguage: "auto",
   sources: DEFAULT_SOURCES,
   topics: DEFAULT_TOPIC_KEYWORDS,
   filters: {
@@ -551,7 +555,6 @@ export async function execute(
   try {
     ensureTopicPushStorage();
     const command = parseCommand(input);
-    const targetLanguage = normalizeDigestLanguage(options?.targetLanguage);
 
     switch (command.kind) {
       case "help":
@@ -591,6 +594,7 @@ export async function execute(
         const config = readConfig(command.profileId);
         const state = readState(command.profileId);
         const profile = getProfileMeta(command.profileId);
+        const targetLanguage = resolveRunTargetLanguage(config, options);
         const run = await runDigest(config, state, now, targetLanguage);
         const nextState = mergeSentLog(state, run.selected, now);
         writeState(nextState, profile.id);
@@ -1643,6 +1647,34 @@ function normalizeDigestLanguage(raw: unknown): string {
   return value.slice(0, 24);
 }
 
+function normalizeConfigDigestLanguage(raw: unknown): TopicPushDigestLanguage {
+  const value = normalizeText(raw).toLowerCase();
+  if (!value || ["auto", "default", "detect", "auto-detect", "automatic", "自动"].includes(value)) {
+    return "auto";
+  }
+  if (value.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (value.startsWith("en")) {
+    return "en";
+  }
+  return "auto";
+}
+
+function resolveRunTargetLanguage(config: TopicPushConfig, options?: TopicPushExecuteOptions): string {
+  const explicitLanguage = normalizeText(options?.explicitLanguage);
+  if (explicitLanguage) {
+    return normalizeDigestLanguage(explicitLanguage);
+  }
+
+  const configuredLanguage = normalizeConfigDigestLanguage(config.defaultLanguage);
+  if (configuredLanguage !== "auto") {
+    return configuredLanguage;
+  }
+
+  return normalizeDigestLanguage(options?.inferredLanguage);
+}
+
 function formatDigestLanguageLabel(language: string): string {
   const value = normalizeDigestLanguage(language);
   if (value === "zh-CN") {
@@ -2311,6 +2343,7 @@ function formatConfig(config: TopicPushConfig, profileId?: string): string {
     "Topic Push Config",
     `profile: ${profile.id} (${profile.name})`,
     `summary_engine: ${config.summaryEngine}`,
+    `default_language: ${config.defaultLanguage}`,
     `sources: ${config.sources.length} (enabled=${config.sources.filter((item) => item.enabled).length})`,
     `quota: total=${config.dailyQuota.total}, engineering=${config.dailyQuota.engineering}, news=${config.dailyQuota.news}, ecosystem=${config.dailyQuota.ecosystem}`,
     `filters: window=${config.filters.timeWindowHours}h, minTitleLength=${config.filters.minTitleLength}, maxPerDomain=${config.filters.maxPerDomain}`,
@@ -2516,6 +2549,11 @@ function normalizeConfig(input: unknown): TopicPushConfig {
     ?? source.analysisEngine
     ?? source.engine
   );
+  const defaultLanguage = normalizeConfigDigestLanguage(
+    source.defaultLanguage
+    ?? source.default_language
+    ?? source.language
+  );
   const normalizedSources = normalizeSources(source.sources);
   const normalizedTopics = normalizeTopics(source.topics);
   const normalizedFilters = normalizeFilters(source.filters);
@@ -2524,6 +2562,7 @@ function normalizeConfig(input: unknown): TopicPushConfig {
   return {
     version: 1,
     summaryEngine,
+    defaultLanguage,
     sources: normalizedSources,
     topics: normalizedTopics,
     filters: normalizedFilters,
@@ -3410,6 +3449,7 @@ function cloneDefaultConfig(): TopicPushConfig {
   return {
     version: 1,
     summaryEngine: DEFAULT_CONFIG.summaryEngine,
+    defaultLanguage: DEFAULT_CONFIG.defaultLanguage,
     sources: DEFAULT_SOURCES.map((item) => ({ ...item })),
     topics: createDefaultTopics(),
     filters: {

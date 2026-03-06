@@ -34,6 +34,7 @@ import {
   TaskFormState,
   TopicPushCategory,
   TopicPushConfig,
+  TopicPushDigestLanguage,
   TopicPushProfile,
   TopicPushProfilesPayload,
   TopicPushSummaryEngine,
@@ -1134,6 +1135,13 @@ export default function App() {
     }));
   }
 
+  function handleTopicDefaultLanguageChange(value: TopicPushDigestLanguage): void {
+    setTopicPushConfig((prev) => ({
+      ...prev,
+      defaultLanguage: value
+    }));
+  }
+
   function handleAddTopicSource(): void {
     setTopicPushConfig((prev) => {
       const baseId = `source-${prev.sources.length + 1}`;
@@ -1412,6 +1420,7 @@ export default function App() {
           onUseProfile={() => void handleUseTopicProfile()}
           onDeleteProfile={() => void handleDeleteTopicProfile()}
           onSummaryEngineChange={handleTopicSummaryEngineChange}
+          onDefaultLanguageChange={handleTopicDefaultLanguageChange}
           onSourceChange={handleTopicSourceChange}
           onAddSource={handleAddTopicSource}
           onRemoveSource={handleRemoveTopicSource}
@@ -1548,10 +1557,12 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
   const filters = source.filters ?? fallback.filters;
   const dailyQuota = source.dailyQuota ?? fallback.dailyQuota;
   const summaryEngine = source.summaryEngine === "gpt_plugin" ? "gpt_plugin" : "local";
+  const defaultLanguage = normalizeTopicPushDefaultLanguage(source.defaultLanguage);
 
   return {
     version: 1,
     summaryEngine,
+    defaultLanguage,
     sources,
     topics,
     filters: {
@@ -1574,6 +1585,17 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
       ecosystem: clampNumberValue(dailyQuota.ecosystem, fallback.dailyQuota.ecosystem, 0, 40)
     }
   };
+}
+
+function normalizeTopicPushDefaultLanguage(raw: unknown): TopicPushDigestLanguage {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value.startsWith("zh")) {
+    return "zh-CN";
+  }
+  if (value.startsWith("en")) {
+    return "en";
+  }
+  return "auto";
 }
 
 function normalizeTopicPushSource(source: Partial<TopicPushSource> | null | undefined, index: number): TopicPushSource {

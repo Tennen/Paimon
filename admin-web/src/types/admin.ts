@@ -188,10 +188,12 @@ export type TopicPushDailyQuota = {
 };
 
 export type TopicPushSummaryEngine = "local" | "gpt_plugin";
+export type TopicPushDigestLanguage = "auto" | "zh-CN" | "en";
 
 export type TopicPushConfig = {
   version: 1;
   summaryEngine: TopicPushSummaryEngine;
+  defaultLanguage: TopicPushDigestLanguage;
   sources: TopicPushSource[];
   topics: Record<TopicPushTopicKey, string[]>;
   filters: TopicPushFilters;
@@ -387,6 +389,7 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
 export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
   version: 1,
   summaryEngine: "local",
+  defaultLanguage: "auto",
   sources: [],
   topics: {
     llm_apps: [],

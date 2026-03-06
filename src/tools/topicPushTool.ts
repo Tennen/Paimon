@@ -13,10 +13,13 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
         executeInputTool(
           op,
           args,
-          async (input) =>
-            executeTopicPush(input, {
-              targetLanguage: detectUserLanguage(input, context)
-            })
+          async (input) => {
+            const explicitLanguage = readExplicitLanguageFlag(input);
+            return executeTopicPush(input, {
+              explicitLanguage: explicitLanguage ?? undefined,
+              inferredLanguage: explicitLanguage ? undefined : detectUserLanguage(input, context)
+            });
+          }
         )
     },
     {
@@ -94,11 +97,6 @@ function registerDirectCommands(
 }
 
 function detectUserLanguage(input: string, context: Record<string, unknown>): string {
-  const explicit = readExplicitLanguageFlag(input);
-  if (explicit) {
-    return explicit;
-  }
-
   const memory = typeof context.memory === "string" ? context.memory : "";
   const sample = `${input}\n${memory.slice(-4000)}`;
   const zhCount = (sample.match(/[\u4e00-\u9fff]/g) ?? []).length;

@@ -29,6 +29,7 @@ import { formatDateTime } from "@/lib/adminFormat";
 import {
   TopicPushCategory,
   TopicPushConfig,
+  TopicPushDigestLanguage,
   TopicPushProfile,
   TopicPushSummaryEngine,
   TopicPushSource,
@@ -50,6 +51,7 @@ type TopicPushSectionProps = {
   onUseProfile: () => void;
   onDeleteProfile: () => void;
   onSummaryEngineChange: (value: TopicPushSummaryEngine) => void;
+  onDefaultLanguageChange: (value: TopicPushDigestLanguage) => void;
   onSourceChange: (index: number, patch: Partial<TopicPushSource>) => void;
   onAddSource: () => void;
   onRemoveSource: (index: number) => void;
@@ -67,6 +69,12 @@ const CATEGORY_OPTIONS: Array<{ value: TopicPushCategory; label: string }> = [
 const SUMMARY_ENGINE_OPTIONS: Array<{ value: TopicPushSummaryEngine; label: string }> = [
   { value: "local", label: "local（本地模型）" },
   { value: "gpt_plugin", label: "gpt_plugin（GPT Bridge）" }
+];
+
+const DEFAULT_LANGUAGE_OPTIONS: Array<{ value: TopicPushDigestLanguage; label: string }> = [
+  { value: "auto", label: "auto（自动判断）" },
+  { value: "zh-CN", label: "zh-CN（简体中文）" },
+  { value: "en", label: "en（English）" }
 ];
 
 export function TopicPushSection(props: TopicPushSectionProps) {
@@ -129,7 +137,7 @@ export function TopicPushSection(props: TopicPushSectionProps) {
           </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <div className="space-y-1.5">
             <Label>摘要引擎</Label>
             <Select
@@ -141,6 +149,24 @@ export function TopicPushSection(props: TopicPushSectionProps) {
               </SelectTrigger>
               <SelectContent>
                 {SUMMARY_ENGINE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>默认语言</Label>
+            <Select
+              value={props.topicPushConfig.defaultLanguage}
+              onValueChange={(value) => props.onDefaultLanguageChange(value as TopicPushDigestLanguage)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择默认语言" />
+              </SelectTrigger>
+              <SelectContent>
+                {DEFAULT_LANGUAGE_OPTIONS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
