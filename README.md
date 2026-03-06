@@ -1,657 +1,248 @@
-# Paimon (Phase 1)
+# Paimon
 
-Single-process monolith that processes ingress events in strict per-session order.
+Paimon 是一个面向个人自动化和消息驱动场景的单进程 Agent Runtime。
 
-## Architecture (Sequence)
+它把来自企业微信、HTTP 或 Home Assistant 的输入统一转换成内部事件，再由 LLM 进行意图判断、技能规划和工具调用，最后把结果回传给用户或外部系统。项目目标不是做一个通用聊天壳，而是把“消息入口 + 本地模型 + 自动化工具 + 持久化 + 运维后台”收敛到一个可以长期运行的服务里。
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor User
-  participant WeCom as WeCom (Client)
-  participant Bridge as WeCom Bridge (optional)
-  participant Paimon as Paimon (Ingress + Orchestrator)
-  participant LLM as LLM Engine (Ollama / llama-server)
-  participant Tools as ToolRouter
-  participant HA as Home Assistant
+## 项目是做什么的
 
-  User->>WeCom: Send message / request
-  WeCom-->>Paimon: HTTP webhook (/ingress/wecom)
-  WeCom-->>Bridge: (optional) SSE bridge stream
-  Bridge-->>Paimon: /stream event
-  Paimon->>LLM: Plan action (intent)
-  LLM-->>Paimon: Action
-  Paimon->>Tools: Route action
-  Tools->>HA: call_service / get_state / camera_snapshot
-  HA-->>Tools: Result / image
-  Tools-->>Paimon: Tool output
-  Paimon-->>WeCom: Reply text
-  Paimon-->>WeCom: (optional) Send image + caption
+这个项目主要用来搭建一个可持续运行的智能体服务，典型场景包括：
+
+- 作为企业微信里的个人助理或自动化入口
+- 作为 Home Assistant 的自然语言控制层
+- 作为定时推送、RSS 主题摘要、市场分析的执行引擎
+- 作为带后台管理界面的本地优先 Agent 服务
+- 作为可扩展的技能运行时，后续可以继续接入更多工具或平台
+
+## 核心架构
+
+Paimon 采用单进程 monolith 结构，但内部职责分层明确：
+
+```text
+Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Storage
+                                   |
+                                   +-> LLM Engine
+                                   +-> Skill Manager
+                                   +-> Memory / Scheduler / Admin
 ```
 
-## Directory conventions
+各目录职责如下：
 
-- `src/ingress`: inbound protocol adapters (`/ingress/*`, admin API, bridge stream).
-- `src/integrations`: outbound integrations (Home Assistant, WeCom clients).
-- `src/tools`: LLM-callable tools and registry.
-- `src/storage`: persistence abstraction (`registerStore/getStore/setStore`).
-- `tools/`: standalone operational scripts (not runtime modules).
+- `src/ingress/`: 输入适配层，负责 HTTP、企业微信回调、SSE bridge、Admin API 等入口
+- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程
+- `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
+- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Push、Market Analysis、Evolution Operator 等集成
+- `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
+- `src/scheduler/`: 定时任务和推送用户管理
+- `src/memory/`: 会话记忆存储
+- `src/skills/`: 技能元数据加载与管理
+- `admin-web/`: 后台前端
+- `tools/`: 独立脚本和桥接程序
 
-See `AGENTS.md` for coding constraints and `docs/PROJECT_STRUCTURE.md` for structure planning.
+### 请求处理流程
 
-## Requirements
+1. 输入先通过 `ingress` 层转成统一的 `Envelope`
+2. `SessionManager` 保证同一会话按顺序处理
+3. `Orchestrator` 决定是直接命令、快捷指令，还是交给 LLM 规划
+4. `ToolRouter` 调用对应工具
+5. 工具通过 `integrations` 访问外部系统
+6. 结果写入记忆/审计/业务存储，并回传给调用方
+
+这种结构的重点是：
+
+- 输入协议和业务能力解耦
+- 外部平台调用和 Agent 编排解耦
+- 数据持久化集中管理，避免业务逻辑散落到文件路径上
+- 新能力优先通过 `tool + integration` 的方式接入，而不是堆到入口层
+
+## 当前已有能力
+
+### 1. 多入口接入
+
+- 企业微信文本消息接入
+- 企业微信语音消息接入，支持 STT 转写后继续执行
+- 通用 HTTP ingress
+- Home Assistant 通知转发入口
+- WeCom bridge SSE 模式，适合本地服务不方便公网暴露的场景
+
+### 2. LLM 与智能体编排
+
+- 支持 `Ollama` 和 `llama-server`
+- 支持技能发现、技能规划、工具调用的分步式执行
+- 支持直接命令和异步回调型命令
+- 支持会话记忆持久化
+
+### 3. 工具与业务能力
+
+- `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照
+- `terminal`: 执行本机命令
+- `topic-push`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
+- `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
+- `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
+- `evolution-operator`: 用于排队、执行、跟踪代码演化任务
+- `system shortcuts`: 内置 `/sync`、`/build`、`/restart`、`/deploy` 等运维捷径
+
+### 4. 运维与后台能力
+
+- Admin API 与 Admin Web 界面
+- 模型配置查看与更新
+- 定时任务和推送用户管理
+- Topic Push 配置管理
+- Market Analysis 配置与运行记录查看
+- Evolution 队列与状态管理
+- 审计日志与本地数据持久化
+
+## 安装与部署
+
+### 环境要求
+
+最小要求：
 
 - Node.js 18+
 
-## Setup
+按场景可选：
+
+- `Ollama` 或 `llama-server`，用于 LLM 推理
+- `Python 3`，如果要启用 `fast-whisper` 语音转写
+- `Home Assistant`，如果要启用智能家居能力
+- 企业微信应用配置，若要通过 WeCom 收发消息
+- 一台可公网访问的 VPS，若要使用 WeCom bridge 模式
+
+### 1. 安装依赖
 
 ```bash
 npm install
 ```
 
-Set Home Assistant env vars:
+### 2. 配置环境变量
 
-```bash
-export HA_BASE_URL="http://homeassistant.local:8123"
-export HA_TOKEN="YOUR_LONG_LIVED_TOKEN"
+项目启动时会读取根目录 `.env`。可参考仓库内的 `.env.example` 作为模板，下面保留最小可用配置示例。
+
+#### 使用 Ollama
+
+```env
+PORT=3000
+
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:4b
+OLLAMA_PLANNING_MODEL=qwen3:8b
+
+HA_BASE_URL=http://homeassistant.local:8123
+HA_TOKEN=your_home_assistant_token
 ```
 
-Set LLM env vars:
+#### 使用 llama-server
 
-```bash
-export LLM_PROVIDER="ollama" # ollama | llama-server
-export LLM_TIMEOUT_MS="15000"
-export LLM_PLANNING_TIMEOUT_MS="30000" # optional, fallback to LLM_TIMEOUT_MS
-export LLM_MAX_RETRIES="2"
-export LLM_STRICT_JSON="true"
-export LLM_MAX_ITERATIONS="2"
+```env
+PORT=3000
+
+LLM_PROVIDER=llama-server
+LLAMA_SERVER_BASE_URL=http://127.0.0.1:8080
+LLAMA_SERVER_MODEL=qwen3-thinking
+
+HA_BASE_URL=http://homeassistant.local:8123
+HA_TOKEN=your_home_assistant_token
 ```
 
-Set Ollama provider env vars:
+#### 启用企业微信
 
-```bash
-export OLLAMA_BASE_URL="http://127.0.0.1:11434"
-export OLLAMA_MODEL="qwen3:4b"
-export OLLAMA_PLANNING_MODEL="qwen3:8b" # optional, used for skill planning stage; fallback to OLLAMA_MODEL
-export OLLAMA_VISION_MODEL="qwen3-vl:4b" # optional, used for image describe
-export LLM_TIMEOUT_MS="15000"
-export LLM_PLANNING_TIMEOUT_MS="30000" # optional, fallback to LLM_TIMEOUT_MS
-export LLM_MAX_RETRIES="2"
-export LLM_STRICT_JSON="true"
-export LLM_MAX_ITERATIONS="2"
-export LLM_THINKING_BUDGET_ENABLED="false" # optional, enable planning thinking budget control
-export LLM_THINKING_BUDGET="1024" # optional, admin default for Step2 planning; Step1 may override per request when enabled
-export VISION_TIMEOUT_MS="30000"
-export VISION_MAX_RETRIES="1"
-export HA_SNAPSHOT_DESCRIBE="true"
-export VISION_PROMPT="请用中文简短描述图片内容，1句话以内，不要臆测或编造。"
+```env
+WECOM_TOKEN=your_wecom_token
+WECOM_CORP_ID=your_corp_id
+WECOM_APP_SECRET=your_app_secret
+WECOM_AGENT_ID=your_agent_id
 ```
 
-`LLM_THINKING_BUDGET_ENABLED=true` 时，Admin 中的 `LLM_THINKING_BUDGET` 表示 Planning Thinking Budget 默认值（供 Step1 LLM 参考）；Step2 实际执行可被 Step1 决策输出覆盖。
-Set llama-server provider env vars:
+#### 启用语音转写
 
-```bash
-export LLM_PROVIDER="llama-server"
-export LLAMA_SERVER_BASE_URL="http://127.0.0.1:8080"
-export LLAMA_SERVER_MODEL="qwen3-thinking"
-export LLAMA_SERVER_PLANNING_MODEL="qwen3-thinking" # optional, fallback to LLAMA_SERVER_MODEL
-export LLAMA_SERVER_API_KEY="" # optional
-export LLAMA_SERVER_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true}'
-export LLAMA_SERVER_PLANNING_CHAT_TEMPLATE_KWARGS='{"enable_thinking":true,"thinking_budget":1024}'
+```env
+STT_PROVIDER=fast-whisper
+STT_FAST_WHISPER_AUTO_INSTALL=true
+STT_FAST_WHISPER_PYTHON=python3
+STT_FAST_WHISPER_MODEL=small
 ```
 
-Note: vision caption (`ha.camera_snapshot` describe) still uses `OLLAMA_VISION_MODEL`.
+如果只是先把服务跑起来，核心是先保证：
 
-Set WeCom env vars:
+- 至少配置一个可用的 LLM Provider
+- 若要启用 Home Assistant，再补 `HA_BASE_URL` 和 `HA_TOKEN`
+- 若要启用企业微信，再补 `WECOM_*` 配置
 
-```bash
-export WECOM_TOKEN="YOUR_WECOM_TOKEN"
-export WECOM_BRIDGE_URL="http://your-vps-domain:8080" # optional, for SSE bridge
-export WECOM_BRIDGE_TOKEN="YOUR_STREAM_TOKEN" # optional, for SSE bridge
-export WECOM_CORP_ID="YOUR_CORP_ID" # app message sender (local)
-export WECOM_APP_SECRET="YOUR_APP_SECRET" # app message sender (local)
-export WECOM_AGENT_ID="YOUR_AGENT_ID" # app message sender (local)
-export WECOM_CONTEXT_LIMIT="1000" # max in-memory contexts
-export WECOM_AUDIO_DIR="data/wecom-audio" # local voice file directory
-export WECOM_MEDIA_USE_BRIDGE="true" # prefer bridge proxy for media download
-```
-
-Set STT env vars:
-
-```bash
-export STT_PROVIDER="fast-whisper" # fast-whisper | mock
-export STT_FAST_WHISPER_AUTO_INSTALL="true" # auto pip install on startup
-export STT_FAST_WHISPER_PYTHON="python3"
-export STT_FAST_WHISPER_SCRIPT="tools/fast-whisper-transcribe.py" # optional, custom script path
-export STT_FAST_WHISPER_MODEL="small"
-export STT_FAST_WHISPER_DEVICE="auto"
-export STT_FAST_WHISPER_COMPUTE_TYPE="int8"
-export STT_FAST_WHISPER_LANGUAGE="zh" # optional
-export STT_FAST_WHISPER_BEAM_SIZE="1"
-export STT_FAST_WHISPER_VAD_FILTER="true"
-export STT_FAST_WHISPER_TIMEOUT_MS="180000"
-```
-
-`STT_PROVIDER=fast-whisper` 时，服务启动会在 `sttRuntime.init()` 阶段检查 `faster_whisper` Python 包；如果缺失且 `STT_FAST_WHISPER_AUTO_INSTALL=true`，会自动执行：
-
-```bash
-python3 -m pip install --disable-pip-version-check faster-whisper
-```
-
-如果你想关闭自动安装，可设置 `STT_FAST_WHISPER_AUTO_INSTALL=false`，然后自行安装上述依赖。
-
-HA entity allowlist is pulled from Home Assistant periodically via WebSocket (by `HA_BASE_URL` + `HA_TOKEN`), and filtered to those exposed to Assist (`options.conversation.should_expose = true`).
-Because some camera entities lack `unique_id` and don’t appear in the entity registry, we also supplement `camera.*` from REST `/api/states`.
-You can control refresh cadence with:
-
-```bash
-export HA_ENTITY_REFRESH_MS="60000"
-```
-
-## Run
+### 3. 本地开发启动
 
 ```bash
 npm run dev
 ```
 
-## External scripts
+启动后可使用：
 
-All standalone helper scripts and bridge programs are under `tools/`:
+- `http://localhost:3000/health` 查看服务存活
+- `http://localhost:3000/admin` 打开管理后台
 
-- `tools/fast-whisper-transcribe.py`
-- `tools/llama-server-daemon-macos.sh`
-- `tools/market-smoke.ts`
-- `tools/ollama-model-to-gguf.js`
-- `tools/wecom-bridge.go`
-- `tools/wecom-bridge.js`
-
-See `tools/README.md` for details.
-
-## llama-server (macOS silent daemon)
-
-Install `llama-server` first (for example, via `brew install llama.cpp`), then run:
+如果需要单独调试后台前端：
 
 ```bash
-tools/llama-server-daemon-macos.sh start \
-  --model ~/.llm/models/qwen3-thinking.gguf \
-  --port 8080 \
-  --ctx-size 32768 \
-  --threads 8 \
-  --parallel 1 \
-  --alias qwen3-thinking
+npm run dev:admin
 ```
 
-This uses `launchctl` (`~/Library/LaunchAgents/com.paimon.llama-server.plist`) so the process keeps running without an attached terminal, and defaults to silent logs (`/dev/null`).
-
-Common operations:
+### 4. 生产构建与运行
 
 ```bash
-tools/llama-server-daemon-macos.sh status
-tools/llama-server-daemon-macos.sh restart --model ~/.llm/models/qwen3-thinking.gguf
-tools/llama-server-daemon-macos.sh stop
+npm run build
+npm start
 ```
 
-## Export Ollama model to GGUF
+说明：
 
-If your model is already downloaded by Ollama, export/copy it to `~/.llm/models`:
+- `npm run build` 会同时构建后端和 `admin-web`
+- 生产模式下，后台页面由主服务统一托管在 `/admin`
+- 建议使用 `systemd`、`pm2` 或容器方式托管进程
+- 建议在前面加一层 Nginx 或其他反向代理
+
+### 5. 企业微信部署方式
+
+如果你的服务可以直接暴露公网，可以直接把企业微信回调配置到 Paimon 服务。
+
+如果服务运行在本地网络里，不方便开放公网入口，可以使用仓库内的 WeCom bridge：
+
+- 在公网机器上部署 `tools/wecom-bridge.go` 或 `tools/wecom-bridge.js`
+- 本地 Paimon 通过 `WECOM_BRIDGE_URL` 主动连接 bridge 的 SSE 流
+- 这样企业微信请求先到 bridge，再由 bridge 转发给本地 Agent
+
+这类模式适合家庭网络、本地开发机或 NAS 环境。
+
+## 数据与持久化
+
+项目默认把运行数据写入 `data/` 目录，主要包括：
+
+- 会话记忆
+- 审计日志
+- 定时任务和推送用户
+- Topic Push 配置与状态
+- Market Analysis 配置、持仓与运行记录
+- Evolution 队列与指标
+
+持久化统一走 `src/storage/persistence.ts`，业务模块不直接依赖具体文件路径。
+
+## 扩展方式
+
+如果你要继续扩展这个项目，推荐遵循下面的方式：
+
+- 新的外部平台接入放到 `src/integrations/<domain>/`
+- 新的 LLM 可调用工具放到 `src/tools/*Tool.ts`
+- 新的输入协议放到 `src/ingress/`
+- 新的技能只在 `skills/<name>/SKILL.md` 中声明契约，不把运行逻辑塞进技能目录
+
+这也是当前项目保持可维护性的核心约束。
+
+## 常用命令
 
 ```bash
-node tools/ollama-model-to-gguf.js --model qwen3:4b
+npm run dev
+npm run build
+npm run test:evolution
+npx tsc -p tsconfig.json
 ```
 
-Custom output directory and overwrite:
-
-```bash
-node tools/ollama-model-to-gguf.js --model qwen3:4b --output-dir ~/.llm/models --force
-```
-
-## Health / sessions
-
-```bash
-curl -s http://localhost:3000/health
-curl -s http://localhost:3000/sessions
-```
-
-## Admin config example
-
-```bash
-curl -s http://localhost:3000/admin/api/config
-```
-
-```json
-{
-  "model": "qwen3:4b",
-  "planningModel": "qwen3:8b",
-  "planningTimeoutMs": "30000",
-  "thinkingBudgetEnabled": true,
-  "thinkingBudgetDefault": "1024",
-  "thinkingBudget": "1024"
-}
-```
-
-## WeCom ingress
-
-WeCom will POST XML to `/ingress/wecom` in plaintext mode. The adapter validates `signature` or `msg_signature` using `WECOM_TOKEN`, builds an `Envelope`, and returns a text reply.
-
-For `voice` messages, the service will:
-
-1. Download media by `MediaId` and save it under `WECOM_AUDIO_DIR` (default `data/wecom-audio`).
-2. Run STT through the configured provider (`fast-whisper` by default).
-3. Feed transcription text into orchestration and reply as normal.
-
-## Camera snapshot describe
-
-When `ha.camera_snapshot` is called, the agent will:
-
-1. Fetch the image from Home Assistant.
-2. Send the image to WeCom (bridge mode).
-3. Use the vision model to generate a short caption and reply with that caption.
-
-Set `HA_SNAPSHOT_DESCRIBE="false"` to disable the caption step. `OLLAMA_VISION_MODEL` falls back to `OLLAMA_MODEL` if not set.
-
-## Curl examples
-
-Reminder (MockTool):
-
-```bash
-curl -s http://localhost:3000/ingress \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requestId": "r1",
-    "source": "http",
-    "sessionId": "s1",
-    "kind": "text",
-    "text": "remind me tomorrow",
-    "receivedAt": "2026-01-30T00:00:00Z"
-  }'
-```
-
-Home Assistant call_service (turn on light):
-
-```bash
-curl -s http://localhost:3000/ingress \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requestId": "r2",
-    "source": "http",
-    "sessionId": "s1",
-    "kind": "text",
-    "text": "turn on the light",
-    "receivedAt": "2026-01-30T00:00:00Z"
-  }'
-```
-
-Home Assistant get_state:
-
-```bash
-curl -s http://localhost:3000/ingress \
-  -H "Content-Type: application/json" \
-  -d '{
-    "requestId": "r3",
-    "source": "http",
-    "sessionId": "s1",
-    "kind": "text",
-    "text": "status of the light",
-    "receivedAt": "2026-01-30T00:00:00Z"
-  }'
-```
-
-## Notes
-
-- Audit log is written to `data/audit.jsonl`.
-- If HA entity list is empty (e.g., fetch failed), HA actions are rejected.
-
-## WeCom bridge (no public ingress to local)
-
-If you cannot expose your local service, run a small VPS bridge and connect via SSE.
-
-VPS (Ubuntu 21, Go build + systemd):
-
-```bash
-sudo apt-get update
-sudo apt-get install -y golang
-cd /path/to/Paimon
-go build -o wecom-bridge ./tools/wecom-bridge.go
-```
-
-Create env file (e.g. `/etc/wecom-bridge.env`):
-
-```bash
-WECOM_TOKEN=your_wecom_token
-WECOM_AES_KEY=your_encoding_aes_key
-WECOM_RECEIVE_ID=your_receive_id_optional
-WECOM_BRIDGE_TOKEN=your_stream_token
-BRIDGE_BUFFER_SIZE=200
-PORT=8080
-```
-
-Systemd unit (silent run to avoid log noise):
-
-```ini
-[Unit]
-Description=WeCom Bridge
-After=network.target
-
-[Service]
-Type=simple
-EnvironmentFile=/etc/wecom-bridge.env
-WorkingDirectory=/path/to/Paimon
-ExecStart=/path/to/Paimon/wecom-bridge
-Restart=on-failure
-RestartSec=2
-StandardOutput=null
-StandardError=null
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable wecom-bridge
-sudo systemctl start wecom-bridge
-```
-
-Local (agent):
-
-```bash
-export WECOM_BRIDGE_URL="http://your-vps-domain:8080"
-export WECOM_BRIDGE_TOKEN="your_stream_token"
-```
-
-## Session memory (MEMORY.MD)
-
-Per-session memory is stored at `data/memory/<sessionId>/MEMORY.md` and injected into LLM runtime context as `memory`.
-
-## Self-Improving Evolution Engine
-
-Paimon now includes a built-in evolution loop for autonomous repo changes based on queued goals.
-
-State stores (`json-file` backend):
-
-- `evolution.state`
-- `evolution.retry_queue`
-- `evolution.metrics`
-
-Core behavior:
-
-- Tick loop (default every 30s): fetch pending goal or due retry.
-- Plan via `codex exec --json`.
-- Execute each plan step via codex.
-- Run checks (`npm test` / `npm lint` / `tsc --noEmit`, based on available scripts).
-- Auto-fix from check summary when failures occur.
-- Exponential backoff retry for 429/rate-limit (`10m * 2^attempt`, max 6h).
-- Auto commit after checks pass.
-- Auto push after commit succeeds (to configured remote/branch or current upstream).
-- Push failure marks goal as failed and enters existing failure/retry flow.
-- Update metrics and goal events.
-
-Admin APIs:
-
-- `GET /admin/api/evolution/state`
-- `POST /admin/api/evolution/goals`
-- `POST /admin/api/evolution/tick`
-
-Evolution Admin (UI):
-
-- `统一队列模块（Goal+Retry+History）`：按 `goalId` 合并 `state.goals`、`state.history`、`retryQueue.items`，在同一表格展示 active/retry/history。
-- 字段来源：
-- `goalId`：来自 `goal.id` / `history.id` / `retryItem.goalId`（同一 `goalId` 去重）。
-- `goal`：优先 `state.goals[].goal`，其次 `state.history[].goal`。
-- `status` / `stage` / `stepProgress`：优先当前 goal；无 goal 时回退 history；仅 retry 时状态/阶段为 `waiting_retry`，步骤为 `-`。
-- `retrySummary` / `nextRetryAt`：综合 `goal.retries`、`history.retries` 与 `retryQueue.items[]`；`nextRetryAt` 取最早待重试时间。
-- `updatedAt` / `completedAt`：`completedAt` 取 goal/history 完成时间；`updatedAt` 取 goal 更新时间、完成时间、重试时间中的最新值。
-
-WeCom / HTTP direct commands:
-
-- `/evolve <goal>`
-- `/coding <goal>`
-- `/evolve status`
-- `/evolve status <goalId>`
-- `/evolve tick`
-
-Example:
-
-```bash
-curl -s http://localhost:3000/admin/api/evolution/goals \
-  -H "Content-Type: application/json" \
-  -d '{
-    "goal": "增加一个插件系统，支持动态加载工具模块",
-    "commitMessage": "feat: add dynamic plugin loader"
-  }'
-```
-
-Optional env:
-
-- `EVOLUTION_TICK_MS` (default `30000`)
-- `EVOLUTION_MAX_FIX_ATTEMPTS` (default `2`)
-- `EVOLUTION_MAX_RETRY_ATTEMPTS` (default `6`)
-- `EVOLUTION_RETRY_BASE_MS` (default `600000`)
-- `EVOLUTION_RETRY_MAX_MS` (default `21600000`)
-- `EVOLUTION_ENABLE_HARD_ROLLBACK` (default `false`)
-- `EVOLUTION_GIT_PUSH_REMOTE` (optional, higher priority than git upstream)
-- `EVOLUTION_GIT_PUSH_BRANCH` (optional, higher priority than git upstream)
-
-Commit message rule:
-
-- If request payload includes `commitMessage`, engine uses it as-is.
-- If `commitMessage` is not provided, engine generates one from staged diff before commit.
-- If generation fails, engine falls back to a deterministic message.
-
-## Skills (extensible)
-
-Create a skill under `skills/<name>/SKILL.md`.
-
-Layering rules:
-
-- Keep integration adapters flat under `src/integrations/<domain>/`.
-- Keep all LLM-callable tool implementations in `src/tools/` (one tool per file, self-register).
-- Keep `src/skills/` focused on skill metadata management.
-
-Example structure:
-
-```
-skills/my-skill/SKILL.md
-src/integrations/my-integration/client.ts
-src/tools/mySkillTool.ts
-```
-
-In `SKILL.md`, define runtime contract fields:
-
-- `tool`
-- `action`
-- `params`
-
-And describe LLM output JSON as:
-
-```json
-{
-  "tool": "tool_name",
-  "action": "action_name",
-  "params": {
-    "key": "value"
-  }
-}
-```
-
-Runtime parser accepts both `action/params` and legacy `op/args`, then routes to the registered tool.
-
-## Market Analysis Capability
-
-`market-analysis` skill is built in and supports deterministic A-share/ETF/fund analysis.
-
-When LLM explanation is enabled, the input `signalResult` sent to LLM includes both 股票代码+名称 via `assetSignals[].code` and `assetSignals[].name`.
-For `analysisEngine: gpt_plugin`, the returned `summary` explicitly cites the data basis behind each signal conclusion (including benchmark context, per-asset code/name/signal, key available metrics, and missing data when unavailable).
-To keep `chatgpt-bridge` stable, the prompt is still assembled with the existing string-array + `join(\"\")` pattern and does not introduce extra newline characters.
-
-Direct commands:
-
-```bash
-/market midday
-/market close
-/market status
-/market portfolio
-```
-
-Data files:
-
-- Portfolio: `data/market-analysis/portfolio.json`
-- Analysis config: `data/market-analysis/config.json`
-- Run snapshots: `data/market-analysis/runs/*.json`
-- Run index: `data/market-analysis/state.json`
-
-Portfolio schema:
-
-```json
-{
-  "funds": [
-    {
-      "code": "510300",
-      "name": "沪深300ETF",
-      "quantity": 1000,
-      "avgCost": 3.85
-    }
-  ],
-  "cash": 12000
-}
-```
-
-Analysis engine config schema:
-
-```json
-{
-  "version": 1,
-  "analysisEngine": "local",
-  "gptPlugin": {
-    "timeoutMs": 20000,
-    "fallbackToLocal": true
-  }
-}
-```
-
-Switch example (`local` -> `gpt_plugin`):
-
-```bash
-curl -s http://localhost:3000/admin/api/market/config \
-  -H "Content-Type: application/json" \
-  -X PUT \
-  -d '{
-    "analysisConfig": {
-      "analysisEngine": "gpt_plugin",
-      "gptPlugin": {
-        "timeoutMs": 20000,
-        "fallbackToLocal": true
-      }
-    }
-  }'
-```
-
-Recommended scheduler setup (daily):
-
-- `13:30` with message `/market midday`
-- `15:15` with message `/market close`
-
-Admin API:
-
-- `GET /admin/api/market/config`
-- `PUT /admin/api/market/config`
-- `GET /admin/api/market/runs?limit=12`
-- `GET /admin/api/market/runs/latest`
-- `POST /admin/api/market/run-once`
-- `POST /admin/api/market/tasks/bootstrap` (upsert two daily market tasks for a user)
-
-Admin Market holdings editing:
-
-- Portfolio rows in Admin Market are saved per-row. After editing one holding, click that row's save action to persist the change.
-- Row status indicates whether the holding is unsaved, saving, or saved.
-- Holding `name` is persisted together with `code`, `quantity`, and `avgCost`.
-- `GET /admin/api/market/config` returns holding names at `portfolio.funds[].name`.
-
-`POST /admin/api/market/run-once` (manual one-off run):
-
-- Request body fields:
-- `userId` (string, required): target receiver user id.
-- `phase` (`midday` | `close`, required): generate intraday or close report.
-- `withExplanation` (boolean, optional): when `false`, append `--no-llm` to skip LLM explanation.
-- Only `userId`, `phase`, `withExplanation` are accepted. Any extra field returns `400`.
-
-Request example:
-
-```bash
-curl -s http://localhost:3000/admin/api/market/run-once \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "zhangsan",
-    "phase": "midday",
-    "withExplanation": true
-  }'
-```
-
-Typical success response:
-
-```json
-{
-  "ok": true,
-  "phase": "midday",
-  "message": "/market midday",
-  "acceptedAsync": false,
-  "responseText": "已生成盘中报告",
-  "imageCount": 1
-}
-```
-
-Typical async accepted response:
-
-```json
-{
-  "ok": true,
-  "phase": "close",
-  "message": "/market close --no-llm",
-  "acceptedAsync": true,
-  "responseText": "任务已受理，稍后推送",
-  "imageCount": 0
-}
-```
-
-Typical `400` responses:
-
-```json
-{ "ok": false, "error": "userId is required" }
-```
-
-```json
-{ "ok": false, "error": "phase must be midday or close" }
-```
-
-Relation with scheduled tasks:
-
-- `run-once` triggers an immediate single execution and does not create/update cron tasks.
-- Scheduled daily execution still uses `/admin/api/market/tasks/bootstrap` and task settings.
-
-Manual one-off report generation:
-
-1. Confirm target `userId` exists and can receive messages.
-2. Trigger intraday run:
-
-```bash
-curl -s http://localhost:3000/admin/api/market/run-once \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"zhangsan","phase":"midday","withExplanation":true}'
-```
-
-3. Trigger close run (without LLM explanation):
-
-```bash
-curl -s http://localhost:3000/admin/api/market/run-once \
-  -H "Content-Type: application/json" \
-  -d '{"userId":"zhangsan","phase":"close","withExplanation":false}'
-```
-
-4. Verify latest run record:
-
-```bash
-curl -s "http://localhost:3000/admin/api/market/runs/latest?phase=midday"
-curl -s "http://localhost:3000/admin/api/market/runs/latest?phase=close"
-```
+更多独立脚本可查看 [tools/README.md](tools/README.md)。
