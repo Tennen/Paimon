@@ -1,28 +1,39 @@
 import { SkillPlanningResult, SkillSelectionResult } from "../../types";
 import { parseSkillPlanningResult, parseSkillSelectionResult } from "./json_guard";
-import { LLMEngine, LLMExecutionStep, LLMPlanningOptions, LLMProvider, LLMRuntimeContext } from "./llm";
+import {
+  LLMChatMessage,
+  LLMChatRequest,
+  LLMChatStep,
+  LLMEngine,
+  LLMExecutionStep,
+  LLMPlanningOptions,
+  LLMProvider,
+  LLMRuntimeContext
+} from "./llm";
 import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
 
 const JSON_RETRY_HINT = "Output MUST be valid JSON only. No other text.";
 
-type WorkflowEngineOptions = {
+type ChatEngineOptions = {
   maxRetries: number;
   strictJson: boolean;
 };
 
-export type WorkflowStepRequest = {
-  step: LLMExecutionStep;
+export type InternalChatRequest = {
+  step: LLMChatStep;
   model: string;
-  systemPrompt: string;
-  userPrompt: string;
+  messages: LLMChatMessage[];
+  timeoutMs?: number;
+  options?: Record<string, unknown>;
+  keepAlive?: number;
   planningOptions?: LLMPlanningOptions;
 };
 
-export abstract class LLMWorkflowEngine implements LLMEngine {
+export abstract class LLMChatEngine implements LLMEngine {
   private readonly maxRetries: number;
   private readonly strictJson: boolean;
 
-  protected constructor(options: WorkflowEngineOptions) {
+  protected constructor(options: ChatEngineOptions) {
     this.maxRetries = options.maxRetries;
     this.strictJson = options.strictJson;
   }
@@ -31,10 +42,24 @@ export abstract class LLMWorkflowEngine implements LLMEngine {
 
   abstract getProviderName(): LLMProvider;
 
-  protected abstract requestWorkflowStep(request: WorkflowStepRequest): Promise<string>;
+  protected abstract executeChat(request: InternalChatRequest): Promise<string>;
+
+  async chat(request: LLMChatRequest): Promise<string> {
+    const step = request.step ?? "general";
+    const model = request.model ?? this.resolveModelForChatStep(step);
+    return this.executeChat({
+      step,
+      model,
+      messages: request.messages,
+      timeoutMs: request.timeoutMs,
+      options: request.options,
+      keepAlive: request.keepAlive,
+      planningOptions: request.planningOptions
+    });
+  }
 
   async selectSkill(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult> {
-    return this.executeWorkflowStep<SkillSelectionResult>({
+    return this.executeStructuredStep<SkillSelectionResult>({
       step: "skill_selection",
       text,
       runtimeContext,
@@ -49,7 +74,7 @@ export abstract class LLMWorkflowEngine implements LLMEngine {
     runtimeContext: LLMRuntimeContext,
     planningOptions?: LLMPlanningOptions
   ): Promise<SkillPlanningResult> {
-    return this.executeWorkflowStep<SkillPlanningResult>({
+    return this.executeStructuredStep<SkillPlanningResult>({
       step: "skill_planning",
       text,
       runtimeContext,
@@ -66,7 +91,7 @@ export abstract class LLMWorkflowEngine implements LLMEngine {
     });
   }
 
-  private async executeWorkflowStep<T>(request: {
+  private async executeStructuredStep<T>(request: {
     step: LLMExecutionStep;
     text: string;
     runtimeContext: LLMRuntimeContext;
@@ -90,11 +115,13 @@ export abstract class LLMWorkflowEngine implements LLMEngine {
           console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
         }
 
-        const raw = await this.requestWorkflowStep({
+        const raw = await this.executeChat({
           step: request.step,
           model,
-          systemPrompt,
-          userPrompt,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt }
+          ],
           planningOptions: request.planningOptions
         });
 
@@ -115,5 +142,12 @@ export abstract class LLMWorkflowEngine implements LLMEngine {
     }
 
     return request.fallback();
+  }
+
+  private resolveModelForChatStep(step: LLMChatStep): string {
+    if (step === "skill_planning") {
+      return this.getModelForStep("skill_planning");
+    }
+    return this.getModelForStep("skill_selection");
   }
 }

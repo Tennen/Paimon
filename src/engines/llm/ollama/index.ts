@@ -1,5 +1,5 @@
 import { LLMExecutionStep, LLMPlanMeta } from "../llm";
-import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_runtime";
+import { InternalChatRequest, LLMChatEngine } from "../chat_engine";
 
 export type OllamaMessage = {
   role: "system" | "user" | "assistant";
@@ -70,7 +70,7 @@ const DEFAULT_EARLY_STOPPING_PROMPT =
 const DEFAULT_CONTINUE_PROMPT =
   "Continue and finish your pending response now. If you are still in thinking mode, stop thinking and provide the final answer directly.";
 
-export class OllamaLLMEngine extends LLMWorkflowEngine {
+export class OllamaLLMEngine extends LLMChatEngine {
   private readonly options: OllamaLLMOptions;
 
   private static readonly THINKING_MODE_OPTIONS: OllamaChatOptions = {
@@ -115,38 +115,47 @@ export class OllamaLLMEngine extends LLMWorkflowEngine {
     return "ollama";
   }
 
-  protected async requestWorkflowStep(request: WorkflowStepRequest): Promise<string> {
+  protected async executeChat(request: InternalChatRequest): Promise<string> {
+    if (request.step === "general") {
+      return this.executeOllamaChat({
+        baseUrl: this.options.baseUrl,
+        model: request.model,
+        keepAlive: request.keepAlive,
+        timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+        options: toOllamaChatOptions(request.options),
+        messages: request.messages.map(toOllamaMessage)
+      });
+    }
+
     if (request.step === "skill_selection") {
       return this.executeOllamaChat({
         baseUrl: this.options.baseUrl,
         model: request.model,
-        keepAlive: 0,
-        timeoutMs: this.options.timeoutMs,
-        messages: [
-          { role: "system", content: request.systemPrompt },
-          { role: "user", content: request.userPrompt }
-        ]
+        keepAlive: request.keepAlive ?? 0,
+        timeoutMs: request.timeoutMs ?? this.options.timeoutMs,
+        options: toOllamaChatOptions(request.options),
+        messages: request.messages.map(toOllamaMessage)
       });
     }
 
     const effectiveThinkingBudget = this.options.thinkingBudgetEnabled
       ? request.planningOptions?.thinkingBudgetOverride ?? this.options.thinkingBudget
       : undefined;
+    const planningOptions = toOllamaChatOptions(request.options);
 
     return this.executeOllamaChat({
       baseUrl: this.options.baseUrl,
       model: request.model,
-      timeoutMs: this.options.planningTimeoutMs,
-      options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
+      timeoutMs: request.timeoutMs ?? this.options.planningTimeoutMs,
+      options: planningOptions
+        ? { ...OllamaLLMEngine.THINKING_MODE_OPTIONS, ...planningOptions }
+        : OllamaLLMEngine.THINKING_MODE_OPTIONS,
       thinkingBudget: {
         enabled: this.options.thinkingBudgetEnabled,
         budgetTokens: effectiveThinkingBudget,
         maxNewTokens: this.options.thinkingMaxNewTokens
       },
-      messages: [
-        { role: "system", content: request.systemPrompt },
-        { role: "user", content: request.userPrompt }
-      ]
+      messages: request.messages.map(toOllamaMessage)
     });
   }
 
@@ -263,6 +272,27 @@ async function executeOllamaChatRequest(
 
 function hasText(content: string): boolean {
   return String(content ?? "").trim().length > 0;
+}
+
+function toOllamaMessage(message: {
+  role: "system" | "user" | "assistant";
+  content: string;
+  images?: string[];
+}): OllamaMessage {
+  return {
+    role: message.role,
+    content: message.content,
+    images: Array.isArray(message.images) ? message.images : undefined
+  };
+}
+
+function toOllamaChatOptions(
+  options: Record<string, unknown> | undefined
+): OllamaChatOptions | undefined {
+  if (!options) {
+    return undefined;
+  }
+  return options as OllamaChatOptions;
 }
 
 function extractAssistantText(data: OllamaChatRawResponse): string {

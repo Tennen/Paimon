@@ -2,9 +2,6 @@ import { LLMEngine, LLMProvider } from "./llm";
 import { LlamaServerLLMEngine } from "./llama-server";
 import { OllamaLLMEngine } from "./ollama";
 
-export { LLMWorkflowEngine } from "./workflow_runtime";
-export type { WorkflowStepRequest } from "./workflow_runtime";
-
 export function createLLMEngine(providerRaw: string | undefined = process.env.LLM_PROVIDER): LLMEngine {
   const provider = normalizeProvider(providerRaw);
   if (provider === "llama-server") {

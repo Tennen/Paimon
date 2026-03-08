@@ -1,5 +1,5 @@
 import { LLMExecutionStep } from "../llm";
-import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_runtime";
+import { InternalChatRequest, LLMChatEngine } from "../chat_engine";
 
 export type LlamaServerMessage = {
   role: "system" | "user" | "assistant";
@@ -61,7 +61,7 @@ export type LlamaServerLLMOptions = {
   planningExtraBody?: Record<string, unknown> | null;
 };
 
-export class LlamaServerLLMEngine extends LLMWorkflowEngine {
+export class LlamaServerLLMEngine extends LLMChatEngine {
   private readonly options: LlamaServerLLMOptions;
 
   private static readonly DEFAULT_PLANNING_OPTIONS: LlamaServerChatOptions = {
@@ -134,21 +134,23 @@ export class LlamaServerLLMEngine extends LLMWorkflowEngine {
     return "llama-server";
   }
 
-  protected async requestWorkflowStep(request: WorkflowStepRequest): Promise<string> {
+  protected async executeChat(request: InternalChatRequest): Promise<string> {
     const isPlanning = request.step === "skill_planning";
+    const isSelection = request.step === "skill_selection";
 
     return this.executeLlamaServerChat({
       baseUrl: this.options.baseUrl,
       model: request.model,
       apiKey: this.options.apiKey,
-      timeoutMs: isPlanning ? this.options.planningTimeoutMs : this.options.timeoutMs,
-      options: isPlanning ? this.options.planningOptions : this.options.selectionOptions,
-      chatTemplateKwargs: isPlanning ? this.options.planningChatTemplateKwargs : this.options.chatTemplateKwargs,
-      extraBody: isPlanning ? this.options.planningExtraBody : this.options.extraBody,
-      messages: [
-        { role: "system", content: request.systemPrompt },
-        { role: "user", content: request.userPrompt }
-      ]
+      timeoutMs: request.timeoutMs ?? (isPlanning ? this.options.planningTimeoutMs : this.options.timeoutMs),
+      options: toLlamaServerChatOptions(request.options)
+        ?? (isPlanning ? this.options.planningOptions : isSelection ? this.options.selectionOptions : undefined),
+      chatTemplateKwargs: isPlanning ? this.options.planningChatTemplateKwargs : isSelection ? this.options.chatTemplateKwargs : undefined,
+      extraBody: isPlanning ? this.options.planningExtraBody : isSelection ? this.options.extraBody : undefined,
+      messages: request.messages.map((message) => ({
+        role: message.role,
+        content: message.content
+      }))
     });
   }
 
@@ -315,6 +317,15 @@ function parseChatOptions(
   }
 
   return Object.keys(output).length > 0 ? output : undefined;
+}
+
+function toLlamaServerChatOptions(
+  options: Record<string, unknown> | undefined
+): LlamaServerChatOptions | undefined {
+  if (!options) {
+    return undefined;
+  }
+  return options as LlamaServerChatOptions;
 }
 
 function assignNumeric(

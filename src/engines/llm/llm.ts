@@ -27,12 +27,30 @@ export type LLMPlanMeta = {
 };
 
 export type LLMExecutionStep = "skill_selection" | "skill_planning";
+export type LLMChatStep = "general" | LLMExecutionStep;
+
+export type LLMChatMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+  images?: string[];
+};
+
+export type LLMChatRequest = {
+  messages: LLMChatMessage[];
+  step?: LLMChatStep;
+  model?: string;
+  timeoutMs?: number;
+  options?: Record<string, unknown>;
+  keepAlive?: number;
+  planningOptions?: LLMPlanningOptions;
+};
 
 export type LLMPlanningOptions = {
   thinkingBudgetOverride?: number;
 };
 
 export interface LLMEngine {
+  chat(request: LLMChatRequest): Promise<string>;
   selectSkill(text: string, runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult>;
   planToolExecution(
     text: string,

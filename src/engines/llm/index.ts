@@ -1,6 +1,6 @@
-export { createLLMEngine, normalizeProvider } from "./workflow_engine";
-export { LLMWorkflowEngine } from "./workflow_engine";
-export type { WorkflowStepRequest } from "./workflow_engine";
+export { createLLMEngine, normalizeProvider } from "./engine_factory";
+export { LLMChatEngine } from "./chat_engine";
+export type { InternalChatRequest } from "./chat_engine";
 
 export { OllamaLLMEngine } from "./ollama";
 export { LlamaServerLLMEngine } from "./llama-server";

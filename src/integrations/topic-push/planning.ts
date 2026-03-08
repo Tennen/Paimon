@@ -1,6 +1,5 @@
 import { jsonrepair } from "jsonrepair";
-import { ollamaChat } from "../../engines/llm/ollama";
-import { llamaServerChat } from "../../engines/llm/llama-server";
+import { createLLMEngine } from "../../engines/llm";
 import * as chatgptBridge from "../chatgpt-bridge/service";
 import { DEFAULT_TARGET_LANGUAGE } from "./defaults";
 import { asRecord, isRecord, normalizeText, toArray } from "./shared";
@@ -293,7 +292,8 @@ async function chatWithPlanningModel(
     return chatWithGptPluginBridge(systemPrompt, userPrompt);
   }
 
-  const provider = normalizeLlmProvider(process.env.LLM_PROVIDER);
+  const llmEngine = createLLMEngine();
+  const provider = llmEngine.getProviderName();
 
   if (provider === "llama-server") {
     const model = String(
@@ -307,10 +307,9 @@ async function chatWithPlanningModel(
       throw new Error("missing planning model for llama-server");
     }
 
-    return llamaServerChat({
-      baseUrl: String(process.env.LLAMA_SERVER_BASE_URL ?? "http://127.0.0.1:8080").trim(),
+    return llmEngine.chat({
+      step: "general",
       model,
-      apiKey: String(process.env.LLAMA_SERVER_API_KEY ?? process.env.OPENAI_API_KEY ?? "").trim(),
       timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
       messages: [
         { role: "system", content: systemPrompt },
@@ -324,8 +323,8 @@ async function chatWithPlanningModel(
     throw new Error("missing planning model for ollama");
   }
 
-  return ollamaChat({
-    baseUrl: String(process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").trim(),
+  return llmEngine.chat({
+    step: "general",
     model,
     timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
     options: {
@@ -522,14 +521,6 @@ function shouldUsePlanningModelRefine(): boolean {
     return false;
   }
   return true;
-}
-
-function normalizeLlmProvider(raw: string | undefined): "ollama" | "llama-server" {
-  const value = String(raw ?? "").trim().toLowerCase();
-  if (["llama-server", "llama_server", "llama.cpp", "llamacpp", "llama"].includes(value)) {
-    return "llama-server";
-  }
-  return "ollama";
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
