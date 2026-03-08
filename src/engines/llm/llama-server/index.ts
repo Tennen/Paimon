@@ -1,5 +1,5 @@
 import { LLMExecutionStep } from "../llm";
-import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_engine";
+import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_runtime";
 
 export type LlamaServerMessage = {
   role: "system" | "user" | "assistant";

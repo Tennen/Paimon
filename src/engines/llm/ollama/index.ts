@@ -1,5 +1,5 @@
 import { LLMExecutionStep, LLMPlanMeta } from "../llm";
-import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_engine";
+import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_runtime";
 
 export type OllamaMessage = {
   role: "system" | "user" | "assistant";

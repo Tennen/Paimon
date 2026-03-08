@@ -1,28 +1,6 @@
-import { LLMEngine, LLMProvider } from "./llm";
-import { LlamaServerLLMEngine } from "./llama-server";
-import { OllamaLLMEngine } from "./ollama";
-
-export function createLLMEngine(providerRaw: string | undefined = process.env.LLM_PROVIDER): LLMEngine {
-  const provider = normalizeProvider(providerRaw);
-  if (provider === "llama-server") {
-    return new LlamaServerLLMEngine();
-  }
-  return new OllamaLLMEngine();
-}
-
-function normalizeProvider(providerRaw: string | undefined): LLMProvider {
-  const value = String(providerRaw ?? "").trim().toLowerCase();
-  if (!value) {
-    return "ollama";
-  }
-  if (["llama-server", "llama_server", "llama.cpp", "llamacpp", "llama"].includes(value)) {
-    return "llama-server";
-  }
-  if (value !== "ollama") {
-    console.warn(`[LLM] unknown provider '${providerRaw}', fallback to ollama`);
-  }
-  return "ollama";
-}
+export { createLLMEngine, normalizeProvider } from "./workflow_engine";
+export { LLMWorkflowEngine } from "./workflow_engine";
+export type { WorkflowStepRequest } from "./workflow_engine";
 
 export { OllamaLLMEngine } from "./ollama";
 export { LlamaServerLLMEngine } from "./llama-server";
