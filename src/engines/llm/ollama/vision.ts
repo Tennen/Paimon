@@ -1,4 +1,4 @@
-import { ollamaChat } from "./client";
+import { ollamaChat } from ".";
 
 export type VisionDescribeOptions = {
   baseUrl: string;

@@ -1,4 +1,4 @@
-import { LLMRuntimeContext } from "../llm";
+import { LLMRuntimeContext } from "./llm";
 
 export enum PromptMode {
   SkillSelection = "skill_selection",

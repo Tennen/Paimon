@@ -1,6 +1,6 @@
 import { jsonrepair } from "jsonrepair";
-import { ollamaChat } from "../../engines/llm/ollama/client";
-import { llamaServerChat } from "../../engines/llm/llama-server/client";
+import { ollamaChat } from "../../engines/llm/ollama";
+import { llamaServerChat } from "../../engines/llm/llama-server";
 import * as chatgptBridge from "../chatgpt-bridge/service";
 import { DEFAULT_TARGET_LANGUAGE } from "./defaults";
 import { asRecord, isRecord, normalizeText, toArray } from "./shared";

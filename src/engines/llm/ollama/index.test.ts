@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { OllamaLLMOptions } from "./index";
-import type { OllamaChatRequest } from "./client";
+import type { OllamaChatRequest, OllamaLLMOptions } from "./index";
+import { OllamaLLMEngine } from "./index";
 
 const PLANNING_RESPONSE = JSON.stringify({
   tool: "terminal",
@@ -27,77 +27,55 @@ function createEngineOptions(options?: Partial<OllamaLLMOptions>): Partial<Ollam
   };
 }
 
-function createMockModule(modulePath: string, exports: Record<string, unknown>): NodeModule {
-  const Module = require("node:module");
-  const mod = new Module.Module(modulePath);
-  mod.filename = modulePath;
-  mod.paths = Module._nodeModulePaths(process.cwd());
-  mod.loaded = true;
-  mod.exports = exports;
-  return mod as NodeModule;
+class MockOllamaLLMEngine extends OllamaLLMEngine {
+  constructor(
+    options: Partial<OllamaLLMOptions>,
+    private readonly calls: OllamaChatRequest[]
+  ) {
+    super(options);
+  }
+
+  protected override async executeOllamaChat(request: OllamaChatRequest): Promise<string> {
+    this.calls.push(request);
+    return PLANNING_RESPONSE;
+  }
 }
 
 test("planToolExecution uses override budget first and falls back to default budget", async () => {
   const calls: OllamaChatRequest[] = [];
-  const mockOllamaChat = async (request: OllamaChatRequest): Promise<string> => {
-    calls.push(request);
-    return PLANNING_RESPONSE;
-  };
 
-  const clientPath = require.resolve("./client");
-  const indexPath = require.resolve("./index");
-  const originalClientCache = require.cache[clientPath];
-  const originalIndexCache = require.cache[indexPath];
+  const engineWithOverride = new MockOllamaLLMEngine(createEngineOptions({
+    thinkingBudgetEnabled: true,
+    thinkingBudget: 1024,
+    thinkingMaxNewTokens: 4096
+  }), calls);
+  const overridePlan = await engineWithOverride.planToolExecution(
+    "run",
+    {},
+    { thinkingBudgetOverride: 2048 }
+  );
+  assert.equal(overridePlan.op, "run");
+  assert.equal(calls[0]?.thinkingBudget?.enabled, true);
+  assert.equal(calls[0]?.thinkingBudget?.budgetTokens, 2048);
+  assert.equal(calls[0]?.thinkingBudget?.maxNewTokens, 4096);
 
-  try {
-    delete require.cache[indexPath];
-    require.cache[clientPath] = createMockModule(clientPath, { ollamaChat: mockOllamaChat });
+  const engineWithFallback = new MockOllamaLLMEngine(createEngineOptions({
+    thinkingBudgetEnabled: true,
+    thinkingBudget: 1536
+  }), calls);
+  await engineWithFallback.planToolExecution("run", {});
+  assert.equal(calls[1]?.thinkingBudget?.enabled, true);
+  assert.equal(calls[1]?.thinkingBudget?.budgetTokens, 1536);
 
-    const { OllamaLLMEngine } = require("./index") as typeof import("./index");
-
-    const engineWithOverride = new OllamaLLMEngine(createEngineOptions({
-      thinkingBudgetEnabled: true,
-      thinkingBudget: 1024,
-      thinkingMaxNewTokens: 4096
-    }));
-    const overridePlan = await engineWithOverride.planToolExecution(
-      "run",
-      {},
-      { thinkingBudgetOverride: 2048 }
-    );
-    assert.equal(overridePlan.op, "run");
-    assert.equal(calls[0]?.thinkingBudget?.enabled, true);
-    assert.equal(calls[0]?.thinkingBudget?.budgetTokens, 2048);
-    assert.equal(calls[0]?.thinkingBudget?.maxNewTokens, 4096);
-
-    const engineWithFallback = new OllamaLLMEngine(createEngineOptions({
-      thinkingBudgetEnabled: true,
-      thinkingBudget: 1536
-    }));
-    await engineWithFallback.planToolExecution("run", {});
-    assert.equal(calls[1]?.thinkingBudget?.enabled, true);
-    assert.equal(calls[1]?.thinkingBudget?.budgetTokens, 1536);
-
-    const disabledThinkingBudgetEngine = new OllamaLLMEngine(createEngineOptions({
-      thinkingBudgetEnabled: false,
-      thinkingBudget: 1536
-    }));
-    await disabledThinkingBudgetEngine.planToolExecution(
-      "run",
-      {},
-      { thinkingBudgetOverride: 3072 }
-    );
-    assert.equal(calls[2]?.thinkingBudget?.enabled, false);
-    assert.equal(calls[2]?.thinkingBudget?.budgetTokens, undefined);
-  } finally {
-    delete require.cache[indexPath];
-    if (originalIndexCache) {
-      require.cache[indexPath] = originalIndexCache;
-    }
-    if (originalClientCache) {
-      require.cache[clientPath] = originalClientCache;
-    } else {
-      delete require.cache[clientPath];
-    }
-  }
+  const disabledThinkingBudgetEngine = new MockOllamaLLMEngine(createEngineOptions({
+    thinkingBudgetEnabled: false,
+    thinkingBudget: 1536
+  }), calls);
+  await disabledThinkingBudgetEngine.planToolExecution(
+    "run",
+    {},
+    { thinkingBudgetOverride: 3072 }
+  );
+  assert.equal(calls[2]?.thinkingBudget?.enabled, false);
+  assert.equal(calls[2]?.thinkingBudget?.budgetTokens, undefined);
 });

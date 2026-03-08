@@ -1,7 +1,55 @@
-import { LLMEngine, LLMRuntimeContext, LLMPlanMeta, LLMExecutionStep, LLMPlanningOptions } from "../llm";
-import { ollamaChat } from "./client";
-import { buildSystemPrompt, buildUserPrompt, PromptMode } from "./prompt";
-import { parseSkillSelectionResult, parseSkillPlanningResult } from "../json_guard";
+import { LLMExecutionStep, LLMPlanMeta } from "../llm";
+import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_engine";
+
+export type OllamaMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+  images?: string[];
+};
+
+export type OllamaChatOptions = {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  num_predict?: number;
+  presence_penalty?: number;
+  repeat_penalty?: number;
+  stop?: string[];
+};
+
+export type OllamaThinkingBudgetConfig = {
+  enabled?: boolean;
+  budgetTokens?: number;
+  maxNewTokens?: number;
+  earlyStoppingPrompt?: string;
+  continuePrompt?: string;
+};
+
+export type OllamaChatRequest = {
+  baseUrl: string;
+  model: string;
+  messages: OllamaMessage[];
+  timeoutMs: number;
+  keepAlive?: number;
+  options?: OllamaChatOptions;
+  thinkingBudget?: OllamaThinkingBudgetConfig;
+};
+
+type OllamaChatRawResponse = {
+  message?: { content?: string; thinking?: string; reasoning?: string };
+  response?: string;
+  thinking?: string;
+  reasoning?: string;
+  done?: boolean;
+  done_reason?: string;
+};
+
+type OllamaChatResult = {
+  content: string;
+  done: boolean;
+  doneReason: string;
+};
 
 export type OllamaLLMOptions = {
   baseUrl: string;
@@ -16,29 +64,43 @@ export type OllamaLLMOptions = {
   thinkingMaxNewTokens: number;
 };
 
-export class OllamaLLMEngine implements LLMEngine {
+const DEFAULT_THINKING_MAX_NEW_TOKENS = 32768;
+const DEFAULT_EARLY_STOPPING_PROMPT =
+  "\n\nConsidering the limited time by the user, I have to give the solution based on the thinking directly now.\n</think>\n\n";
+const DEFAULT_CONTINUE_PROMPT =
+  "Continue and finish your pending response now. If you are still in thinking mode, stop thinking and provide the final answer directly.";
+
+export class OllamaLLMEngine extends LLMWorkflowEngine {
   private readonly options: OllamaLLMOptions;
-  private static readonly THINKING_MODE_OPTIONS = {
+
+  private static readonly THINKING_MODE_OPTIONS: OllamaChatOptions = {
     temperature: 0.6,
     top_p: 0.95,
     top_k: 20,
     min_p: 0,
     num_predict: 32768,
     presence_penalty: 0
-  } as const;
+  };
 
   constructor(options?: Partial<OllamaLLMOptions>) {
     const defaultModel = options?.model ?? process.env.OLLAMA_MODEL ?? "qwen3:4b";
-    const defaultTimeoutMs = parseInt(process.env.LLM_TIMEOUT_MS ?? "30000", 10);
+    const defaultTimeoutMs = parseEnvPositiveInteger(process.env.LLM_TIMEOUT_MS, 30000);
+    const maxRetries = parseEnvPositiveInteger(process.env.LLM_MAX_RETRIES, 2);
+    const strictJson = parseEnvBoolean(process.env.LLM_STRICT_JSON, true);
+
+    super({
+      maxRetries: options?.maxRetries ?? maxRetries,
+      strictJson: options?.strictJson ?? strictJson
+    });
 
     this.options = {
       baseUrl: options?.baseUrl ?? process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
       model: defaultModel,
       planningModel: options?.planningModel ?? process.env.OLLAMA_PLANNING_MODEL ?? defaultModel,
       timeoutMs: options?.timeoutMs ?? defaultTimeoutMs,
-      planningTimeoutMs: options?.planningTimeoutMs ?? parseInt(process.env.LLM_PLANNING_TIMEOUT_MS ?? String(defaultTimeoutMs), 10),
-      maxRetries: options?.maxRetries ?? parseInt(process.env.LLM_MAX_RETRIES ?? "2", 10),
-      strictJson: options?.strictJson ?? (process.env.LLM_STRICT_JSON ?? "true") === "true",
+      planningTimeoutMs: options?.planningTimeoutMs ?? parseEnvPositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, defaultTimeoutMs),
+      maxRetries: options?.maxRetries ?? maxRetries,
+      strictJson: options?.strictJson ?? strictJson,
       thinkingBudgetEnabled: options?.thinkingBudgetEnabled ?? parseEnvBoolean(process.env.LLM_THINKING_BUDGET_ENABLED, false),
       thinkingBudget: options?.thinkingBudget ?? parseEnvPositiveInteger(process.env.LLM_THINKING_BUDGET, 1024),
       thinkingMaxNewTokens: options?.thinkingMaxNewTokens ?? parseEnvPositiveInteger(process.env.LLM_THINKING_MAX_NEW_TOKENS, 32768)
@@ -53,117 +115,43 @@ export class OllamaLLMEngine implements LLMEngine {
     return "ollama";
   }
 
-  async selectSkill(
-    text: string,
-    runtimeContext: LLMRuntimeContext
-  ): Promise<{ decision: "respond" | "use_skill"; skill_name?: string; response_text?: string }> {
-    const mode = PromptMode.SkillSelection;
-    const model = this.options.model;
-    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
-    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
-
-    let retries = 0;
-    let lastRaw = "";
-
-    for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
-      const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
-      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
-
-      try {
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
-        }
-        lastRaw = await ollamaChat({
-          baseUrl: this.options.baseUrl,
-          model,
-          keepAlive: 0,
-          timeoutMs: this.options.timeoutMs,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        });
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
-        }
-
-        const result = parseSkillSelectionResult(lastRaw);
-        return result;
-      } catch (err) {
-        console.error("ollamaChat failed", err);
-        if (attempt < this.options.maxRetries) {
-          retries += 1;
-          continue;
-        }
-      }
+  protected async requestWorkflowStep(request: WorkflowStepRequest): Promise<string> {
+    if (request.step === "skill_selection") {
+      return this.executeOllamaChat({
+        baseUrl: this.options.baseUrl,
+        model: request.model,
+        keepAlive: 0,
+        timeoutMs: this.options.timeoutMs,
+        messages: [
+          { role: "system", content: request.systemPrompt },
+          { role: "user", content: request.userPrompt }
+        ]
+      });
     }
 
-    return { decision: "respond", response_text: "OK" };
-  }
-
-  async planToolExecution(
-    text: string,
-    runtimeContext: LLMRuntimeContext,
-    planningOptions?: LLMPlanningOptions
-  ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
-    const mode = PromptMode.SkillPlanning;
-    const model = this.options.planningModel;
-    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
-    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
     const effectiveThinkingBudget = this.options.thinkingBudgetEnabled
-      ? planningOptions?.thinkingBudgetOverride ?? this.options.thinkingBudget
+      ? request.planningOptions?.thinkingBudgetOverride ?? this.options.thinkingBudget
       : undefined;
 
-    let retries = 0;
-    let lastRaw = "";
+    return this.executeOllamaChat({
+      baseUrl: this.options.baseUrl,
+      model: request.model,
+      timeoutMs: this.options.planningTimeoutMs,
+      options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
+      thinkingBudget: {
+        enabled: this.options.thinkingBudgetEnabled,
+        budgetTokens: effectiveThinkingBudget,
+        maxNewTokens: this.options.thinkingMaxNewTokens
+      },
+      messages: [
+        { role: "system", content: request.systemPrompt },
+        { role: "user", content: request.userPrompt }
+      ]
+    });
+  }
 
-    for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
-      const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
-      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
-
-      try {
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
-        }
-        lastRaw = await ollamaChat({
-          baseUrl: this.options.baseUrl,
-          model,
-          timeoutMs: this.options.planningTimeoutMs,
-          options: OllamaLLMEngine.THINKING_MODE_OPTIONS,
-          thinkingBudget: {
-            enabled: this.options.thinkingBudgetEnabled,
-            budgetTokens: effectiveThinkingBudget,
-            maxNewTokens: this.options.thinkingMaxNewTokens
-          },
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        });
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${lastRaw}`);
-        }
-
-        const result = parseSkillPlanningResult(lastRaw);
-        return result;
-      } catch (err) {
-        console.error("ollamaChat failed", err);
-        if (attempt < this.options.maxRetries) {
-          retries += 1;
-          continue;
-        }
-      }
-    }
-
-    return {
-      tool: "unknown",
-      op: "unknown",
-      args: {},
-      success_response: "Tool execution succeeded",
-      failure_response: "Tool execution failed"
-    };
+  protected async executeOllamaChat(request: OllamaChatRequest): Promise<string> {
+    return ollamaChat(request);
   }
 
   getMeta(retries: number, parseOk: boolean, rawOutputLength: number, fallback: boolean): LLMPlanMeta {
@@ -176,6 +164,152 @@ export class OllamaLLMEngine implements LLMEngine {
       fallback
     };
   }
+}
+
+export async function ollamaChat(request: OllamaChatRequest): Promise<string> {
+  const thinkingConfig = request.thinkingBudget;
+  const budget = normalizePositiveInteger(thinkingConfig?.budgetTokens);
+  const thinkingEnabled = thinkingConfig?.enabled === true && budget !== null && isQwenModel(request.model);
+
+  if (!thinkingEnabled || budget === null) {
+    const single = await executeOllamaChatRequest(request, request.messages, request.options);
+    if (!hasText(single.content)) {
+      throw new Error("Ollama response missing content");
+    }
+    return single.content;
+  }
+
+  // Pass 1: enforce a thinking-token budget.
+  const firstPass = await executeOllamaChatRequest(
+    request,
+    request.messages,
+    { ...(request.options ?? {}), num_predict: budget }
+  );
+  if (firstPass.doneReason !== "length") {
+    if (!hasText(firstPass.content)) {
+      throw new Error("Ollama response missing content");
+    }
+    return firstPass.content;
+  }
+
+  // Pass 2: budget reached on pass 1, append early-stop prompt and continue.
+  const firstPassText = hasText(firstPass.content) ? firstPass.content : "";
+  const secondPassMessages: OllamaMessage[] = [
+    ...request.messages,
+    {
+      role: "assistant",
+      content: `${firstPassText}${thinkingConfig?.earlyStoppingPrompt ?? DEFAULT_EARLY_STOPPING_PROMPT}`
+    },
+    {
+      role: "user",
+      content: thinkingConfig?.continuePrompt ?? DEFAULT_CONTINUE_PROMPT
+    }
+  ];
+
+  const secondPass = await executeOllamaChatRequest(
+    request,
+    secondPassMessages,
+    resolveSecondPassOptions(request.options, thinkingConfig?.maxNewTokens)
+  );
+  if (!hasText(secondPass.content)) {
+    throw new Error("Ollama response missing content");
+  }
+  return secondPass.content;
+}
+
+async function executeOllamaChatRequest(
+  request: OllamaChatRequest,
+  messages: OllamaMessage[],
+  options: OllamaChatOptions | undefined
+): Promise<OllamaChatResult> {
+  const baseUrl = request.baseUrl.replace(/\/$/, "");
+  const url = `${baseUrl}/api/chat`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: request.model,
+        messages,
+        keep_alive: request.keepAlive ?? 300,
+        stream: false,
+        options
+      }),
+      signal: controller.signal
+    });
+
+    if (!res.ok) {
+      throw new Error(`Ollama HTTP ${res.status}`);
+    }
+
+    const data = (await res.json()) as OllamaChatRawResponse;
+    const content = extractAssistantText(data);
+
+    return {
+      content,
+      done: data.done === true,
+      doneReason: typeof data.done_reason === "string" ? data.done_reason : ""
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function hasText(content: string): boolean {
+  return String(content ?? "").trim().length > 0;
+}
+
+function extractAssistantText(data: OllamaChatRawResponse): string {
+  const contentCandidates = [data.message?.content, data.response];
+  for (const candidate of contentCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate;
+    }
+  }
+
+  const thinkingCandidates = [
+    data.message?.thinking,
+    data.message?.reasoning,
+    data.thinking,
+    data.reasoning
+  ];
+  for (const candidate of thinkingCandidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return `<think>\n${candidate.trim()}\n`;
+    }
+  }
+  return "";
+}
+
+function isQwenModel(model: string): boolean {
+  return /qwen/i.test(String(model ?? ""));
+}
+
+function normalizePositiveInteger(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    return null;
+  }
+  return Math.floor(n);
+}
+
+function resolveSecondPassOptions(
+  base: OllamaChatOptions | undefined,
+  maxNewTokens: unknown
+): OllamaChatOptions {
+  const maxTokens = normalizePositiveInteger(maxNewTokens)
+    ?? normalizePositiveInteger(base?.num_predict)
+    ?? DEFAULT_THINKING_MAX_NEW_TOKENS;
+  return {
+    ...(base ?? {}),
+    num_predict: maxTokens
+  };
 }
 
 function parseEnvPositiveInteger(raw: string | undefined, fallback: number): number {

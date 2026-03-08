@@ -1,7 +1,48 @@
-import { LLMEngine, LLMRuntimeContext, LLMExecutionStep } from "../llm";
-import { buildSystemPrompt, buildUserPrompt, PromptMode } from "../ollama/prompt";
-import { parseSkillSelectionResult, parseSkillPlanningResult } from "../json_guard";
-import { llamaServerChat, LlamaServerChatOptions } from "./client";
+import { LLMExecutionStep } from "../llm";
+import { LLMWorkflowEngine, WorkflowStepRequest } from "../workflow_engine";
+
+export type LlamaServerMessage = {
+  role: "system" | "user" | "assistant";
+  content: string;
+};
+
+export type LlamaServerChatOptions = {
+  temperature?: number;
+  top_p?: number;
+  top_k?: number;
+  min_p?: number;
+  max_tokens?: number;
+  num_predict?: number;
+  presence_penalty?: number;
+  frequency_penalty?: number;
+  repeat_penalty?: number;
+  stop?: string[];
+};
+
+export type LlamaServerChatRequest = {
+  baseUrl: string;
+  model: string;
+  messages: LlamaServerMessage[];
+  timeoutMs: number;
+  apiKey?: string;
+  options?: LlamaServerChatOptions;
+  chatTemplateKwargs?: Record<string, unknown> | null;
+  extraBody?: Record<string, unknown> | null;
+};
+
+type LlamaServerChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+    };
+  }>;
+};
+
+type LlamaServerContentPart = {
+  type?: string;
+  text?: string;
+  content?: string;
+};
 
 export type LlamaServerLLMOptions = {
   baseUrl: string;
@@ -20,7 +61,7 @@ export type LlamaServerLLMOptions = {
   planningExtraBody?: Record<string, unknown> | null;
 };
 
-export class LlamaServerLLMEngine implements LLMEngine {
+export class LlamaServerLLMEngine extends LLMWorkflowEngine {
   private readonly options: LlamaServerLLMOptions;
 
   private static readonly DEFAULT_PLANNING_OPTIONS: LlamaServerChatOptions = {
@@ -38,6 +79,13 @@ export class LlamaServerLLMEngine implements LLMEngine {
       ?? process.env.OLLAMA_MODEL
       ?? "qwen3";
     const defaultTimeoutMs = parsePositiveInteger(process.env.LLM_TIMEOUT_MS, 30000);
+    const maxRetries = parsePositiveInteger(process.env.LLM_MAX_RETRIES, 2);
+    const strictJson = parseBoolean(process.env.LLM_STRICT_JSON, true);
+
+    super({
+      maxRetries: options?.maxRetries ?? maxRetries,
+      strictJson: options?.strictJson ?? strictJson
+    });
 
     const selectionOptions = options?.selectionOptions
       ?? parseChatOptions(process.env.LLAMA_SERVER_CHAT_OPTIONS, undefined, "LLAMA_SERVER_CHAT_OPTIONS");
@@ -66,8 +114,8 @@ export class LlamaServerLLMEngine implements LLMEngine {
       planningModel: options?.planningModel ?? process.env.LLAMA_SERVER_PLANNING_MODEL ?? defaultModel,
       timeoutMs: options?.timeoutMs ?? defaultTimeoutMs,
       planningTimeoutMs: options?.planningTimeoutMs ?? parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, defaultTimeoutMs),
-      maxRetries: options?.maxRetries ?? parsePositiveInteger(process.env.LLM_MAX_RETRIES, 2),
-      strictJson: options?.strictJson ?? parseBoolean(process.env.LLM_STRICT_JSON, true),
+      maxRetries: options?.maxRetries ?? maxRetries,
+      strictJson: options?.strictJson ?? strictJson,
       apiKey: options?.apiKey ?? process.env.LLAMA_SERVER_API_KEY ?? process.env.OPENAI_API_KEY,
       selectionOptions,
       planningOptions,
@@ -86,103 +134,121 @@ export class LlamaServerLLMEngine implements LLMEngine {
     return "llama-server";
   }
 
-  async selectSkill(
-    text: string,
-    runtimeContext: LLMRuntimeContext
-  ): Promise<{ decision: "respond" | "use_skill"; skill_name?: string; response_text?: string }> {
-    const mode = PromptMode.SkillSelection;
-    const model = this.options.model;
-    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
-    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
+  protected async requestWorkflowStep(request: WorkflowStepRequest): Promise<string> {
+    const isPlanning = request.step === "skill_planning";
 
-    for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
-      const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
-      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
-
-      try {
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
-        }
-        const raw = await llamaServerChat({
-          baseUrl: this.options.baseUrl,
-          model,
-          apiKey: this.options.apiKey,
-          timeoutMs: this.options.timeoutMs,
-          options: this.options.selectionOptions,
-          chatTemplateKwargs: this.options.chatTemplateKwargs,
-          extraBody: this.options.extraBody,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        });
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${raw}`);
-        }
-        return parseSkillSelectionResult(raw);
-      } catch (err) {
-        console.error("llamaServerChat failed", err);
-        if (attempt < this.options.maxRetries) {
-          continue;
-        }
-      }
-    }
-
-    return { decision: "respond", response_text: "OK" };
+    return this.executeLlamaServerChat({
+      baseUrl: this.options.baseUrl,
+      model: request.model,
+      apiKey: this.options.apiKey,
+      timeoutMs: isPlanning ? this.options.planningTimeoutMs : this.options.timeoutMs,
+      options: isPlanning ? this.options.planningOptions : this.options.selectionOptions,
+      chatTemplateKwargs: isPlanning ? this.options.planningChatTemplateKwargs : this.options.chatTemplateKwargs,
+      extraBody: isPlanning ? this.options.planningExtraBody : this.options.extraBody,
+      messages: [
+        { role: "system", content: request.systemPrompt },
+        { role: "user", content: request.userPrompt }
+      ]
+    });
   }
 
-  async planToolExecution(
-    text: string,
-    runtimeContext: LLMRuntimeContext
-  ): Promise<{ tool: string; op: string; args: Record<string, unknown>; success_response: string; failure_response: string }> {
-    const mode = PromptMode.SkillPlanning;
-    const model = this.options.planningModel;
-    const userPrompt = buildUserPrompt(text, runtimeContext, { mode });
-    const logPrompts = process.env.LLM_LOG_PROMPTS === "true";
+  protected async executeLlamaServerChat(request: LlamaServerChatRequest): Promise<string> {
+    return llamaServerChat(request);
+  }
+}
 
-    for (let attempt = 0; attempt <= this.options.maxRetries; attempt += 1) {
-      const extraHint = attempt > 0 ? "Output MUST be valid JSON only. No other text." : undefined;
-      const systemPrompt = buildSystemPrompt(mode, this.options.strictJson, extraHint);
+export async function llamaServerChat(request: LlamaServerChatRequest): Promise<string> {
+  const baseUrl = request.baseUrl.replace(/\/$/, "");
+  const url = `${baseUrl}/v1/chat/completions`;
 
-      try {
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] system_prompt:\n${systemPrompt}`);
-          console.log(`[LLM][${model}][attempt ${attempt}] user_prompt:\n${userPrompt}`);
-        }
-        const raw = await llamaServerChat({
-          baseUrl: this.options.baseUrl,
-          model,
-          apiKey: this.options.apiKey,
-          timeoutMs: this.options.planningTimeoutMs,
-          options: this.options.planningOptions,
-          chatTemplateKwargs: this.options.planningChatTemplateKwargs,
-          extraBody: this.options.planningExtraBody,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt }
-          ]
-        });
-        if (logPrompts) {
-          console.log(`[LLM][${model}][attempt ${attempt}] raw_output:\n${raw}`);
-        }
-        return parseSkillPlanningResult(raw);
-      } catch (err) {
-        console.error("llamaServerChat failed", err);
-        if (attempt < this.options.maxRetries) {
-          continue;
-        }
-      }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), request.timeoutMs);
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json"
+  };
+  if (request.apiKey && request.apiKey.trim().length > 0) {
+    headers.Authorization = `Bearer ${request.apiKey.trim()}`;
+  }
+
+  const payload: Record<string, unknown> = {
+    model: request.model,
+    messages: request.messages,
+    stream: false,
+    ...(request.options ?? {})
+  };
+  if (request.chatTemplateKwargs && Object.keys(request.chatTemplateKwargs).length > 0) {
+    payload.chat_template_kwargs = request.chatTemplateKwargs;
+  }
+  if (request.extraBody && Object.keys(request.extraBody).length > 0) {
+    Object.assign(payload, request.extraBody);
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`llama-server HTTP ${response.status}${body ? `: ${truncate(body, 240)}` : ""}`);
     }
 
-    return {
-      tool: "unknown",
-      op: "unknown",
-      args: {},
-      success_response: "Tool execution succeeded",
-      failure_response: "Tool execution failed"
-    };
+    const data = (await response.json()) as LlamaServerChatResponse;
+    const content = extractAssistantText(data);
+    if (!content.trim()) {
+      throw new Error("llama-server response missing content");
+    }
+    return content;
+  } finally {
+    clearTimeout(timeout);
   }
+}
+
+function extractAssistantText(data: LlamaServerChatResponse): string {
+  if (!Array.isArray(data.choices) || data.choices.length === 0) {
+    return "";
+  }
+  return normalizeContent(data.choices[0]?.message?.content);
+}
+
+function normalizeContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  const chunks: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") {
+      chunks.push(part);
+      continue;
+    }
+    if (!part || typeof part !== "object") {
+      continue;
+    }
+    const typedPart = part as LlamaServerContentPart;
+    if (typeof typedPart.text === "string") {
+      chunks.push(typedPart.text);
+      continue;
+    }
+    if (typeof typedPart.content === "string" && typedPart.type === "text") {
+      chunks.push(typedPart.content);
+    }
+  }
+  return chunks.join("");
+}
+
+function truncate(input: string, maxLength: number): string {
+  if (input.length <= maxLength) {
+    return input;
+  }
+  return `${input.slice(0, maxLength)}...`;
 }
 
 function parsePositiveInteger(raw: string | undefined, fallback: number): number {
