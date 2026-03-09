@@ -1,6 +1,6 @@
 import { jsonrepair } from "jsonrepair";
 import { createLLMEngine } from "../../engines/llm";
-import * as chatgptBridge from "../chatgpt-bridge/service";
+import { executeInNewChat } from "../chatgpt-bridge/service";
 import { DEFAULT_TARGET_LANGUAGE } from "./defaults";
 import { asRecord, isRecord, normalizeText, toArray } from "./shared";
 import {
@@ -340,18 +340,14 @@ async function chatWithPlanningModel(
 }
 
 async function chatWithGptPluginBridge(systemPrompt: string, userPrompt: string): Promise<string> {
-  const bridgeHandler = chatgptBridge;
-  if (!bridgeHandler || typeof bridgeHandler.execute !== "function") {
-    throw new Error("gpt_plugin bridge execute() is missing");
-  }
-
   const timeoutMs = parsePositiveInteger(
     process.env.TOPIC_PUSH_GPT_PLUGIN_TIMEOUT_MS,
     parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000)
   );
-  const bridgeInput = `/gpt new ${buildGptPluginPlanningPrompt(systemPrompt, userPrompt)}`;
+  const prompt = buildGptPluginPlanningPrompt(systemPrompt, userPrompt);
+  const request = executeInNewChat(prompt);
   const response = await withTimeout(
-    Promise.resolve(bridgeHandler.execute(bridgeInput)),
+    Promise.resolve(request),
     timeoutMs,
     "gpt_plugin request timeout"
   );

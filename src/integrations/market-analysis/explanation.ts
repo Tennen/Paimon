@@ -1,5 +1,5 @@
 // @ts-nocheck
-import * as chatgptBridge from "../chatgpt-bridge/service";
+import { executeInNewChat } from "../chatgpt-bridge/service";
 import { DEFAULT_ANALYSIS_CONFIG, DEFAULT_TIMEOUT_MS } from "./defaults";
 import { normalizeAnalysisConfig } from "./storage";
 import { fetchJson, parsePositiveInteger } from "./utils";
@@ -117,26 +117,11 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
     && analysisConfig.gptPlugin.fallbackToLocal
   );
 
-  const bridgeHandler = chatgptBridge;
-  if (!bridgeHandler || typeof bridgeHandler.execute !== "function") {
-    const reason = "gpt_plugin bridge execute() is missing";
-    if (!fallbackToLocal) {
-      throw new Error(reason);
-    }
-    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
-    return {
-      ...localFallback,
-      provider: "local",
-      fallbackFrom: "gpt_plugin",
-      fallbackReason: reason
-    };
-  }
-
   const prompt = buildGptPluginExplanationPrompt(signalResult, optionalNewsContext);
-  const bridgeInput = `/gpt new ${prompt}`;
   try {
+    const request = executeInNewChat(prompt);
     const response = await withTimeout(
-      Promise.resolve(bridgeHandler.execute(bridgeInput)),
+      Promise.resolve(request),
       timeoutMs,
       "gpt_plugin request timeout"
     );

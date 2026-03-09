@@ -39,6 +39,18 @@ export async function execute(input) {
     return { text: buildGptCommandHelpText() };
   }
 
+  return enqueueCommand(command);
+}
+
+export async function executeInNewChat(prompt) {
+  const command = {
+    kind: "new",
+    prompt: String(prompt || "").trim()
+  };
+  return enqueueCommand(command);
+}
+
+function enqueueCommand(command) {
   const task = serialQueue.then(
     () => runChatgptRequest(command),
     () => runChatgptRequest(command)
