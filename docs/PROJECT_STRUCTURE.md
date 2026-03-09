@@ -9,6 +9,8 @@ src/
   core/            # Orchestrator, router, core runtime flow
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # External API adapters (flat by domain)
+    topic-push/    # Topic push runtime (planning/mutations/storage split)
+    market-analysis/ # Market analysis runtime (signals/storage/format split)
     evolution-operator/ # Evolution runtime engine + state orchestration
   tools/   # Tool handlers and schemas (one tool per file, self-register)
   storage/         # Persistence abstraction (store registration/get/set)
