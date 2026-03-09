@@ -17,6 +17,7 @@ export const DATA_STORE = {
   MARKET_RUNS: "market.runs",
   ENV_CONFIG: "env.config",
   MEMORY_SESSIONS: "memory.sessions",
+  RE_AGENT_MEMORY_SESSIONS: "re-agent.memory.sessions",
   AUDIT_LOG: "audit.log",
   TOPIC_PUSH_CONFIG: "topic-push.config",
   TOPIC_PUSH_STATE: "topic-push.state"
@@ -36,6 +37,7 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.MARKET_RUNS]: "market-analysis/runs.json",
   [DATA_STORE.ENV_CONFIG]: "config/.env",
   [DATA_STORE.MEMORY_SESSIONS]: "memory/sessions.json",
+  [DATA_STORE.RE_AGENT_MEMORY_SESSIONS]: "memory/re-agent-sessions.json",
   [DATA_STORE.AUDIT_LOG]: "audit.jsonl",
   [DATA_STORE.TOPIC_PUSH_CONFIG]: "topic-push/config.json",
   [DATA_STORE.TOPIC_PUSH_STATE]: "topic-push/state.json"

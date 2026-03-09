@@ -9,12 +9,15 @@ import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry, ToolSchemaItem 
 import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { sttRuntime } from "../engines/stt";
+import { isReAgentCommandInput } from "./re-agent";
+import { ReAgentMemoryStore } from "../memory/reAgentMemoryStore";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
   private readonly toolRouter: ToolRouter;
   private readonly llmEngine: LLMEngine;
   private readonly memoryStore: MemoryStore;
+  private readonly reAgentMemoryStore: ReAgentMemoryStore;
   private readonly skillManager: SkillManager;
   private readonly maxIterations: number;
   private readonly toolRegistry: ToolRegistry;
@@ -27,11 +30,13 @@ export class Orchestrator {
     memoryStore: MemoryStore,
     skillManager: SkillManager,
     toolRegistry: ToolRegistry,
-    callbackDispatcher: CallbackDispatcher
+    callbackDispatcher: CallbackDispatcher,
+    reAgentMemoryStore: ReAgentMemoryStore = new ReAgentMemoryStore()
   ) {
     this.toolRouter = toolRouter;
     this.llmEngine = llmEngine;
     this.memoryStore = memoryStore;
+    this.reAgentMemoryStore = reAgentMemoryStore;
     this.skillManager = skillManager;
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
@@ -47,7 +52,7 @@ export class Orchestrator {
     }
 
     const text = await sttRuntime.transcribe(envelope);
-    const memory = this.memoryStore.read(envelope.sessionId);
+    const memory = this.readSessionMemory(envelope.sessionId, text);
 
     try {
       const directRouteResponse = await this.handleDirectCommandRoute(text, memory, envelope, start);
@@ -259,7 +264,7 @@ export class Orchestrator {
     taskEnvelope: Envelope,
     start: number
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.memoryStore.read(envelope.sessionId);
+    const latestMemory = this.readSessionMemory(envelope.sessionId, text);
     const toolExecution: ToolExecution = {
       tool: matched.tool,
       op: matched.op,
@@ -310,7 +315,7 @@ export class Orchestrator {
     taskEnvelope: Envelope,
     start: number
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.memoryStore.read(envelope.sessionId);
+    const latestMemory = this.readSessionMemory(envelope.sessionId, text);
     const response = await this.executeDirectShortcut(
       matched,
       text,
@@ -569,7 +574,19 @@ export class Orchestrator {
 
   private appendMemory(envelope: Envelope, text: string, response: Response): void {
     const memoryText = text || inferNonTextMemoryMarker(envelope.kind);
-    this.memoryStore.append(envelope.sessionId, formatMemoryEntry(memoryText, response));
+    const entry = formatMemoryEntry(memoryText, response);
+    if (shouldUseReAgentMemory(memoryText, response.text)) {
+      this.reAgentMemoryStore.append(envelope.sessionId, entry);
+      return;
+    }
+    this.memoryStore.append(envelope.sessionId, entry);
+  }
+
+  private readSessionMemory(sessionId: string, inputText: string): string {
+    if (isReAgentCommandInput(inputText)) {
+      return this.reAgentMemoryStore.read(sessionId);
+    }
+    return this.memoryStore.read(sessionId);
   }
 }
 
@@ -587,6 +604,10 @@ function formatMemoryEntry(userText: string, response: Response): string {
   const now = new Date().toISOString();
   const assistantText = response.text ?? "";
   return `- ${now}\\n  - user: ${userText}\\n  - assistant: ${assistantText}`;
+}
+
+function shouldUseReAgentMemory(userText: string, assistantText: string | undefined): boolean {
+  return isReAgentCommandInput(userText) || isReAgentCommandInput(assistantText);
 }
 
 function sanitizeToolResult(input: unknown): unknown {

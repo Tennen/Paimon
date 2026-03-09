@@ -28,6 +28,7 @@ export type ToolSchemaItem = {
 export type ToolDependencies = {
   skillManager: unknown;
   evolutionService?: unknown;
+  reAgentRuntime?: unknown;
 };
 
 export type ToolModule = {

@@ -20,6 +20,7 @@ import { EvolutionCodexConfigService } from "./integrations/evolution-operator/c
 import { EvolutionOperatorService } from "./integrations/evolution-operator/service";
 import { sttRuntime } from "./engines/stt";
 import { registerSystemShortcuts } from "./core/systemShortcuts";
+import { ReAgentRuntime } from "./core/re-agent/runtime";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -31,9 +32,10 @@ const envStore = new EnvConfigStore();
 const evolutionEngine = new EvolutionEngine();
 const codexConfigService = new EvolutionCodexConfigService(envStore);
 const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConfigService);
+const reAgentRuntime = new ReAgentRuntime();
 
 const registry = new ToolRegistry();
-loadTools(registry, { skillManager, evolutionService });
+loadTools(registry, { skillManager, evolutionService, reAgentRuntime });
 registerSystemShortcuts(registry);
 const toolRouter = new ToolRouter(registry);
 const llmEngine = createLLMEngine();

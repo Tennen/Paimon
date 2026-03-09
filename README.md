@@ -29,12 +29,12 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 各目录职责如下：
 
 - `src/ingress/`: 输入适配层，负责 HTTP、企业微信回调、SSE bridge、Admin API 等入口
-- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程
+- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
 - `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
-- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Push、Market Analysis、Evolution Operator 等集成
+- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Push、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
 - `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
 - `src/scheduler/`: 定时任务和推送用户管理
-- `src/memory/`: 会话记忆存储
+- `src/memory/`: 会话记忆存储（主对话记忆与 `/re` 子 agent 记忆分流）
 - `src/skills/`: 技能元数据加载与管理
 - `admin-web/`: 后台前端
 - `tools/`: 独立脚本和桥接程序
@@ -43,7 +43,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 1. 输入先通过 `ingress` 层转成统一的 `Envelope`
 2. `SessionManager` 保证同一会话按顺序处理
-3. `Orchestrator` 决定是直接命令、快捷指令，还是交给 LLM 规划
+3. `Orchestrator` 决定是直接命令（含 `/re` 子 agent）、快捷指令，还是交给主 LLM 规划
 4. `ToolRouter` 调用对应工具
 5. 工具通过 `integrations` 访问外部系统
 6. 结果写入记忆/审计/业务存储，并回传给调用方
@@ -71,6 +71,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 支持技能发现、技能规划、工具调用的分步式执行
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
+- 支持 `/re` 子 agent ReAct 循环（默认本地模型 `qwen3.5:9b`）
 
 ### 3. 工具与业务能力
 
@@ -80,6 +81,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
+- `re-agent modules`: 子 agent 可调用 `rag`、`mcp`、`multiagent` 三类模块
 - `system shortcuts`: 内置 `/sync`、`/build`、`/restart`、`/deploy` 等运维捷径
 
 ### 4. 运维与后台能力
@@ -127,6 +129,11 @@ LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3:4b
 OLLAMA_PLANNING_MODEL=qwen3:8b
+RE_AGENT_MODEL=qwen3.5:9b
+RE_AGENT_MAX_STEPS=6
+RE_AGENT_TIMEOUT_MS=30000
+MCP_ENDPOINT=
+MCP_TIMEOUT_MS=15000
 
 HA_BASE_URL=http://homeassistant.local:8123
 HA_TOKEN=your_home_assistant_token
@@ -212,11 +219,24 @@ npm start
 
 这类模式适合家庭网络、本地开发机或 NAS 环境。
 
+## `/re` 子 Agent 用法
+
+- `/re <问题>`：触发子 agent 对话（ReAct 循环）
+- `/re help`：查看子 agent 帮助
+- `/re reset`：重置当前会话的子 agent 记忆
+- 子 agent 输出统一以 `/re` 前缀返回，便于和主对话区分
+
+Memory 分流规则：
+
+- 当用户输入以 `/re` 开头时，读取/写入 `ReAgentMemoryStore`
+- 当助手输出以 `/re` 开头时，也写入 `ReAgentMemoryStore`
+- 其他消息继续使用现有 `MemoryStore`
+
 ## 数据与持久化
 
 项目默认把运行数据写入 `data/` 目录，主要包括：
 
-- 会话记忆
+- 会话记忆（主会话 + `/re` 子 agent 会话）
 - 审计日志
 - 定时任务和推送用户
 - Topic Push 配置与状态
