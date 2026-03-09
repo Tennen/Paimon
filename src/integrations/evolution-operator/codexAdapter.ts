@@ -36,6 +36,18 @@ export type CodexRunEvent =
       line: string;
     }
   | {
+      type: "approval_required";
+      at: string;
+      taskId: string;
+      prompt: string;
+    }
+  | {
+      type: "approval_submitted";
+      at: string;
+      taskId: string;
+      decision: "yes" | "no";
+    }
+  | {
       type: "timeout";
       at: string;
       timeoutMs: number;
@@ -60,10 +72,24 @@ type CodexAdapterOptions = {
   maxRawLines: number;
   model: string;
   reasoningEffort: string;
+  approvalPolicy: string;
+};
+
+export type CodexPendingApproval = {
+  taskId: string;
+  at: string;
+  prompt: string;
+};
+
+type ActiveCodexRun = {
+  stdin: NodeJS.WritableStream | null;
+  onEvent?: CodexRunRequest["onEvent"];
 };
 
 export class CodexAdapter {
   private readonly options: CodexAdapterOptions;
+  private readonly pendingApprovals = new Map<string, CodexPendingApproval>();
+  private readonly activeRuns = new Map<string, ActiveCodexRun>();
 
   constructor(options?: Partial<CodexAdapterOptions>) {
     const rootDir = options?.rootDir ?? process.cwd();
@@ -74,9 +100,59 @@ export class CodexAdapter {
       timeoutMs: options?.timeoutMs ?? parseInt(process.env.EVOLUTION_CODEX_TIMEOUT_MS ?? "900000", 10),
       maxRawLines: options?.maxRawLines ?? 120,
       model: String(options?.model ?? "").trim(),
-      reasoningEffort: String(options?.reasoningEffort ?? "").trim().toLowerCase()
+      reasoningEffort: String(options?.reasoningEffort ?? "").trim().toLowerCase(),
+      approvalPolicy: normalizeApprovalPolicy(
+        options?.approvalPolicy ?? process.env.EVOLUTION_CODEX_APPROVAL_POLICY ?? process.env.CODEX_APPROVAL_POLICY
+      )
     };
     ensureDir(this.options.outputDir);
+  }
+
+  listPendingApprovals(): CodexPendingApproval[] {
+    return Array.from(this.pendingApprovals.values()).sort((left, right) => {
+      return Date.parse(left.at) - Date.parse(right.at);
+    });
+  }
+
+  submitApproval(input: { taskId: string; decision: "yes" | "no" }): { ok: boolean; message: string } {
+    const taskId = sanitizeTaskId(input.taskId);
+    const pending = this.pendingApprovals.get(taskId);
+    if (!pending) {
+      return {
+        ok: false,
+        message: `未找到待确认任务: ${taskId}`
+      };
+    }
+
+    const active = this.activeRuns.get(taskId);
+    if (!active?.stdin) {
+      this.pendingApprovals.delete(taskId);
+      return {
+        ok: false,
+        message: `任务 ${taskId} 不可写入确认（可能已结束）`
+      };
+    }
+
+    try {
+      const payload = input.decision === "yes" ? "y\n" : "n\n";
+      active.stdin.write(payload);
+      this.pendingApprovals.delete(taskId);
+      emitCodexEvent(active.onEvent, {
+        type: "approval_submitted",
+        at: nowIso(),
+        taskId,
+        decision: input.decision
+      });
+      return {
+        ok: true,
+        message: `已提交确认: ${taskId} -> ${input.decision}`
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: `提交确认失败: ${(error as Error).message}`
+      };
+    }
   }
 
   async run(request: CodexRunRequest): Promise<CodexRunResult> {
@@ -85,6 +161,7 @@ export class CodexAdapter {
     const timeoutMs = Number.isFinite(request.timeoutMs) ? Number(request.timeoutMs) : this.options.timeoutMs;
     const rawTail: string[] = [];
     const onLine = (channel: "stdout" | "stderr", line: string) => {
+      this.captureApprovalPrompt(taskId, line, request.onEvent);
       emitCodexEvent(request.onEvent, {
         type: channel,
         at: nowIso(),
@@ -93,6 +170,8 @@ export class CodexAdapter {
     };
 
     const args = [
+      "-a",
+      this.options.approvalPolicy,
       "exec",
       "--json",
       "--sandbox",
@@ -118,10 +197,15 @@ export class CodexAdapter {
         outputFile,
         timeoutMs
       });
+      this.pendingApprovals.delete(taskId);
 
       const child = spawn("codex", args, {
         cwd: this.options.rootDir,
         env: process.env
+      });
+      this.activeRuns.set(taskId, {
+        stdin: child.stdin,
+        onEvent: request.onEvent
       });
 
       let stdoutBuffer = "";
@@ -141,6 +225,7 @@ export class CodexAdapter {
         });
         flushRemainingBuffer(rawTail, stdoutBuffer, "stdout", this.options.maxRawLines, onLine);
         flushRemainingBuffer(rawTail, stderrBuffer, "stderr", this.options.maxRawLines, onLine);
+        this.cleanupTask(taskId);
         resolve(buildResult({
           ok: false,
           outputFile,
@@ -184,6 +269,7 @@ export class CodexAdapter {
         });
         flushRemainingBuffer(rawTail, stdoutBuffer, "stdout", this.options.maxRawLines, onLine);
         flushRemainingBuffer(rawTail, stderrBuffer, "stderr", this.options.maxRawLines, onLine);
+        this.cleanupTask(taskId);
         resolve(buildResult({
           ok: false,
           outputFile,
@@ -215,6 +301,7 @@ export class CodexAdapter {
           signal,
           ok: code === 0 && !timedOut
         });
+        this.cleanupTask(taskId);
 
         resolve(
           buildResult({
@@ -227,6 +314,36 @@ export class CodexAdapter {
           })
         );
       });
+    });
+  }
+
+  private cleanupTask(taskId: string): void {
+    this.activeRuns.delete(taskId);
+    this.pendingApprovals.delete(taskId);
+  }
+
+  private captureApprovalPrompt(taskId: string, line: string, listener?: CodexRunRequest["onEvent"]): void {
+    const prompt = detectApprovalPrompt(line);
+    if (!prompt) {
+      return;
+    }
+
+    const existing = this.pendingApprovals.get(taskId);
+    if (existing && existing.prompt === prompt) {
+      return;
+    }
+
+    const pending: CodexPendingApproval = {
+      taskId,
+      at: nowIso(),
+      prompt: prompt.slice(0, 500)
+    };
+    this.pendingApprovals.set(taskId, pending);
+    emitCodexEvent(listener, {
+      type: "approval_required",
+      at: pending.at,
+      taskId: pending.taskId,
+      prompt: pending.prompt
     });
   }
 }
@@ -378,6 +495,14 @@ function resolveCodexReasoningEffort(...candidates: Array<string | undefined>): 
   );
 }
 
+function normalizeApprovalPolicy(value: unknown): string {
+  const text = String(value ?? "").trim().toLowerCase();
+  if (text === "untrusted" || text === "on-request" || text === "on-failure" || text === "never") {
+    return text;
+  }
+  return "on-request";
+}
+
 function normalizeReasoningEffort(value: unknown): string {
   const text = String(value ?? "").trim().toLowerCase();
   if (!text) {
@@ -388,4 +513,94 @@ function normalizeReasoningEffort(value: unknown): string {
 
 function formatTomlString(value: string): string {
   return JSON.stringify(value);
+}
+
+function detectApprovalPrompt(line: string): string | null {
+  const text = String(line ?? "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const fromJson = detectApprovalPromptFromJson(text);
+  if (fromJson) {
+    return fromJson;
+  }
+
+  if (/\[(?:y\/n|y\/N|Y\/n|Y\/N|yes\/no|Yes\/No)\]/.test(text)) {
+    return text;
+  }
+  if (/\b(approve|approval|confirm|permission|allow)\b/i.test(text)) {
+    return text;
+  }
+  if (/(确认|批准|同意|拒绝|是否继续)/.test(text)) {
+    return text;
+  }
+  return null;
+}
+
+function detectApprovalPromptFromJson(text: string): string | null {
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const type = String(parsed.type ?? "").toLowerCase();
+  const message = readPromptText(parsed);
+
+  if (type.includes("approval") || type.includes("confirm")) {
+    if (message) {
+      return message;
+    }
+    return `等待确认事件: ${type}`;
+  }
+
+  if (message && /\b(approve|approval|confirm|permission|allow)\b/i.test(message)) {
+    return message;
+  }
+  if (message && /(确认|批准|同意|拒绝|是否继续)/.test(message)) {
+    return message;
+  }
+
+  const item = isRecord(parsed.item) ? parsed.item : null;
+  if (item) {
+    const itemType = String(item.type ?? "").toLowerCase();
+    const itemMessage = readPromptText(item);
+    if (itemType.includes("approval") || itemType.includes("confirm")) {
+      return itemMessage || `等待确认事件: ${itemType}`;
+    }
+    if (itemMessage && /\b(approve|approval|confirm|permission|allow)\b/i.test(itemMessage)) {
+      return itemMessage;
+    }
+  }
+
+  return null;
+}
+
+function readPromptText(obj: Record<string, unknown>): string {
+  const candidates: unknown[] = [
+    obj.prompt,
+    obj.message,
+    obj.reason,
+    obj.detail,
+    isRecord(obj.error) ? obj.error.message : undefined
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

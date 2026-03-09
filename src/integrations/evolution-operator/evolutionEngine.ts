@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { jsonrepair } from "jsonrepair";
-import { CodexAdapter, CodexRunEvent, CodexRunResult } from "./codexAdapter";
+import { CodexAdapter, CodexPendingApproval, CodexRunEvent, CodexRunResult } from "./codexAdapter";
 import { EvolutionStateStore } from "./stateStore";
 import { TestRunner } from "./testRunner";
 import {
@@ -50,6 +50,7 @@ export class EvolutionEngine {
   private readonly options: EvolutionEngineOptions;
   private timer: NodeJS.Timeout | null = null;
   private queue: Promise<void> = Promise.resolve();
+  private readonly codexTaskGoalMap = new Map<string, string>();
 
   constructor(store?: EvolutionStateStore, codex?: CodexAdapter, testRunner?: TestRunner, options?: Partial<EvolutionEngineOptions>) {
     this.store = store ?? new EvolutionStateStore();
@@ -120,6 +121,89 @@ export class EvolutionEngine {
     return this.enqueueWork(async () => {
       await this.processTick();
     });
+  }
+
+  triggerNowAsync(): void {
+    void this.triggerNow().catch((error) => {
+      console.error(`[evolution] async tick failed: ${(error as Error).message}`);
+    });
+  }
+
+  listPendingCodexApprovals(goalId?: string): Array<CodexPendingApproval & { goalId?: string }> {
+    const pending = this.codex.listPendingApprovals();
+    return pending
+      .map((item) => {
+        const mappedGoalId = this.codexTaskGoalMap.get(item.taskId) || extractGoalIdFromTaskId(item.taskId);
+        return {
+          ...item,
+          ...(mappedGoalId ? { goalId: mappedGoalId } : {})
+        };
+      })
+      .filter((item) => {
+        if (!goalId) {
+          return true;
+        }
+        return item.goalId === goalId;
+      });
+  }
+
+  submitCodexApproval(input: {
+    decision: "yes" | "no";
+    goalId?: string;
+    taskId?: string;
+  }): { ok: boolean; message: string; taskId?: string; goalId?: string } {
+    const requestedTaskId = String(input.taskId ?? "").trim();
+    const requestedGoalId = String(input.goalId ?? "").trim();
+
+    const pending = this.listPendingCodexApprovals(requestedGoalId || undefined);
+    const target = requestedTaskId
+      ? pending.find((item) => item.taskId === requestedTaskId)
+      : pending.length === 1
+        ? pending[0]
+        : null;
+
+    if (!target) {
+      if (pending.length === 0) {
+        return {
+          ok: false,
+          message: requestedGoalId
+            ? `Goal ${requestedGoalId} 当前没有待确认的 codex 交互`
+            : "当前没有待确认的 codex 交互"
+        };
+      }
+      const choices = pending
+        .slice(0, 5)
+        .map((item) => `${item.taskId}${item.goalId ? ` (${item.goalId})` : ""}`)
+        .join(", ");
+      return {
+        ok: false,
+        message: `存在多个待确认任务，请补充 taskId 或 goalId。候选: ${choices}`
+      };
+    }
+
+    const submitted = this.codex.submitApproval({
+      taskId: target.taskId,
+      decision: input.decision
+    });
+    if (!submitted.ok) {
+      return {
+        ok: false,
+        message: submitted.message,
+        taskId: target.taskId,
+        ...(target.goalId ? { goalId: target.goalId } : {})
+      };
+    }
+
+    if (target.goalId) {
+      this.pushGoalEvent(target.goalId, "codex", `已提交确认(${input.decision}): ${target.taskId}`, true);
+    }
+
+    return {
+      ok: true,
+      message: submitted.message,
+      taskId: target.taskId,
+      ...(target.goalId ? { goalId: target.goalId } : {})
+    };
   }
 
   private async enqueueWork<T>(job: () => Promise<T>, triggerAfter = false): Promise<T> {
@@ -1025,13 +1109,18 @@ export class EvolutionEngine {
     this.setGoalStage(goal.id, input.stage, input.startedMessage, true);
     goal.stage = input.stage;
 
-    return this.codex.run({
-      taskId: input.taskId,
-      prompt: input.prompt,
-      onEvent: (event) => {
-        this.handleCodexEvent(goal.id, input.taskId, event);
-      }
-    });
+    this.codexTaskGoalMap.set(input.taskId, goal.id);
+    try {
+      return await this.codex.run({
+        taskId: input.taskId,
+        prompt: input.prompt,
+        onEvent: (event) => {
+          this.handleCodexEvent(goal.id, input.taskId, event);
+        }
+      });
+    } finally {
+      this.codexTaskGoalMap.delete(input.taskId);
+    }
   }
 
   private handleCodexEvent(goalId: string, taskId: string, event: CodexRunEvent): void {
@@ -1056,6 +1145,22 @@ export class EvolutionEngine {
       if (event.type === "stderr" && line.toLowerCase().includes("error")) {
         this.pushGoalEvent(goalId, "error", trimForState(line, 260), true);
       }
+      return;
+    }
+
+    if (event.type === "approval_required") {
+      this.pushGoalRawLine(goalId, `[codex approval] ${event.prompt}`);
+      this.pushGoalEvent(
+        goalId,
+        "codex",
+        `codex 等待确认: ${trimForState(event.prompt, 220)}（可用 /evolve confirm yes|no ${taskId}）`,
+        true
+      );
+      return;
+    }
+
+    if (event.type === "approval_submitted") {
+      this.pushGoalEvent(goalId, "codex", `已提交确认(${event.decision}): ${taskId}`, true);
       return;
     }
 
@@ -1225,6 +1330,11 @@ function buildRetryTaskId(goalId: string, taskType: RetryTaskType, stepIndex?: n
     return `${goalId}:${taskType}:${stepIndex}`;
   }
   return `${goalId}:${taskType}`;
+}
+
+function extractGoalIdFromTaskId(taskId: string): string {
+  const matched = String(taskId ?? "").match(/^(goal-[a-z0-9-]+?)-(?:plan|step-\d+|fix-\d+|structure|commit-message)$/i);
+  return matched ? matched[1] : "";
 }
 
 function normalizeGeneratedCommitMessage(raw: string): string {

@@ -5,13 +5,21 @@ import { ToolResult } from "../types";
 const ALLOWED_REASONING_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 const RESET_TOKENS = new Set(["default", "reset", "clear", "none", "空", "默认"]);
 
-export const directCommands = ["/evolve", "/coding", "/codex"];
+export const evolutionDirectCommands = ["/evolve", "/coding"];
+export const codexDirectCommands = ["/codex"];
 
 type EvolutionServiceBridge = {
   getTickMs: () => number;
   getSnapshot: () => unknown;
   enqueueGoal: (input: { goal: string; commitMessage?: string }) => Promise<unknown>;
   triggerNow: () => Promise<void>;
+  triggerNowAsync?: () => void | Promise<void>;
+  listPendingCodexApprovals?: (goalId?: string) => Array<{ taskId: string; at: string; prompt: string; goalId?: string }>;
+  submitCodexApproval?: (input: {
+    decision: "yes" | "no";
+    goalId?: string;
+    taskId?: string;
+  }) => { ok: boolean; message: string; taskId?: string; goalId?: string };
   getCodexConfig: () => { codexModel: string; codexReasoningEffort: string; envPath: string };
   updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) => {
     codexModel: string;
@@ -48,7 +56,18 @@ export function registerTool(registry: ToolRegistry, deps: ToolDependencies): vo
     }
   );
 
-  registerDirectCommands(registry, directCommands, {
+  registerDirectCommands(registry, evolutionDirectCommands, {
+    tool: "skill.evolution-operator",
+    op: "execute",
+    argName: "input",
+    argMode: "full_input",
+    preferToolResult: true,
+    async: true,
+    acceptedText: "收到，Evolution 任务已受理，后台处理中；完成后会回传结果。",
+    acceptedDelayMs: 1200
+  });
+
+  registerDirectCommands(registry, codexDirectCommands, {
     tool: "skill.evolution-operator",
     op: "execute",
     argName: "input",
@@ -93,6 +112,10 @@ function buildEvolutionContext(
       getSnapshot: () => evolutionService.getSnapshot(),
       enqueueGoal: (input: { goal: string; commitMessage?: string }) => evolutionService.enqueueGoal(input),
       triggerNow: () => evolutionService.triggerNow(),
+      triggerNowAsync: () => evolutionService.triggerNowAsync?.(),
+      getPendingConfirmations: (goalId?: string) => evolutionService.listPendingCodexApprovals?.(goalId) ?? [],
+      submitConfirmation: (input: { decision: "yes" | "no"; goalId?: string; taskId?: string }) =>
+        evolutionService.submitCodexApproval?.(input) ?? { ok: false, message: "当前版本不支持确认命令" },
       getCodexConfig: () => evolutionService.getCodexConfig(),
       updateCodexConfig: (input: { model?: string; reasoningEffort?: string }) =>
         evolutionService.updateCodexConfig(input)
@@ -143,7 +166,8 @@ export async function execute(input, context) {
   }
 
   if (command.kind === "tick") {
-    await Promise.resolve(api.triggerNow());
+    const trigger = typeof api.triggerNowAsync === "function" ? api.triggerNowAsync : api.triggerNow;
+    void Promise.resolve(trigger()).catch(() => undefined);
     const snapshot = await Promise.resolve(api.getSnapshot());
     return { text: buildTickResponse(snapshot) };
   }
@@ -151,6 +175,39 @@ export async function execute(input, context) {
   if (command.kind === "status") {
     const snapshot = await Promise.resolve(api.getSnapshot());
     return { text: buildStatusResponse(snapshot, command.goalId) };
+  }
+
+  if (command.kind === "logs") {
+    const snapshot = await Promise.resolve(api.getSnapshot());
+    return {
+      text: buildLogsResponse(snapshot, {
+        goalId: command.goalId,
+        keyword: command.keyword
+      })
+    };
+  }
+
+  if (command.kind === "confirm_status") {
+    const pending = await Promise.resolve(
+      typeof api.getPendingConfirmations === "function"
+        ? api.getPendingConfirmations(command.goalId)
+        : []
+    );
+    return { text: buildPendingConfirmationsText(pending, command.goalId) };
+  }
+
+  if (command.kind === "confirm_submit") {
+    if (typeof api.submitConfirmation !== "function") {
+      return { text: "当前版本不支持确认命令，请升级 evolution runtime。" };
+    }
+    const submitted = await Promise.resolve(api.submitConfirmation({
+      decision: command.decision,
+      ...(command.goalId ? { goalId: command.goalId } : {}),
+      ...(command.taskId ? { taskId: command.taskId } : {})
+    }));
+    return {
+      text: buildConfirmSubmitResponse(submitted)
+    };
   }
 
   const created = await Promise.resolve(api.enqueueGoal({
@@ -255,6 +312,32 @@ function parseEvolutionCommand(bodyInput, fromDirectCommand) {
     return { scope: "evolution", kind: "tick" };
   }
 
+  const logsMatch = body.match(/^(logs?|tail|日志)\b\s*(.*)$/i);
+  if (logsMatch) {
+    const logsArg = parseLogsArg(logsMatch[2] || "");
+    return {
+      scope: "evolution",
+      kind: "logs",
+      ...(logsArg.goalId ? { goalId: logsArg.goalId } : {}),
+      ...(logsArg.keyword ? { keyword: logsArg.keyword } : {})
+    };
+  }
+
+  const confirmMatch = body.match(/^(confirm|approve|approval|确认)\b\s*(.*)$/i);
+  if (confirmMatch) {
+    return parseConfirmCommand(confirmMatch[2] || "");
+  }
+
+  const pendingMatch = body.match(/^(pending|approvals?|待确认)\b\s*(.*)$/i);
+  if (pendingMatch) {
+    const maybeId = extractGoalId(pendingMatch[2] || "");
+    return {
+      scope: "evolution",
+      kind: "confirm_status",
+      ...(maybeId ? { goalId: maybeId } : {})
+    };
+  }
+
   const goalBody = body.replace(/^(goal|add|new)\b/i, "").trim() || body;
   const commitMessage = extractCommitMessage(goalBody);
   const goal = stripCommitMessage(goalBody).trim();
@@ -267,6 +350,61 @@ function parseEvolutionCommand(bodyInput, fromDirectCommand) {
     kind: "goal",
     goal,
     ...(commitMessage ? { commitMessage } : {})
+  };
+}
+
+function parseLogsArg(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return { goalId: "", keyword: "" };
+  }
+
+  const goalId = extractGoalId(text);
+  const withoutGoal = goalId
+    ? text.replace(goalId, " ").replace(/\s+/g, " ").trim()
+    : text;
+
+  const keywordMatch = withoutGoal.match(/(?:kw|keyword|filter|关键词)\s*[:：=]\s*(.+)$/i);
+  if (keywordMatch && keywordMatch[1]) {
+    return {
+      goalId,
+      keyword: keywordMatch[1].trim().slice(0, 80)
+    };
+  }
+
+  return {
+    goalId,
+    keyword: withoutGoal.slice(0, 80)
+  };
+}
+
+function parseConfirmCommand(raw) {
+  const text = String(raw || "").trim();
+  if (!text || /^(status|list|show|pending|查看|状态)$/i.test(text)) {
+    return { scope: "evolution", kind: "confirm_status" };
+  }
+
+  const matched = text.match(/^([^\s]+)\s*(.*)$/);
+  const token = matched ? matched[1] : "";
+  const rest = matched ? matched[2] : "";
+  const decision = normalizeConfirmDecision(token);
+  if (!decision) {
+    const maybeGoalId = extractGoalId(text);
+    return {
+      scope: "evolution",
+      kind: "confirm_status",
+      ...(maybeGoalId ? { goalId: maybeGoalId } : {})
+    };
+  }
+
+  const goalId = extractGoalId(rest);
+  const taskId = extractCodexTaskId(rest);
+  return {
+    scope: "evolution",
+    kind: "confirm_submit",
+    decision,
+    ...(goalId ? { goalId } : {}),
+    ...(taskId ? { taskId } : {})
   };
 }
 
@@ -373,6 +511,30 @@ function extractGoalId(text) {
   return matched ? matched[0] : "";
 }
 
+function extractCodexTaskId(text) {
+  const source = String(text || "");
+  const explicit = source.match(/(?:task|taskid)\s*[:：=]\s*([a-z0-9._:-]+)/i);
+  if (explicit && explicit[1]) {
+    return explicit[1];
+  }
+  const matched = source.match(/\bgoal-[a-z0-9-]+-(?:plan|step-\d+|fix-\d+|structure|commit-message)\b/i);
+  return matched ? matched[0] : "";
+}
+
+function normalizeConfirmDecision(token) {
+  const normalized = String(token || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  if (["yes", "y", "approve", "ok", "同意", "确认", "是"].includes(normalized)) {
+    return "yes";
+  }
+  if (["no", "n", "reject", "deny", "取消", "拒绝", "否"].includes(normalized)) {
+    return "no";
+  }
+  return "";
+}
+
 function buildEvolutionHelpText() {
   return [
     "Evolution 指令：",
@@ -380,7 +542,10 @@ function buildEvolutionHelpText() {
     "/coding <goal>：同 /evolve",
     "/evolve status：查看整体状态",
     "/evolve status <goalId>：查看指定 Goal",
-    "/evolve tick：立即触发一轮执行",
+    "/evolve tick：异步触发一轮执行",
+    "/evolve logs [goalId] [关键词]：查看最近 5 行日志",
+    "/evolve confirm：查看待确认的 codex 交互",
+    "/evolve confirm yes|no [goalId|taskId]：提交确认",
     "可在 goal 后追加：提交: <commit message>（可选）",
     "不传 commitMessage 时，系统会在提交前自动生成",
     "任务成功后会自动 commit + push；push 失败会导致 Goal 失败",
@@ -414,10 +579,11 @@ function buildTickResponse(snapshot) {
   const state = snapshot && snapshot.state ? snapshot.state : {};
   const retryQueue = snapshot && snapshot.retryQueue ? snapshot.retryQueue : {};
   return [
-    "已触发 Evolution Tick。",
+    "已受理 Evolution Tick（异步执行）。",
     `引擎状态: ${state.status || "unknown"}`,
     `当前任务: ${state.currentGoalId || "-"}`,
-    `重试队列: ${Array.isArray(retryQueue.items) ? retryQueue.items.length : 0}`
+    `重试队列: ${Array.isArray(retryQueue.items) ? retryQueue.items.length : 0}`,
+    "可用：/evolve logs 查看最新日志"
   ].join("\n");
 }
 
@@ -436,7 +602,7 @@ function buildStatusResponse(snapshot, goalId) {
     }
 
     const eventsText = formatEvents(target.events, 8);
-    const rawTailText = formatRawTail(target.rawTail, 8);
+    const rawTailText = formatRawTail(target.rawTail, 8, { strictTextOnly: true });
     return [
       `Goal: ${target.id}`,
       `状态: ${target.status || "unknown"}`,
@@ -480,6 +646,65 @@ function buildStatusResponse(snapshot, goalId) {
   ].join("\n");
 }
 
+function buildLogsResponse(snapshot, input) {
+  const state = snapshot && snapshot.state ? snapshot.state : {};
+  const goals = Array.isArray(state.goals) ? state.goals : [];
+  const target = resolveGoalForLogs(goals, state.currentGoalId, input && input.goalId ? input.goalId : "");
+
+  if (!target) {
+    return "暂无可用日志。可先执行 /evolve <goal> 创建任务。";
+  }
+
+  const keyword = String(input && input.keyword ? input.keyword : "").trim();
+  const lines = formatRawTail(target.rawTail, 120, { keyword, strictTextOnly: true });
+  const latest = lines.slice(-5);
+  const totalRawCount = Array.isArray(target.rawTail) ? target.rawTail.length : 0;
+
+  return [
+    `Goal: ${target.id}`,
+    `状态: ${target.status || "unknown"}，阶段: ${target.stage || "-"}`,
+    `筛选: ${keyword ? keyword : "(无)"}`,
+    `日志: ${latest.length} / ${totalRawCount}`,
+    "最近 5 行:",
+    ...(latest.length > 0 ? latest : ["- (无匹配日志)"])
+  ].join("\n");
+}
+
+function buildPendingConfirmationsText(pending, goalId) {
+  const list = Array.isArray(pending) ? pending : [];
+  if (list.length === 0) {
+    return goalId
+      ? `Goal ${goalId} 当前没有待确认的 codex 交互。`
+      : "当前没有待确认的 codex 交互。";
+  }
+
+  const rows = list.slice(0, 8).map((item) => {
+    const taskId = item && item.taskId ? item.taskId : "-";
+    const goal = item && item.goalId ? item.goalId : "-";
+    const at = item && item.at ? item.at : "-";
+    const prompt = item && item.prompt ? trimText(String(item.prompt), 120) : "";
+    return `- [${at}] ${taskId} (goal=${goal}) ${prompt}`;
+  });
+  return [
+    `待确认任务: ${list.length}`,
+    ...rows,
+    "使用：/evolve confirm yes|no <taskId|goalId>"
+  ].join("\n");
+}
+
+function buildConfirmSubmitResponse(result) {
+  const ok = result && result.ok === true;
+  const message = result && result.message ? String(result.message) : ok ? "确认已提交" : "确认提交失败";
+  return [
+    ok ? "确认已提交。" : "确认提交失败。",
+    message,
+    result && result.taskId ? `task: ${result.taskId}` : "",
+    result && result.goalId ? `goal: ${result.goalId}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 function trimText(text, maxLength) {
   const value = String(text || "");
   if (value.length <= maxLength) {
@@ -498,13 +723,119 @@ function formatEvents(events, maxCount) {
   });
 }
 
-function formatRawTail(rawTail, maxCount) {
+function formatRawTail(rawTail, maxCount, options) {
   const list = Array.isArray(rawTail) ? rawTail : [];
-  return list.slice(-Math.max(1, maxCount)).map((item) => {
+  const keyword = String(options && options.keyword ? options.keyword : "").trim().toLowerCase();
+  const strictTextOnly = Boolean(options && options.strictTextOnly);
+
+  const rows = [];
+  for (const item of list.slice(-Math.max(1, maxCount))) {
     const at = item && item.at ? item.at : "-";
-    const line = item && item.line ? trimText(String(item.line), 220) : "";
-    return `- [${at}] ${line}`;
-  });
+    const rawLine = item && item.line ? String(item.line) : "";
+    const normalizedLine = normalizeLogLine(rawLine, strictTextOnly);
+    if (!normalizedLine) {
+      continue;
+    }
+    if (keyword && !normalizedLine.toLowerCase().includes(keyword)) {
+      continue;
+    }
+    rows.push(`- [${at}] ${trimText(normalizedLine, 220)}`);
+  }
+  return rows;
+}
+
+function resolveGoalForLogs(goals, currentGoalId, requestedGoalId) {
+  const list = Array.isArray(goals) ? goals : [];
+  const requested = String(requestedGoalId || "").trim();
+  if (requested) {
+    return list.find((item) => item && item.id === requested) || null;
+  }
+  if (currentGoalId) {
+    const current = list.find((item) => item && item.id === currentGoalId);
+    if (current) {
+      return current;
+    }
+  }
+  return list
+    .slice()
+    .sort((left, right) => Date.parse(right.updatedAt || "") - Date.parse(left.updatedAt || ""))
+    .find(Boolean) || null;
+}
+
+function normalizeLogLine(line, strictTextOnly) {
+  const text = String(line || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const codexMatch = text.match(/^\[codex (stdout|stderr)\]\s*(.*)$/i);
+  if (codexMatch) {
+    const converted = parseCodexJsonLikeLine(codexMatch[2]);
+    if (converted) {
+      const prefix = codexMatch[1].toLowerCase() === "stderr" ? "stderr" : "stdout";
+      return `${prefix}: ${converted}`;
+    }
+
+    if (strictTextOnly && /^\{.*\}$/.test(codexMatch[2].trim())) {
+      return "";
+    }
+    return codexMatch[2].trim();
+  }
+
+  if (strictTextOnly && /^\{.*\}$/.test(text)) {
+    const converted = parseCodexJsonLikeLine(text);
+    return converted || "";
+  }
+  return text;
+}
+
+function parseCodexJsonLikeLine(line) {
+  const text = String(line || "").trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) {
+    return "";
+  }
+
+  let parsed = null;
+  try {
+    const payload = JSON.parse(text);
+    parsed = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!parsed) {
+    return "";
+  }
+
+  const type = typeof parsed.type === "string" ? parsed.type : "";
+  const message = typeof parsed.message === "string" ? parsed.message.trim() : "";
+  if (type === "thread.started") {
+    const threadId = typeof parsed.thread_id === "string" ? parsed.thread_id : "";
+    return threadId ? `thread started (${threadId})` : "thread started";
+  }
+  if (type === "turn.started") return "turn started";
+  if (type === "turn.completed") return "turn completed";
+  if (type === "turn.failed") {
+    const error = parsed.error && typeof parsed.error === "object" && typeof parsed.error.message === "string"
+      ? parsed.error.message
+      : message || "turn failed";
+    return `turn failed: ${error}`;
+  }
+  if (type === "approval_required" || type.includes("approval") || type.includes("confirm")) {
+    return message || `等待确认: ${type}`;
+  }
+  if (type === "error") {
+    return message || "error";
+  }
+  if (type === "item.completed") {
+    const item = parsed.item && typeof parsed.item === "object" && !Array.isArray(parsed.item) ? parsed.item : null;
+    const itemType = item && typeof item.type === "string" ? item.type : "";
+    const itemMessage = item && typeof item.message === "string" ? item.message : "";
+    if (itemType || itemMessage) {
+      return [itemType, itemMessage].filter(Boolean).join(": ");
+    }
+  }
+  return message;
 }
 
 function toIntValue(value) {

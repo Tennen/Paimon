@@ -252,8 +252,8 @@ export class AdminIngressAdapter implements IngressAdapter {
         return;
       }
       try {
-        await this.evolutionService.triggerNow();
-        res.json({ ok: true });
+        this.evolutionService.triggerNowAsync();
+        res.json({ ok: true, accepted: true });
       } catch (error) {
         res.status(500).json({
           ok: false,

@@ -32,6 +32,22 @@ export class EvolutionOperatorService {
     return this.engine.triggerNow();
   }
 
+  triggerNowAsync(): void {
+    this.engine.triggerNowAsync();
+  }
+
+  listPendingCodexApprovals(goalId?: string): Array<{ taskId: string; at: string; prompt: string; goalId?: string }> {
+    return this.engine.listPendingCodexApprovals(goalId);
+  }
+
+  submitCodexApproval(input: {
+    decision: "yes" | "no";
+    goalId?: string;
+    taskId?: string;
+  }): { ok: boolean; message: string; taskId?: string; goalId?: string } {
+    return this.engine.submitCodexApproval(input);
+  }
+
   getCodexConfig(): CodexConfigSnapshot {
     return this.codexConfig.getConfig();
   }
