@@ -66,12 +66,12 @@ export function parseSkillSelectionResult(rawText: string): SkillSelectionResult
   const obj = parseJsonObject(rawText);
   const decision = obj.decision;
 
-  if (decision !== "respond" && decision !== "use_skill") {
+  if (decision !== "respond" && decision !== "use_skill" && decision !== "use_planning") {
     throw new Error(`Invalid decision: ${decision}`);
   }
 
   return {
-    decision: decision as "respond" | "use_skill",
+    decision: decision as "respond" | "use_skill" | "use_planning",
     skill_name: typeof obj.skill_name === "string" ? obj.skill_name : undefined,
     planning_thinking_budget: parseOptionalPositiveInteger(obj, "planning_thinking_budget"),
     response_text: typeof obj.response_text === "string" ? obj.response_text : undefined,
@@ -81,6 +81,28 @@ export function parseSkillSelectionResult(rawText: string): SkillSelectionResult
 export function parseSkillPlanningResult(rawText: string): SkillPlanningResult {
   console.log("rawText", rawText);
   const obj = parseJsonObject(rawText);
+  const decision = typeof obj.decision === "string" ? obj.decision : undefined;
+
+  if (decision === "respond" || (
+    decision === undefined
+    && typeof obj.response_text === "string"
+    && typeof obj.tool !== "string"
+    && typeof obj.action !== "string"
+    && typeof obj.op !== "string"
+  )) {
+    const responseText = typeof obj.response_text === "string" ? obj.response_text : "";
+    if (!responseText.trim()) {
+      throw new Error("Missing response_text in planning respond output");
+    }
+    return {
+      decision: "respond",
+      response_text: responseText
+    };
+  }
+
+  if (decision && decision !== "tool_call") {
+    throw new Error(`Invalid decision for planning: ${decision}`);
+  }
 
   const action = typeof obj.action === "string" ? obj.action : typeof obj.op === "string" ? obj.op : "";
   const params = obj.params && typeof obj.params === "object"
@@ -97,6 +119,7 @@ export function parseSkillPlanningResult(rawText: string): SkillPlanningResult {
   }
 
   return {
+    decision: "tool_call",
     tool: obj.tool,
     op: action,
     args: params,

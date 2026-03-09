@@ -108,7 +108,7 @@ export class OllamaLLMEngine extends LLMChatEngine {
   }
 
   getModelForStep(step: LLMExecutionStep): string {
-    return step === "skill_planning" ? this.options.planningModel : this.options.model;
+    return step === "planning" ? this.options.planningModel : this.options.model;
   }
 
   getProviderName(): "ollama" {
@@ -127,7 +127,7 @@ export class OllamaLLMEngine extends LLMChatEngine {
       });
     }
 
-    if (request.step === "skill_selection") {
+    if (request.step === "routing") {
       return this.executeOllamaChat({
         baseUrl: this.options.baseUrl,
         model: request.model,

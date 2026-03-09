@@ -127,7 +127,7 @@ export class LlamaServerLLMEngine extends LLMChatEngine {
   }
 
   getModelForStep(step: LLMExecutionStep): string {
-    return step === "skill_planning" ? this.options.planningModel : this.options.model;
+    return step === "planning" ? this.options.planningModel : this.options.model;
   }
 
   getProviderName(): "llama-server" {
@@ -135,8 +135,8 @@ export class LlamaServerLLMEngine extends LLMChatEngine {
   }
 
   protected async executeChat(request: InternalChatRequest): Promise<string> {
-    const isPlanning = request.step === "skill_planning";
-    const isSelection = request.step === "skill_selection";
+    const isPlanning = request.step === "planning";
+    const isSelection = request.step === "routing";
 
     return this.executeLlamaServerChat({
       baseUrl: this.options.baseUrl,

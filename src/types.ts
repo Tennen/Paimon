@@ -10,19 +10,25 @@ export type Envelope = {
 };
 
 export type SkillSelectionResult = {
-  decision: "respond" | "use_skill";
+  decision: "respond" | "use_skill" | "use_planning";
   skill_name?: string;
   planning_thinking_budget?: number;
   response_text?: string;
 };
 
-export type SkillPlanningResult = {
-  tool: string;
-  op: string;
-  args: Record<string, unknown>;
-  success_response: string;
-  failure_response: string;
-};
+export type SkillPlanningResult =
+  | {
+      decision: "respond";
+      response_text: string;
+    }
+  | {
+      decision?: "tool_call";
+      tool: string;
+      op: string;
+      args: Record<string, unknown>;
+      success_response: string;
+      failure_response: string;
+    };
 
 export type ToolExecution = {
   tool: string;

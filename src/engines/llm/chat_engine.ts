@@ -58,9 +58,9 @@ export abstract class LLMChatEngine implements LLMEngine {
     });
   }
 
-  async selectSkill(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult> {
+  async route(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult> {
     return this.executeStructuredStep<SkillSelectionResult>({
-      step: "skill_selection",
+      step: "routing",
       text,
       runtimeContext,
       parse: parseSkillSelectionResult,
@@ -69,19 +69,20 @@ export abstract class LLMChatEngine implements LLMEngine {
     });
   }
 
-  async planToolExecution(
+  async plan(
     text: string,
     runtimeContext: LLMRuntimeContext,
     planningOptions?: LLMPlanningOptions
   ): Promise<SkillPlanningResult> {
     return this.executeStructuredStep<SkillPlanningResult>({
-      step: "skill_planning",
+      step: "planning",
       text,
       runtimeContext,
       planningOptions,
       parse: parseSkillPlanningResult,
       retryHint: JSON_RETRY_HINT,
       fallback: () => ({
+        decision: "tool_call",
         tool: "unknown",
         op: "unknown",
         args: {},
@@ -100,7 +101,7 @@ export abstract class LLMChatEngine implements LLMEngine {
     fallback: () => T;
     retryHint?: string;
   }): Promise<T> {
-    const mode = request.step === "skill_planning" ? PromptMode.SkillPlanning : PromptMode.SkillSelection;
+    const mode = request.step === "planning" ? PromptMode.Planning : PromptMode.Routing;
     const model = this.getModelForStep(request.step);
     const userPrompt = buildUserPrompt(request.text, request.runtimeContext, { mode });
     const shouldLogPrompts = process.env.LLM_LOG_PROMPTS === "true";
@@ -145,9 +146,9 @@ export abstract class LLMChatEngine implements LLMEngine {
   }
 
   private resolveModelForChatStep(step: LLMChatStep): string {
-    if (step === "skill_planning") {
-      return this.getModelForStep("skill_planning");
+    if (step === "planning") {
+      return this.getModelForStep("planning");
     }
-    return this.getModelForStep("skill_selection");
+    return this.getModelForStep("routing");
   }
 }

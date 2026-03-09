@@ -41,7 +41,7 @@ class MockOllamaLLMEngine extends OllamaLLMEngine {
   }
 }
 
-test("planToolExecution uses override budget first and falls back to default budget", async () => {
+test("plan uses override budget first and falls back to default budget", async () => {
   const calls: OllamaChatRequest[] = [];
 
   const engineWithOverride = new MockOllamaLLMEngine(createEngineOptions({
@@ -49,11 +49,12 @@ test("planToolExecution uses override budget first and falls back to default bud
     thinkingBudget: 1024,
     thinkingMaxNewTokens: 4096
   }), calls);
-  const overridePlan = await engineWithOverride.planToolExecution(
+  const overridePlan = await engineWithOverride.plan(
     "run",
     {},
     { thinkingBudgetOverride: 2048 }
   );
+  assert.ok("op" in overridePlan);
   assert.equal(overridePlan.op, "run");
   assert.equal(calls[0]?.thinkingBudget?.enabled, true);
   assert.equal(calls[0]?.thinkingBudget?.budgetTokens, 2048);
@@ -63,7 +64,7 @@ test("planToolExecution uses override budget first and falls back to default bud
     thinkingBudgetEnabled: true,
     thinkingBudget: 1536
   }), calls);
-  await engineWithFallback.planToolExecution("run", {});
+  await engineWithFallback.plan("run", {});
   assert.equal(calls[1]?.thinkingBudget?.enabled, true);
   assert.equal(calls[1]?.thinkingBudget?.budgetTokens, 1536);
 
@@ -71,7 +72,7 @@ test("planToolExecution uses override budget first and falls back to default bud
     thinkingBudgetEnabled: false,
     thinkingBudget: 1536
   }), calls);
-  await disabledThinkingBudgetEngine.planToolExecution(
+  await disabledThinkingBudgetEngine.plan(
     "run",
     {},
     { thinkingBudgetOverride: 3072 }

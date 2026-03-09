@@ -60,38 +60,44 @@ export class Orchestrator {
         return directRouteResponse;
       }
 
-      // Step 1: LLM Call - Determine the skill to use
-      const llmResult = await this.llmCallStep(text, memory, envelope, start);
-      if (llmResult.response) {
-        this.processed.set(envelope.requestId, llmResult.response);
-        this.appendMemory(envelope, text, llmResult.response);
-        return llmResult.response;
+      // Step 1: Routing - Decide direct response / planning / tool-oriented skill path
+      const routingResult = await this.routingStep(text, memory, envelope, start);
+      if (routingResult.response) {
+        this.processed.set(envelope.requestId, routingResult.response);
+        this.appendMemory(envelope, text, routingResult.response);
+        return routingResult.response;
       }
 
-      // Step 2: Skill Plan - Get detailed skill plan with response templates
-      const skillPlanResult = await this.skillPlanStep(
-        llmResult.skillName!,
-        llmResult.planningThinkingBudget,
+      // Step 2: Planning - Local thinking + direct response or tool call plan
+      const planningResult = await this.planningStep(
+        routingResult.skillName,
+        routingResult.planningThinkingBudget,
         text,
         memory,
         envelope,
         start
       );
-      if (skillPlanResult.response) {
-        this.processed.set(envelope.requestId, skillPlanResult.response);
-        this.appendMemory(envelope, text, skillPlanResult.response);
-        return skillPlanResult.response;
+      if (planningResult.response) {
+        this.processed.set(envelope.requestId, planningResult.response);
+        this.appendMemory(envelope, text, planningResult.response);
+        return planningResult.response;
       }
 
       // Step 3: Tool Call - Execute the planned tool action
-      const toolResult = await this.toolCallStep(skillPlanResult.toolExecution!, text, memory, envelope, start);
+      if (!planningResult.toolExecution) {
+        const response = { text: "I don't understand. Please try rephrasing." };
+        this.processed.set(envelope.requestId, response);
+        this.appendMemory(envelope, text, response);
+        return response;
+      }
+      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, memory, envelope, start);
 
       // Step 4: Respond - Generate final response based on tool result and prepared templates
       const response = await this.respondStep(
         toolResult.result,
-        skillPlanResult.successResponse || "Task completed successfully",
-        skillPlanResult.failureResponse || "Tool execution failed",
-        skillPlanResult.preferToolResult ?? false,
+        planningResult.successResponse || "Task completed successfully",
+        planningResult.failureResponse || "Tool execution failed",
+        planningResult.preferToolResult ?? false,
         text,
         envelope,
         start
@@ -326,7 +332,7 @@ export class Orchestrator {
     return { taskEnvelope, response };
   }
 
-  private async llmCallStep(
+  private async routingStep(
     text: string,
     memory: string,
     envelope: Envelope,
@@ -344,18 +350,18 @@ export class Orchestrator {
       // tools_context: buildToolsSchemaContext(this.toolRegistry),
     };
 
-    const result = await this.llmEngine.selectSkill(text, runtimeContext);
+    const result = await this.llmEngine.route(text, runtimeContext);
 
     // Write audit log
     const llmMeta: LLMPlanMeta = {
       llm_provider: this.llmEngine.getProviderName(),
-      model: this.llmEngine.getModelForStep("skill_selection"),
+      model: this.llmEngine.getModelForStep("routing"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,
       fallback: false
     };
-    this.writeLlmAudit(envelope, llmMeta, "llm_call", start);
+    this.writeLlmAudit(envelope, llmMeta, "routing", start);
 
     if (result.decision === "respond") {
       const response = { text: result.response_text || "OK" };
@@ -370,13 +376,19 @@ export class Orchestrator {
       };
     }
 
+    if (result.decision === "use_planning") {
+      return {
+        planningThinkingBudget: result.planning_thinking_budget
+      };
+    }
+
     const response = { text: "I don't understand. Please try rephrasing." };
     this.appendMemory(envelope, text, response);
     return { response };
   }
 
-  private async skillPlanStep(
-    skillName: string,
+  private async planningStep(
+    skillName: string | undefined,
     planningThinkingBudget: number | undefined,
     text: string,
     memory: string,
@@ -389,19 +401,20 @@ export class Orchestrator {
     failureResponse?: string;
     preferToolResult?: boolean;
   }> {
-    const selectedSkill = this.skillManager.get(skillName);
+    const selectedSkill = skillName ? this.skillManager.get(skillName) : undefined;
     const toolName = selectedSkill?.tool;
 
     // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
-    const detail = getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry);
-    const skillContext = buildSkillsContext(this.skillManager, [skillName], extraSkills);
+    const detail = skillName
+      ? getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry)
+      : "";
     const forceTools: string[] = [];
 
     if (skillName === "homeassistant") {
       forceTools.push("homeassistant");
     }
-    if (skillName && skillContext?.[skillName]?.terminal) {
+    if (skillName && selectedSkill?.terminal) {
       forceTools.push("terminal");
     }
     if (toolName) {
@@ -409,7 +422,9 @@ export class Orchestrator {
     }
 
     const fullToolContext = this.toolRegistry.buildRuntimeContext();
-    const toolContext = filterToolContextForSkill(detail, fullToolContext, forceTools);
+    const toolContext = skillName
+      ? filterToolContextForSkill(detail, fullToolContext, forceTools)
+      : null;
 
     const runtimeContext: Record<string, unknown> = {
       isoTime: new Date().toISOString(),
@@ -420,6 +435,7 @@ export class Orchestrator {
       // skills_context: skillContext,
       tools_context: toolContext,
       skill_detail: detail,
+      planning_mode: skillName ? "skill_tool_planning" : "local_thinking",
       skill_contract: selectedSkill?.tool
         ? {
             tool: selectedSkill.tool,
@@ -429,7 +445,7 @@ export class Orchestrator {
         : null
     };
 
-    const plan = await this.llmEngine.planToolExecution(
+    const plan = await this.llmEngine.plan(
       text,
       runtimeContext,
       planningThinkingBudget === undefined
@@ -440,13 +456,19 @@ export class Orchestrator {
     // Write audit log
     const llmMeta: LLMPlanMeta = {
       llm_provider: this.llmEngine.getProviderName(),
-      model: this.llmEngine.getModelForStep("skill_planning"),
+      model: this.llmEngine.getModelForStep("planning"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,
       fallback: false
     };
-    this.writeLlmAudit(envelope, llmMeta, "tool_call", start);
+    this.writeLlmAudit(envelope, llmMeta, "planning", start);
+
+    if (plan.decision === "respond") {
+      return {
+        response: { text: plan.response_text || "OK" }
+      };
+    }
 
     return {
       toolExecution: {

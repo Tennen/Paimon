@@ -1,8 +1,8 @@
 import { LLMRuntimeContext } from "./llm";
 
 export enum PromptMode {
-  SkillSelection = "skill_selection",
-  SkillPlanning = "skill_planning",
+  Routing = "routing",
+  Planning = "planning",
 }
 
 type UserPromptOptions = {
@@ -78,16 +78,16 @@ function detectPromptMode(runtimeContext?: LLMRuntimeContext): PromptMode {
   const context = toRecord(runtimeContext);
   const nextStep = toRecord(context?.next_step_context);
   const kind = typeof nextStep?.kind === "string" ? nextStep.kind : null;
-  if (kind === PromptMode.SkillPlanning || kind === "skill_detail" || kind === "tool_planning") {
-    return PromptMode.SkillPlanning;
+  if (kind === PromptMode.Planning || kind === "skill_planning" || kind === "skill_detail" || kind === "tool_planning") {
+    return PromptMode.Planning;
   }
-  if (kind === PromptMode.SkillSelection || kind === "skill_selection") {
-    return PromptMode.SkillSelection;
+  if (kind === PromptMode.Routing || kind === "skill_selection" || kind === "routing") {
+    return PromptMode.Routing;
   }
   if (typeof context?.skill_detail === "string" || toRecord(context?.tools_context)) {
-    return PromptMode.SkillPlanning;
+    return PromptMode.Planning;
   }
-  return PromptMode.SkillSelection;
+  return PromptMode.Routing;
 }
 
 export function buildSystemPrompt(
@@ -109,49 +109,56 @@ export function buildSystemPrompt(
   ];
 
   const modeSpecificInstructions =
-    mode === PromptMode.SkillSelection
-      ? getSkillSelectionInstructions()
-    : mode === PromptMode.SkillPlanning
-      ? getSkillPlanningInstructions()
-      : getSkillSelectionInstructions();
+    mode === PromptMode.Routing
+      ? getRoutingInstructions()
+    : mode === PromptMode.Planning
+      ? getPlanningInstructions()
+      : getRoutingInstructions();
 
   return [...baseRules, ...modeSpecificInstructions].join("\n") + hint;
 }
 
-function getSkillSelectionInstructions(): string[] {
+function getRoutingInstructions(): string[] {
   return [
-    "=== Step 1: Skill Selection ===",
-    "Your task is to analyze the user's request and decide how to respond.",
+    "=== Step 1: Routing ===",
+    "Your task is to analyze the user's request and decide the next step.",
     "Read the user prompt sections in order: USER_REQUEST -> CONTEXT_JSON.",
     "Use CONTEXT_JSON.skills_context as the source of available skills.",
     "",
     "Output format:",
     '  {"decision":"respond","response_text":"your response here"}',
     '  OR',
+    '  {"decision":"use_planning","planning_thinking_budget":1024}',
+    '  OR',
     '  {"decision":"use_skill","skill_name":"skill_name","planning_thinking_budget":1024}',
     "",
     "Decision logic:",
-    "- If request is conversational or doesn't need tools, use decision='respond'",
+    "- If request is conversational and no extra reasoning is needed, use decision='respond'",
+    "- If local thinking is needed but no external tool is required, use decision='use_planning' so planning step can think locally and reply directly",
     "- If request requires a skill, use decision='use_skill' with skill_name from CONTEXT_JSON.skills_context",
-    "- If CONTEXT_JSON.thinking_budget.enabled=true and decision='use_skill', planning_thinking_budget is required",
+    "- If CONTEXT_JSON.thinking_budget.enabled=true and decision is 'use_skill' or 'use_planning', planning_thinking_budget is required",
     "- planning_thinking_budget must be an integer within [CONTEXT_JSON.thinking_budget.min, CONTEXT_JSON.thinking_budget.max]",
-    "- If CONTEXT_JSON.thinking_budget.enabled=false, omit planning_thinking_budget",
+    "- If CONTEXT_JSON.thinking_budget.enabled=false, omit planning_thinking_budget for all decisions",
     "- Keep decision/skill_name keys and decision values in English exactly as specified",
   ];
 }
 
-function getSkillPlanningInstructions(): string[] {
+function getPlanningInstructions(): string[] {
   return [
-    "=== Step 2: Skill Planning ===",
-    "You have selected a skill. Plan the tool execution.",
+    "=== Step 2: Planning ===",
+    "This step can use local model thinking before returning final JSON.",
+    "If local thinking alone can solve the request, reply directly without tool call.",
     "Read the user prompt sections in order: USER_REQUEST -> CONTEXT_JSON.",
-    "Understand skill intent from CONTEXT_JSON.selected_skill.detail.",
+    "Understand skill intent from CONTEXT_JSON.selected_skill.detail when available.",
     "If CONTEXT_JSON.skill_contract exists, it has highest priority for tool/action/params shape.",
     "Use the tool/action from CONTEXT_JSON.tools_schema.",
     "Use CONTEXT_JSON.tools_context runtime data to fill params (entity_id/device names/etc).",
     "",
     "Output format:",
+    '{ "decision": "respond", "response_text": "your response here" }',
+    "OR",
     '{',
+    '  "decision": "tool_call",',
     '  "tool": "tool_name",',
     '  "action": "operation",',
     '  "params": {...},',
@@ -160,7 +167,10 @@ function getSkillPlanningInstructions(): string[] {
     '}',
     "",
     "Requirements:",
+    "- If you can fully answer with local reasoning, use decision='respond' with response_text",
+    "- If CONTEXT_JSON.tools_schema is empty, you must use decision='respond'",
     "- Do not invent tool names or operations outside CONTEXT_JSON.tools_schema",
+    "- If using a tool, set decision='tool_call' and include tool/action/params",
     "- For the selected tool/action, params keys must strictly match the params defined in CONTEXT_JSON.tools_schema (no extra keys, no missing required keys)",
     "- For params typed as string[], each array element must be one complete value/token; keep values containing spaces as a single element",
     "- Use tools_schema descriptions (tool description / operation description / param_descriptions) when available to pick the right operation and arguments",
@@ -267,7 +277,7 @@ function buildPlanningRuntimeContext(context: Record<string, unknown>): Record<s
 
 function buildReadableRuntimeContext(mode: PromptMode, runtimeContext: LLMRuntimeContext): Record<string, unknown> {
   const context = toRecord(runtimeContext) ?? {};
-  return mode === PromptMode.SkillPlanning
+  return mode === PromptMode.Planning
     ? buildPlanningRuntimeContext(context)
     : buildSelectionRuntimeContext(context);
 }

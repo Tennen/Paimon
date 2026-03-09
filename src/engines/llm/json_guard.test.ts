@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseSkillSelectionResult } from "./json_guard";
+import { parseSkillPlanningResult, parseSkillSelectionResult } from "./json_guard";
 
 test("parseSkillSelectionResult parses planning_thinking_budget when valid", () => {
   const result = parseSkillSelectionResult(
@@ -35,4 +35,33 @@ test("parseSkillSelectionResult rejects invalid planning_thinking_budget", () =>
       /Invalid planning_thinking_budget/
     );
   }
+});
+
+test("parseSkillSelectionResult accepts use_planning decision", () => {
+  const result = parseSkillSelectionResult(
+    '{"decision":"use_planning","planning_thinking_budget":1024}'
+  );
+
+  assert.equal(result.decision, "use_planning");
+  assert.equal(result.planning_thinking_budget, 1024);
+});
+
+test("parseSkillPlanningResult parses direct respond output", () => {
+  const result = parseSkillPlanningResult(
+    '{"decision":"respond","response_text":"本地思考后直接回复"}'
+  );
+
+  assert.equal(result.decision, "respond");
+  assert.equal(result.response_text, "本地思考后直接回复");
+});
+
+test("parseSkillPlanningResult parses tool_call output", () => {
+  const result = parseSkillPlanningResult(
+    '{"decision":"tool_call","tool":"terminal","action":"run","params":{"command":"echo hi"}}'
+  );
+
+  assert.equal(result.decision, "tool_call");
+  assert.equal(result.tool, "terminal");
+  assert.equal(result.op, "run");
+  assert.deepEqual(result.args, { command: "echo hi" });
 });
