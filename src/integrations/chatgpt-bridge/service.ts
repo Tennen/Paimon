@@ -385,13 +385,30 @@ async function fillComposerAndSend(page, message) {
   await page.keyboard.press("KeyA");
   await page.keyboard.up(modifier);
   await page.keyboard.press("Backspace");
-  await page.keyboard.type(message, { delay: 0 });
+  await typeComposerMessage(page, message);
   await sleep(120);
   const clicked = await clickSendButton(page);
   if (!clicked) {
     await page.keyboard.press("Enter");
   }
   await sleep(120);
+}
+
+async function typeComposerMessage(page, message) {
+  const normalized = String(message || "").replace(/\r\n?/g, "\n");
+  const lines = normalized.split("\n");
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line) {
+      await page.keyboard.type(line, { delay: 50 });
+    }
+    if (i < lines.length - 1) {
+      await page.keyboard.down("Shift");
+      await page.keyboard.press("Enter");
+      await page.keyboard.up("Shift");
+    }
+  }
 }
 
 async function clickSendButton(page) {
