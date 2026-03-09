@@ -4,7 +4,7 @@ import path from "path";
 import { Orchestrator } from "./orchestrator";
 import { ToolRouter } from "../tools/toolRouter";
 import { ToolRegistry } from "../tools/toolRegistry";
-import { LLMEngine } from "../engines/llm/llm";
+import { LLMChatRequest, LLMEngine } from "../engines/llm/llm";
 import { SkillManager } from "../skills/skillManager";
 import { Envelope, Response, SkillPlanningResult, SkillSelectionResult } from "../types";
 import { MemoryStore } from "../memory/memoryStore";
@@ -30,6 +30,10 @@ class StubSessionMemoryStore {
 }
 
 class StubLLMEngine implements LLMEngine {
+  async chat(_request: LLMChatRequest): Promise<string> {
+    return "stub-chat-response";
+  }
+
   async selectSkill(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
     return { decision: "respond", response_text: "not-used" };
   }
