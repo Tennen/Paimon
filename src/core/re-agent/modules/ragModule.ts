@@ -1,5 +1,5 @@
 import { RagRetriever, RagSearchHit, RagService } from "../../../integrations/rag/service";
-import { ReAgentSummaryVectorIndex } from "../../../memory/reAgentSummaryVectorIndex";
+import { SummaryVectorIndex } from "../../../memory/summaryVectorIndex";
 import { ReAgentModule } from "../types";
 
 export const RAG_MODULE_NAME = "rag";
@@ -50,7 +50,7 @@ function resolveQuery(params: Record<string, unknown>): string {
 }
 
 function createSummaryMemoryRetriever(
-  index: ReAgentSummaryVectorIndex = new ReAgentSummaryVectorIndex(),
+  index: SummaryVectorIndex = new SummaryVectorIndex(),
   topK: number = readPositiveInt(process.env.RE_AGENT_RAG_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K)
 ): RagRetriever {
   return {
@@ -59,7 +59,7 @@ function createSummaryMemoryRetriever(
       return hits.map((item) => ({
         id: item.id,
         content: item.text,
-        source: `re-agent-summary:${item.id}`,
+        source: `memory-summary:${item.id}`,
         score: item.score,
         metadata: {
           rawRefs: item.rawRefs,

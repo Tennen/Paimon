@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReAgentMemoryCompactor } from "./reAgentMemoryCompactor";
-import { ReAgentRawMemoryRecord, ReAgentRawMemoryStore } from "./reAgentRawMemoryStore";
-import { ReAgentSummaryMemoryStore } from "./reAgentSummaryMemoryStore";
-import { ReAgentSummaryVectorIndex } from "./reAgentSummaryVectorIndex";
+import { MemoryCompactor } from "./memoryCompactor";
+import { RawMemoryRecord, RawMemoryStore } from "./rawMemoryStore";
+import { SummaryMemoryStore } from "./summaryMemoryStore";
+import { SummaryVectorIndex } from "./summaryVectorIndex";
 
 function token(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
 
 function appendRaw(
-  store: ReAgentRawMemoryStore,
+  store: RawMemoryStore,
   input: {
     id: string;
     sessionId: string;
@@ -34,16 +34,16 @@ function appendRaw(
   });
 }
 
-function stripSummarizedAt(record: ReAgentRawMemoryRecord): Omit<ReAgentRawMemoryRecord, "summarizedAt"> {
+function stripSummarizedAt(record: RawMemoryRecord): Omit<RawMemoryRecord, "summarizedAt"> {
   const { summarizedAt: _summarizedAt, ...rest } = record;
   return rest;
 }
 
-test("ReAgentMemoryCompactor keeps raw content unchanged and uses fallback on invalid LLM JSON", { concurrency: false }, async () => {
-  const rawStore = new ReAgentRawMemoryStore();
-  const summaryStore = new ReAgentSummaryMemoryStore();
-  const vectorIndex = new ReAgentSummaryVectorIndex({ dimension: 128 });
-  const compactor = new ReAgentMemoryCompactor({
+test("MemoryCompactor keeps raw content unchanged and uses fallback on invalid LLM JSON", { concurrency: false }, async () => {
+  const rawStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const vectorIndex = new SummaryVectorIndex({ dimension: 128 });
+  const compactor = new MemoryCompactor({
     rawStore,
     summaryStore,
     summaryVectorIndex: vectorIndex,
@@ -96,11 +96,11 @@ test("ReAgentMemoryCompactor keeps raw content unchanged and uses fallback on in
   }
 });
 
-test("ReAgentMemoryCompactor compacts same batch idempotently", { concurrency: false }, async () => {
-  const rawStore = new ReAgentRawMemoryStore();
-  const summaryStore = new ReAgentSummaryMemoryStore();
-  const vectorIndex = new ReAgentSummaryVectorIndex({ dimension: 128 });
-  const compactor = new ReAgentMemoryCompactor({
+test("MemoryCompactor compacts same batch idempotently", { concurrency: false }, async () => {
+  const rawStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const vectorIndex = new SummaryVectorIndex({ dimension: 128 });
+  const compactor = new MemoryCompactor({
     rawStore,
     summaryStore,
     summaryVectorIndex: vectorIndex,
@@ -160,11 +160,11 @@ test("ReAgentMemoryCompactor compacts same batch idempotently", { concurrency: f
   }
 });
 
-test("ReAgentMemoryCompactor supports threshold trigger and scheduler task force trigger", { concurrency: false }, async () => {
-  const rawStore = new ReAgentRawMemoryStore();
-  const summaryStore = new ReAgentSummaryMemoryStore();
-  const vectorIndex = new ReAgentSummaryVectorIndex({ dimension: 128 });
-  const compactor = new ReAgentMemoryCompactor({
+test("MemoryCompactor supports threshold trigger and scheduler task force trigger", { concurrency: false }, async () => {
+  const rawStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const vectorIndex = new SummaryVectorIndex({ dimension: 128 });
+  const compactor = new MemoryCompactor({
     rawStore,
     summaryStore,
     summaryVectorIndex: vectorIndex,

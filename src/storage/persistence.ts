@@ -17,10 +17,9 @@ export const DATA_STORE = {
   MARKET_RUNS: "market.runs",
   ENV_CONFIG: "env.config",
   MEMORY_SESSIONS: "memory.sessions",
-  RE_AGENT_MEMORY_SESSIONS: "re-agent.memory.sessions",
-  RE_AGENT_MEMORY_RAW: "re-agent.memory.raw",
-  RE_AGENT_MEMORY_SUMMARY: "re-agent.memory.summary",
-  RE_AGENT_MEMORY_SUMMARY_INDEX: "re-agent.memory.summary_index",
+  MEMORY_RAW: "memory.raw",
+  MEMORY_SUMMARY: "memory.summary",
+  MEMORY_SUMMARY_INDEX: "memory.summary_index",
   AUDIT_LOG: "audit.log",
   TOPIC_PUSH_CONFIG: "topic-push.config",
   TOPIC_PUSH_STATE: "topic-push.state"
@@ -40,10 +39,9 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.MARKET_RUNS]: "market-analysis/runs.json",
   [DATA_STORE.ENV_CONFIG]: "config/.env",
   [DATA_STORE.MEMORY_SESSIONS]: "memory/sessions.json",
-  [DATA_STORE.RE_AGENT_MEMORY_SESSIONS]: "memory/re-agent-sessions.json",
-  [DATA_STORE.RE_AGENT_MEMORY_RAW]: "memory/re-agent-memory-raw.json",
-  [DATA_STORE.RE_AGENT_MEMORY_SUMMARY]: "memory/re-agent-memory-summary.json",
-  [DATA_STORE.RE_AGENT_MEMORY_SUMMARY_INDEX]: "memory/re-agent-memory-summary-index.json",
+  [DATA_STORE.MEMORY_RAW]: "memory/raw.json",
+  [DATA_STORE.MEMORY_SUMMARY]: "memory/summary.json",
+  [DATA_STORE.MEMORY_SUMMARY_INDEX]: "memory/summary-index.json",
   [DATA_STORE.AUDIT_LOG]: "audit.jsonl",
   [DATA_STORE.TOPIC_PUSH_CONFIG]: "topic-push/config.json",
   [DATA_STORE.TOPIC_PUSH_STATE]: "topic-push/state.json"
@@ -184,7 +182,7 @@ function writeStore(entry: StoreEntry, payload: unknown): void {
 
 function writeFileAtomic(filePath: string, content: string): void {
   ensureParentDir(filePath);
-  const tempPath = `${filePath}.tmp`;
+  const tempPath = `${filePath}.${process.pid}.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 8)}.tmp`;
   fs.writeFileSync(tempPath, content, "utf-8");
   fs.renameSync(tempPath, filePath);
 }

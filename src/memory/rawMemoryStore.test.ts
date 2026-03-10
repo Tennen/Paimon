@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReAgentRawMemoryStore, normalizeReAgentRawMemorySessionKey } from "./reAgentRawMemoryStore";
+import { RawMemoryStore, normalizeRawMemorySessionKey } from "./rawMemoryStore";
 
 const mkToken = (): string => `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
-const append = (s: ReAgentRawMemoryStore, sessionId: string, requestId: string, id: string, user = "u", assistant = "a"): void =>
+const append = (s: RawMemoryStore, sessionId: string, requestId: string, id: string, user = "u", assistant = "a"): void =>
   void s.append({ id, sessionId, requestId, source: "http", user, assistant, meta: { rid: requestId } });
 
-test("ReAgentRawMemoryStore normalizes session keys", () => {
-  const store = new ReAgentRawMemoryStore();
+test("RawMemoryStore normalizes session keys", () => {
+  const store = new RawMemoryStore();
   const t = mkToken();
   const rawSessionId = `re/raw:${t}`;
-  const normalizedSessionId = normalizeReAgentRawMemorySessionKey(rawSessionId);
+  const normalizedSessionId = normalizeRawMemorySessionKey(rawSessionId);
   try {
     store.clear(rawSessionId);
     append(store, rawSessionId, `req-${t}`, `id-${t}`, "  raw user  ", "  raw assistant  ");
@@ -20,8 +20,8 @@ test("ReAgentRawMemoryStore normalizes session keys", () => {
   } finally { store.clear(rawSessionId); }
 });
 
-test("ReAgentRawMemoryStore keeps append order", () => {
-  const store = new ReAgentRawMemoryStore();
+test("RawMemoryStore keeps append order", () => {
+  const store = new RawMemoryStore();
   const t = mkToken();
   const sessionId = `re/order:${t}`;
   const ids = [`${t}-1`, `${t}-2`, `${t}-3`];
@@ -36,8 +36,8 @@ test("ReAgentRawMemoryStore keeps append order", () => {
   } finally { store.clear(sessionId); }
 });
 
-test("ReAgentRawMemoryStore reads records by ids", () => {
-  const store = new ReAgentRawMemoryStore();
+test("RawMemoryStore reads records by ids", () => {
+  const store = new RawMemoryStore();
   const t = mkToken();
   const sessionId = `re/get:${t}`;
   const ids = [`${t}-first`, `${t}-second`, `${t}-third`];
@@ -52,8 +52,8 @@ test("ReAgentRawMemoryStore reads records by ids", () => {
   } finally { store.clear(sessionId); }
 });
 
-test("ReAgentRawMemoryStore clear removes target session only", () => {
-  const store = new ReAgentRawMemoryStore();
+test("RawMemoryStore clear removes target session only", () => {
+  const store = new RawMemoryStore();
   const t = mkToken();
   const targetSessionId = `re/target:${t}`;
   const keepSessionId = `re/keep:${t}`;

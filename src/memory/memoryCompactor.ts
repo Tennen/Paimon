@@ -1,21 +1,21 @@
-import { ReAgentRawMemoryRecord, ReAgentRawMemoryStore } from "./reAgentRawMemoryStore";
-import { ReAgentSummaryMemoryStore, normalizeReAgentSummaryMemorySessionKey } from "./reAgentSummaryMemoryStore";
-import { ReAgentSummaryVectorIndex } from "./reAgentSummaryVectorIndex";
+import { RawMemoryRecord, RawMemoryStore } from "./rawMemoryStore";
+import { SummaryMemoryStore, normalizeSummaryMemorySessionKey } from "./summaryMemoryStore";
+import { SummaryVectorIndex } from "./summaryVectorIndex";
 const DEFAULT_COMPACT_EVERY_ROUNDS = 4;
 const DEFAULT_MAX_BATCH_SIZE = 8;
 const DEFAULT_FORCE_TRIGGER_META_KEYS = ["scheduler_task_id"];
-export type ReAgentMemoryCompactorOptions = {
-  rawStore?: ReAgentRawMemoryStore;
-  summaryStore?: ReAgentSummaryMemoryStore;
-  summaryVectorIndex?: ReAgentSummaryVectorIndex;
-  llm?: ReAgentMemoryCompactorLlm;
+export type MemoryCompactorOptions = {
+  rawStore?: RawMemoryStore;
+  summaryStore?: SummaryMemoryStore;
+  summaryVectorIndex?: SummaryVectorIndex;
+  llm?: MemoryCompactorLlm;
   compactEveryRounds?: number;
   maxBatchSize?: number;
   forceTriggerMetaKeys?: string[];
   now?: () => string;
 };
 
-export type ReAgentMemoryCompactorInput = {
+export type MemoryCompactorInput = {
   sessionId: string;
   force?: boolean;
   requestId?: string;
@@ -23,13 +23,13 @@ export type ReAgentMemoryCompactorInput = {
   meta?: Record<string, unknown>;
 };
 
-export type ReAgentMemoryCompactionReason = "compacted" | "threshold_not_met" | "no_pending_raw" | "invalid_session";
+export type MemoryCompactionReason = "compacted" | "threshold_not_met" | "no_pending_raw" | "invalid_session";
 
-export type ReAgentMemoryCompactionResult = {
+export type MemoryCompactionResult = {
   sessionId: string;
   compacted: boolean;
   forced: boolean;
-  reason: ReAgentMemoryCompactionReason;
+  reason: MemoryCompactionReason;
   pendingCount: number;
   batchCount: number;
   rawIds: string[];
@@ -37,15 +37,15 @@ export type ReAgentMemoryCompactionResult = {
   usedFallback: boolean;
 };
 
-export type ReAgentMemoryCompactorLlmInput = {
+export type MemoryCompactorLlmInput = {
   sessionId: string;
   requestId?: string;
   source?: string;
   prompt: string;
-  rawBatch: ReAgentRawMemoryRecord[];
+  rawBatch: RawMemoryRecord[];
 };
 
-export type ReAgentMemoryCompactorLlm = (input: ReAgentMemoryCompactorLlmInput) => Promise<string>;
+export type MemoryCompactorLlm = (input: MemoryCompactorLlmInput) => Promise<string>;
 
 type StructuredSummary = {
   user_facts: string[];
@@ -55,28 +55,28 @@ type StructuredSummary = {
   rawRefs: string[];
 };
 
-export class ReAgentMemoryCompactor {
-  private readonly rawStore: ReAgentRawMemoryStore;
-  private readonly summaryStore: ReAgentSummaryMemoryStore;
-  private readonly summaryVectorIndex: ReAgentSummaryVectorIndex;
-  private readonly llm?: ReAgentMemoryCompactorLlm;
+export class MemoryCompactor {
+  private readonly rawStore: RawMemoryStore;
+  private readonly summaryStore: SummaryMemoryStore;
+  private readonly summaryVectorIndex: SummaryVectorIndex;
+  private readonly llm?: MemoryCompactorLlm;
   private readonly compactEveryRounds: number;
   private readonly maxBatchSize: number;
   private readonly forceTriggerMetaKeys: string[];
   private readonly now: () => string;
 
-  constructor(options: ReAgentMemoryCompactorOptions = {}) {
-    this.rawStore = options.rawStore ?? new ReAgentRawMemoryStore();
-    this.summaryStore = options.summaryStore ?? new ReAgentSummaryMemoryStore();
-    this.summaryVectorIndex = options.summaryVectorIndex ?? new ReAgentSummaryVectorIndex();
+  constructor(options: MemoryCompactorOptions = {}) {
+    this.rawStore = options.rawStore ?? new RawMemoryStore();
+    this.summaryStore = options.summaryStore ?? new SummaryMemoryStore();
+    this.summaryVectorIndex = options.summaryVectorIndex ?? new SummaryVectorIndex();
     this.llm = options.llm;
-    this.compactEveryRounds = readPositiveInt(options.compactEveryRounds, process.env.RE_AGENT_MEMORY_COMPACT_EVERY_ROUNDS, DEFAULT_COMPACT_EVERY_ROUNDS);
-    this.maxBatchSize = Math.max(this.compactEveryRounds, readPositiveInt(options.maxBatchSize, process.env.RE_AGENT_MEMORY_COMPACT_MAX_BATCH_SIZE, DEFAULT_MAX_BATCH_SIZE));
+    this.compactEveryRounds = readPositiveInt(options.compactEveryRounds, process.env.MEMORY_COMPACT_EVERY_ROUNDS, DEFAULT_COMPACT_EVERY_ROUNDS);
+    this.maxBatchSize = Math.max(this.compactEveryRounds, readPositiveInt(options.maxBatchSize, process.env.MEMORY_COMPACT_MAX_BATCH_SIZE, DEFAULT_MAX_BATCH_SIZE));
     this.forceTriggerMetaKeys = normalizeKeys(options.forceTriggerMetaKeys ?? DEFAULT_FORCE_TRIGGER_META_KEYS);
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  async maybeCompact(input: ReAgentMemoryCompactorInput): Promise<ReAgentMemoryCompactionResult> {
+  async maybeCompact(input: MemoryCompactorInput): Promise<MemoryCompactionResult> {
     const sessionId = text(input.sessionId);
     if (!sessionId) return result("", false, false, "invalid_session", 0, 0, [], false);
     const pending = this.rawStore.listUnsummarized(sessionId);
@@ -110,14 +110,14 @@ export class ReAgentMemoryCompactor {
     return { ...result(sessionId, true, forced, "compacted", pending.length, rawIds.length, rawIds, built.usedFallback), summaryId: summary.id };
   }
 
-  async compactNow(input: Omit<ReAgentMemoryCompactorInput, "force">): Promise<ReAgentMemoryCompactionResult> {
+  async compactNow(input: Omit<MemoryCompactorInput, "force">): Promise<MemoryCompactionResult> {
     return this.maybeCompact({ ...input, force: true });
   }
 
   private async buildSummary(
     sessionId: string,
-    batch: ReAgentRawMemoryRecord[],
-    input: ReAgentMemoryCompactorInput
+    batch: RawMemoryRecord[],
+    input: MemoryCompactorInput
   ): Promise<{ summary: StructuredSummary; usedFallback: boolean }> {
     if (!this.llm) return { summary: fallbackSummary(batch), usedFallback: true };
     try {
@@ -141,16 +141,16 @@ function result(
   sessionId: string,
   compacted: boolean,
   forced: boolean,
-  reason: ReAgentMemoryCompactionReason,
+  reason: MemoryCompactionReason,
   pendingCount: number,
   batchCount: number,
   rawIds: string[],
   usedFallback: boolean
-): ReAgentMemoryCompactionResult {
+): MemoryCompactionResult {
   return { sessionId, compacted, forced, reason, pendingCount, batchCount, rawIds, usedFallback };
 }
 
-function buildPrompt(sessionId: string, batch: ReAgentRawMemoryRecord[]): string {
+function buildPrompt(sessionId: string, batch: RawMemoryRecord[]): string {
   return [
     "Compress memory into JSON only:",
     "{\"user_facts\":string[],\"environment\":string[],\"long_term_preferences\":string[],\"task_results\":string[],\"rawRefs\":string[]}",
@@ -181,7 +181,7 @@ function parseSummary(raw: string): StructuredSummary | null {
   return hasPayload(summary) ? summary : null;
 }
 
-function fallbackSummary(batch: ReAgentRawMemoryRecord[]): StructuredSummary {
+function fallbackSummary(batch: RawMemoryRecord[]): StructuredSummary {
   const environment = unique(batch.flatMap((item) => {
     const taskId = typeof item.meta.scheduler_task_id === "string" ? text(item.meta.scheduler_task_id) : "";
     return [item.source ? `source=${item.source}` : "", taskId ? `scheduler_task_id=${taskId}` : ""];
@@ -195,12 +195,12 @@ function fallbackSummary(batch: ReAgentRawMemoryRecord[]): StructuredSummary {
   };
 }
 
-function cloneRawRecord(item: ReAgentRawMemoryRecord): ReAgentRawMemoryRecord {
+function cloneRawRecord(item: RawMemoryRecord): RawMemoryRecord {
   return { ...item, meta: { ...item.meta }, ...(item.summarizedAt ? { summarizedAt: item.summarizedAt } : {}) };
 }
 
 function createBatchSummaryId(sessionId: string, rawIds: string[]): string {
-  return `summary_batch_${fnv1a(`${normalizeReAgentSummaryMemorySessionKey(sessionId) || "_"}|${rawIds.join("|")}`).toString(16).padStart(8, "0")}`;
+  return `summary_batch_${fnv1a(`${normalizeSummaryMemorySessionKey(sessionId) || "_"}|${rawIds.join("|")}`).toString(16).padStart(8, "0")}`;
 }
 
 function pick(record: Record<string, unknown>, keys: string[]): unknown {

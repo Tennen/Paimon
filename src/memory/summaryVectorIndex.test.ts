@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ReAgentSummaryVectorIndex } from "./reAgentSummaryVectorIndex";
+import { SummaryVectorIndex } from "./summaryVectorIndex";
 
 function createToken(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
 
-test("ReAgentSummaryVectorIndex search isolates sessions", { concurrency: false }, () => {
-  const index = new ReAgentSummaryVectorIndex({ dimension: 256 });
+test("SummaryVectorIndex search isolates sessions", { concurrency: false }, () => {
+  const index = new SummaryVectorIndex({ dimension: 256 });
   const token = createToken();
   const sessionA = `re/vector-a:${token}`;
   const sessionB = `re/vector-b:${token}`;
@@ -40,8 +40,8 @@ test("ReAgentSummaryVectorIndex search isolates sessions", { concurrency: false 
   }
 });
 
-test("ReAgentSummaryVectorIndex ranks more relevant summaries first", { concurrency: false }, () => {
-  const index = new ReAgentSummaryVectorIndex({ dimension: 256 });
+test("SummaryVectorIndex ranks more relevant summaries first", { concurrency: false }, () => {
+  const index = new SummaryVectorIndex({ dimension: 256 });
   const token = createToken();
   const sessionId = `re/vector-rank:${token}`;
   const high = `sum-high-${token}`;
@@ -80,8 +80,8 @@ test("ReAgentSummaryVectorIndex ranks more relevant summaries first", { concurre
   }
 });
 
-test("ReAgentSummaryVectorIndex falls back to recent summaries on empty query", { concurrency: false }, () => {
-  const index = new ReAgentSummaryVectorIndex({ dimension: 128 });
+test("SummaryVectorIndex falls back to recent summaries on empty query", { concurrency: false }, () => {
+  const index = new SummaryVectorIndex({ dimension: 128 });
   const token = createToken();
   const sessionId = `re/vector-fallback:${token}`;
   const oldId = `sum-old-${token}`;

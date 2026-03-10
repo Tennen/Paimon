@@ -3,10 +3,10 @@ import { OllamaReAgentLlmClient, ReAgentLlmClient, ReAgentToolDescriptor } from 
 import { createMcpModule } from "./modules/mcpModule";
 import { createMultiAgentModule } from "./modules/multiAgentModule";
 import { createRagModule } from "./modules/ragModule";
-import { ReAgentMemoryStore } from "../../memory/reAgentMemoryStore";
-import { ReAgentRawMemoryStore } from "../../memory/reAgentRawMemoryStore";
-import { ReAgentSummaryMemoryStore } from "../../memory/reAgentSummaryMemoryStore";
-import { ReAgentSummaryVectorIndex } from "../../memory/reAgentSummaryVectorIndex";
+import { MemoryStore } from "../../memory/memoryStore";
+import { RawMemoryStore } from "../../memory/rawMemoryStore";
+import { SummaryMemoryStore } from "../../memory/summaryMemoryStore";
+import { SummaryVectorIndex } from "../../memory/summaryVectorIndex";
 import { ReActObservation, ReAgentMemoryContext, ReAgentModule, ReAgentTraceStep } from "./types";
 
 export type ReAgentRuntimeRunInput = { sessionId: string; input: string; maxSteps?: number };
@@ -16,10 +16,10 @@ export type ReAgentRuntimeOptions = {
   llmClient?: ReAgentLlmClient;
   modules?: ReAgentModule[];
   maxSteps?: number;
-  reAgentMemoryStore?: ReAgentMemoryStore;
-  rawMemoryStore?: ReAgentRawMemoryStore;
-  summaryMemoryStore?: ReAgentSummaryMemoryStore;
-  summaryVectorIndex?: ReAgentSummaryVectorIndex;
+  memoryStore?: MemoryStore;
+  rawMemoryStore?: RawMemoryStore;
+  summaryMemoryStore?: SummaryMemoryStore;
+  summaryVectorIndex?: SummaryVectorIndex;
   summaryTopK?: number;
   rawRefLimit?: number;
   rawRecordLimit?: number;
@@ -37,10 +37,10 @@ export class ReAgentRuntime {
   private readonly modules: Map<string, ReAgentModule>;
   private readonly tools: ReAgentToolDescriptor[];
   private readonly maxSteps: number;
-  private readonly reAgentMemoryStore: ReAgentMemoryStore;
-  private readonly rawMemoryStore: ReAgentRawMemoryStore;
-  private readonly summaryMemoryStore: ReAgentSummaryMemoryStore;
-  private readonly summaryVectorIndex: ReAgentSummaryVectorIndex;
+  private readonly memoryStore: MemoryStore;
+  private readonly rawMemoryStore: RawMemoryStore;
+  private readonly summaryMemoryStore: SummaryMemoryStore;
+  private readonly summaryVectorIndex: SummaryVectorIndex;
   private readonly summaryTopK: number;
   private readonly rawRefLimit: number;
   private readonly rawRecordLimit: number;
@@ -51,13 +51,13 @@ export class ReAgentRuntime {
     this.modules = new Map(modules.map((item) => [item.name, item]));
     this.tools = modules.map((item) => ({ name: item.name, ...(item.description ? { description: item.description } : {}) }));
     this.maxSteps = readPositiveInt(options.maxSteps, process.env.RE_AGENT_MAX_STEPS, DEFAULT_MAX_STEPS);
-    this.reAgentMemoryStore = options.reAgentMemoryStore ?? new ReAgentMemoryStore();
-    this.rawMemoryStore = options.rawMemoryStore ?? new ReAgentRawMemoryStore();
-    this.summaryMemoryStore = options.summaryMemoryStore ?? new ReAgentSummaryMemoryStore();
-    this.summaryVectorIndex = options.summaryVectorIndex ?? new ReAgentSummaryVectorIndex();
-    this.summaryTopK = readPositiveInt(options.summaryTopK, process.env.RE_AGENT_MEMORY_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K);
-    this.rawRefLimit = readPositiveInt(options.rawRefLimit, process.env.RE_AGENT_MEMORY_RAW_REF_LIMIT, DEFAULT_RAW_REF_LIMIT);
-    this.rawRecordLimit = readPositiveInt(options.rawRecordLimit, process.env.RE_AGENT_MEMORY_RAW_RECORD_LIMIT, DEFAULT_RAW_RECORD_LIMIT);
+    this.memoryStore = options.memoryStore ?? new MemoryStore();
+    this.rawMemoryStore = options.rawMemoryStore ?? new RawMemoryStore();
+    this.summaryMemoryStore = options.summaryMemoryStore ?? new SummaryMemoryStore();
+    this.summaryVectorIndex = options.summaryVectorIndex ?? new SummaryVectorIndex();
+    this.summaryTopK = readPositiveInt(options.summaryTopK, process.env.MEMORY_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K);
+    this.rawRefLimit = readPositiveInt(options.rawRefLimit, process.env.MEMORY_RAW_REF_LIMIT, DEFAULT_RAW_REF_LIMIT);
+    this.rawRecordLimit = readPositiveInt(options.rawRecordLimit, process.env.MEMORY_RAW_RECORD_LIMIT, DEFAULT_RAW_RECORD_LIMIT);
   }
 
   async run(input: ReAgentRuntimeRunInput): Promise<ReAgentRuntimeResult> {
@@ -121,7 +121,7 @@ export class ReAgentRuntime {
   resetSession(sessionId: string): void {
     const key = String(sessionId ?? "").trim();
     if (!key) return;
-    this.reAgentMemoryStore.clear(key);
+    this.memoryStore.clear(key);
     this.rawMemoryStore.clear(key);
     this.summaryMemoryStore.clear(key);
     this.summaryVectorIndex.clear(key);

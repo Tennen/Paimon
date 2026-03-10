@@ -2,10 +2,10 @@ import { DATA_STORE, getStore, registerStore, setStore } from "../storage/persis
 
 type SummaryMemoryStoreState = {
   version: 1;
-  sessions: Record<string, ReAgentSummaryMemoryRecord[]>;
+  sessions: Record<string, SummaryMemoryRecord[]>;
 };
 
-export type ReAgentSummaryMemoryRecord = {
+export type SummaryMemoryRecord = {
   id: string;
   sessionId: string;
   user_facts: string[];
@@ -17,7 +17,7 @@ export type ReAgentSummaryMemoryRecord = {
   updatedAt: string;
 };
 
-export type ReAgentSummaryMemoryUpsertInput = {
+export type SummaryMemoryUpsertInput = {
   id?: string;
   sessionId: string;
   user_facts?: unknown;
@@ -29,14 +29,14 @@ export type ReAgentSummaryMemoryUpsertInput = {
   updatedAt?: string;
 };
 
-export class ReAgentSummaryMemoryStore {
-  private readonly storeName = DATA_STORE.RE_AGENT_MEMORY_SUMMARY;
+export class SummaryMemoryStore {
+  private readonly storeName = DATA_STORE.MEMORY_SUMMARY;
 
   constructor(_baseDir?: string) {
     registerStore(this.storeName, () => createDefaultStore());
   }
 
-  upsert(input: ReAgentSummaryMemoryUpsertInput): ReAgentSummaryMemoryRecord {
+  upsert(input: SummaryMemoryUpsertInput): SummaryMemoryRecord {
     const store = this.readStore();
     const key = toSessionKey(input.sessionId);
     const records = store.sessions[key] ?? [];
@@ -44,7 +44,7 @@ export class ReAgentSummaryMemoryStore {
     const id = normalizeString(input.id) || generateId();
     const index = records.findIndex((item) => item.id === id);
     const existing = index >= 0 ? records[index] : undefined;
-    const record: ReAgentSummaryMemoryRecord = {
+    const record: SummaryMemoryRecord = {
       id,
       sessionId: normalizeString(input.sessionId) || existing?.sessionId || key,
       user_facts: toStringList(input.user_facts),
@@ -65,7 +65,7 @@ export class ReAgentSummaryMemoryStore {
     return cloneRecord(record);
   }
 
-  listBySession(sessionId: string): ReAgentSummaryMemoryRecord[] {
+  listBySession(sessionId: string): SummaryMemoryRecord[] {
     const store = this.readStore();
     return (store.sessions[toSessionKey(sessionId)] ?? []).map(cloneRecord);
   }
@@ -85,12 +85,12 @@ export class ReAgentSummaryMemoryStore {
   }
 }
 
-export function normalizeReAgentSummaryMemorySessionKey(sessionId: string): string {
+export function normalizeSummaryMemorySessionKey(sessionId: string): string {
   return String(sessionId ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function toSessionKey(sessionId: string): string {
-  const key = normalizeReAgentSummaryMemorySessionKey(sessionId);
+  const key = normalizeSummaryMemorySessionKey(sessionId);
   return key || "_";
 }
 
@@ -98,7 +98,7 @@ function normalizeStore(input: unknown): SummaryMemoryStoreState {
   if (!isRecord(input) || !isRecord(input.sessions)) {
     return createDefaultStore();
   }
-  const sessions: Record<string, ReAgentSummaryMemoryRecord[]> = {};
+  const sessions: Record<string, SummaryMemoryRecord[]> = {};
   for (const [rawSessionKey, rawValue] of Object.entries(input.sessions)) {
     const key = toSessionKey(rawSessionKey);
     sessions[key] = Array.isArray(rawValue) ? normalizeRecords(rawValue, key) : [];
@@ -106,8 +106,8 @@ function normalizeStore(input: unknown): SummaryMemoryStoreState {
   return { version: 1, sessions };
 }
 
-function normalizeRecords(rawRecords: unknown[], fallbackSessionId: string): ReAgentSummaryMemoryRecord[] {
-  const output: ReAgentSummaryMemoryRecord[] = [];
+function normalizeRecords(rawRecords: unknown[], fallbackSessionId: string): SummaryMemoryRecord[] {
+  const output: SummaryMemoryRecord[] = [];
   const seen = new Set<string>();
   for (const rawRecord of rawRecords) {
     if (!isRecord(rawRecord)) {
@@ -138,7 +138,7 @@ function createDefaultStore(): SummaryMemoryStoreState {
   return { version: 1, sessions: {} };
 }
 
-function cloneRecord(record: ReAgentSummaryMemoryRecord): ReAgentSummaryMemoryRecord {
+function cloneRecord(record: SummaryMemoryRecord): SummaryMemoryRecord {
   return {
     ...record,
     user_facts: [...record.user_facts],

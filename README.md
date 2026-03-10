@@ -223,27 +223,27 @@ npm start
 
 - `/re <问题>`：触发子 agent 对话（ReAct 循环）
 - `/re help`：查看子 agent 帮助
-- `/re reset`：重置当前会话的子 agent 记忆（同时清空 legacy 记忆与 raw/summary 双层记忆及其索引）
+- `/re reset`：重置当前会话全局记忆（会清空主会话记忆与 raw/summary 双层记忆及其索引）
 - 子 agent 输出统一以 `/re` 前缀返回，便于和主对话区分
 
-Memory 分流规则（hybrid memory）：
+Memory 规则（global hybrid memory）：
 
-- 当用户输入以 `/re` 开头时，原始记录先完整写入 `raw memory`（不改写原文）
-- 当助手输出以 `/re` 开头时，也完整写入 `raw memory`
+- 所有会话消息都会写入统一的 `MemoryStore` 会话记忆
+- 所有会话消息都会完整写入 `raw memory`（不改写原文）
 - 系统在低频触发 `compaction`（例如每 N 轮或任务结束）把未摘要批次提炼为结构化 `summary memory`
 - `summary memory` 结构包含 `user_facts`、`environment`、`long_term_preferences`、`task_results` 与 `rawRefs`
 - 运行时先做 `RAG` summary 检索，再按 `rawRefs` 按 ID 回补少量原文上下文
-- 其他消息继续使用现有 `MemoryStore`
+- `/re` 会在该全局记忆上执行子 agent 循环
 
 ## 数据与持久化
 
 项目默认把运行数据写入 `data/` 目录，主要包括：
 
-- 会话记忆（主会话 + `/re` 子 agent 会话）
-- `/re` 双层记忆数据文件：
-  - `data/memory/re-agent-memory-raw.json`（raw memory）
-  - `data/memory/re-agent-memory-summary.json`（summary memory）
-  - `data/memory/re-agent-memory-summary-index.json`（summary 向量索引）
+- 会话记忆（统一全局会话）
+- 全局双层记忆数据文件：
+  - `data/memory/raw.json`（raw memory）
+  - `data/memory/summary.json`（summary memory）
+  - `data/memory/summary-index.json`（summary 向量索引）
 - 审计日志
 - 定时任务和推送用户
 - Topic Push 配置与状态

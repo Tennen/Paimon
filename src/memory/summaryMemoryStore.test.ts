@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DATA_STORE, getStore, setStore } from "../storage/persistence";
 import {
-  ReAgentSummaryMemoryStore,
-  normalizeReAgentSummaryMemorySessionKey
-} from "./reAgentSummaryMemoryStore";
+  SummaryMemoryStore,
+  normalizeSummaryMemorySessionKey
+} from "./summaryMemoryStore";
 
 function createToken(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
@@ -15,11 +15,11 @@ type PersistedSummaryStore = {
   sessions: Record<string, unknown>;
 };
 
-test("ReAgentSummaryMemoryStore normalizes schema", { concurrency: false }, () => {
-  const store = new ReAgentSummaryMemoryStore();
+test("SummaryMemoryStore normalizes schema", { concurrency: false }, () => {
+  const store = new SummaryMemoryStore();
   const token = createToken();
   const rawSessionId = `re/summary:${token}`;
-  const normalizedSessionId = normalizeReAgentSummaryMemorySessionKey(rawSessionId);
+  const normalizedSessionId = normalizeSummaryMemorySessionKey(rawSessionId);
 
   try {
     store.clear(rawSessionId);
@@ -45,8 +45,8 @@ test("ReAgentSummaryMemoryStore normalizes schema", { concurrency: false }, () =
   }
 });
 
-test("ReAgentSummaryMemoryStore dedupes rawRefs on upsert", { concurrency: false }, () => {
-  const store = new ReAgentSummaryMemoryStore();
+test("SummaryMemoryStore dedupes rawRefs on upsert", { concurrency: false }, () => {
+  const store = new SummaryMemoryStore();
   const token = createToken();
   const sessionId = `re/raw-refs:${token}`;
   const summaryId = `sum-${token}`;
@@ -74,15 +74,15 @@ test("ReAgentSummaryMemoryStore dedupes rawRefs on upsert", { concurrency: false
   }
 });
 
-test("ReAgentSummaryMemoryStore rolls back unknown version to v1", { concurrency: false }, () => {
-  const store = new ReAgentSummaryMemoryStore();
+test("SummaryMemoryStore rolls back unknown version to v1", { concurrency: false }, () => {
+  const store = new SummaryMemoryStore();
   const token = createToken();
   const sessionId = `re/version:${token}`;
-  const normalizedSessionId = normalizeReAgentSummaryMemorySessionKey(sessionId);
+  const normalizedSessionId = normalizeSummaryMemorySessionKey(sessionId);
 
   try {
     store.clear(sessionId);
-    setStore(DATA_STORE.RE_AGENT_MEMORY_SUMMARY, {
+    setStore(DATA_STORE.MEMORY_SUMMARY, {
       version: 3,
       sessions: {
         [normalizedSessionId]: [
@@ -115,7 +115,7 @@ test("ReAgentSummaryMemoryStore rolls back unknown version to v1", { concurrency
       rawRefs: [...list[0].rawRefs, "raw-new"]
     });
 
-    const persisted = getStore<PersistedSummaryStore>(DATA_STORE.RE_AGENT_MEMORY_SUMMARY);
+    const persisted = getStore<PersistedSummaryStore>(DATA_STORE.MEMORY_SUMMARY);
     assert.equal(persisted.version, 1);
   } finally {
     store.clear(sessionId);

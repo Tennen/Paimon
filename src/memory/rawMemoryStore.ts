@@ -1,32 +1,32 @@
 import { DATA_STORE, getStore, registerStore, setStore } from "../storage/persistence";
-type RawMemoryStoreState = { version: 1; sessions: Record<string, ReAgentRawMemoryRecord[]> };
-export type ReAgentRawMemoryMeta = Record<string, unknown>;
-export type ReAgentRawMemoryRecord = {
+type RawMemoryStoreState = { version: 1; sessions: Record<string, RawMemoryRecord[]> };
+export type RawMemoryMeta = Record<string, unknown>;
+export type RawMemoryRecord = {
   id: string;
   sessionId: string;
   requestId: string;
   source: string;
   user: string;
   assistant: string;
-  meta: ReAgentRawMemoryMeta;
+  meta: RawMemoryMeta;
   createdAt: string;
   summarizedAt?: string;
 };
-export type ReAgentRawMemoryAppendInput = {
+export type RawMemoryAppendInput = {
   id?: string;
   sessionId: string;
   requestId: string;
   source: string;
   user: string;
   assistant: string;
-  meta?: ReAgentRawMemoryMeta;
+  meta?: RawMemoryMeta;
   createdAt?: string;
 };
-export class ReAgentRawMemoryStore {
-  private readonly storeName = DATA_STORE.RE_AGENT_MEMORY_RAW;
+export class RawMemoryStore {
+  private readonly storeName = DATA_STORE.MEMORY_RAW;
   constructor(_baseDir?: string) { registerStore(this.storeName, () => createDefaultStore()); }
 
-  append(input: ReAgentRawMemoryAppendInput): ReAgentRawMemoryRecord {
+  append(input: RawMemoryAppendInput): RawMemoryRecord {
     const store = this.readStore();
     const key = toSessionKey(input.sessionId);
     const records = store.sessions[key] ?? [];
@@ -39,16 +39,16 @@ export class ReAgentRawMemoryStore {
     return cloneRecord(record);
   }
 
-  listBySession(sessionId: string): ReAgentRawMemoryRecord[] {
+  listBySession(sessionId: string): RawMemoryRecord[] {
     return (this.readStore().sessions[toSessionKey(sessionId)] ?? []).map(cloneRecord);
   }
 
-  listUnsummarized(sessionId: string, limit?: number): ReAgentRawMemoryRecord[] {
+  listUnsummarized(sessionId: string, limit?: number): RawMemoryRecord[] {
     const records = this.listBySession(sessionId).filter((item) => !item.summarizedAt);
     return typeof limit === "number" && limit > 0 ? records.slice(0, limit) : records;
   }
 
-  getByIds(ids: string[], sessionId?: string): ReAgentRawMemoryRecord[] {
+  getByIds(ids: string[], sessionId?: string): RawMemoryRecord[] {
     const requested = dedupeIds(ids);
     if (requested.length === 0) return [];
     const store = this.readStore();
@@ -56,7 +56,7 @@ export class ReAgentRawMemoryStore {
       ? store.sessions[toSessionKey(sessionId)] ?? []
       : Object.values(store.sessions).flat();
     const byId = new Map(source.map((item) => [item.id, item]));
-    return requested.map((id) => byId.get(id)).filter((item): item is ReAgentRawMemoryRecord => Boolean(item)).map(cloneRecord);
+    return requested.map((id) => byId.get(id)).filter((item): item is RawMemoryRecord => Boolean(item)).map(cloneRecord);
   }
 
   markSummarized(sessionId: string, ids: string[], summarizedAt: string = new Date().toISOString()): number {
@@ -93,18 +93,18 @@ export class ReAgentRawMemoryStore {
   }
 }
 
-export function normalizeReAgentRawMemorySessionKey(sessionId: string): string {
+export function normalizeRawMemorySessionKey(sessionId: string): string {
   return String(sessionId ?? "").replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function toSessionKey(sessionId: string): string {
-  const key = normalizeReAgentRawMemorySessionKey(sessionId);
+  const key = normalizeRawMemorySessionKey(sessionId);
   return key || "_";
 }
 
 function normalizeStore(input: unknown): RawMemoryStoreState {
   if (!isRecord(input) || !isRecord(input.sessions)) return createDefaultStore();
-  const sessions: Record<string, ReAgentRawMemoryRecord[]> = {};
+  const sessions: Record<string, RawMemoryRecord[]> = {};
   for (const [rawSessionKey, rawValue] of Object.entries(input.sessions)) {
     const key = toSessionKey(rawSessionKey);
     sessions[key] = Array.isArray(rawValue) ? normalizeRecords(rawValue, key) : [];
@@ -112,8 +112,8 @@ function normalizeStore(input: unknown): RawMemoryStoreState {
   return { version: 1, sessions };
 }
 
-function normalizeRecords(input: unknown[], fallbackSessionId: string): ReAgentRawMemoryRecord[] {
-  const out: ReAgentRawMemoryRecord[] = [];
+function normalizeRecords(input: unknown[], fallbackSessionId: string): RawMemoryRecord[] {
+  const out: RawMemoryRecord[] = [];
   const seen = new Set<string>();
   for (const rawRecord of input) {
     if (!isRecord(rawRecord)) continue;
@@ -142,7 +142,7 @@ function normalizeRecords(input: unknown[], fallbackSessionId: string): ReAgentR
   return out;
 }
 
-function toRecord(input: ReAgentRawMemoryAppendInput): ReAgentRawMemoryRecord {
+function toRecord(input: RawMemoryAppendInput): RawMemoryRecord {
   return {
     id: normalizeId(input.id) || generateId(),
     sessionId: input.sessionId,
@@ -155,7 +155,7 @@ function toRecord(input: ReAgentRawMemoryAppendInput): ReAgentRawMemoryRecord {
   };
 }
 
-function cloneRecord(input: ReAgentRawMemoryRecord): ReAgentRawMemoryRecord {
+function cloneRecord(input: RawMemoryRecord): RawMemoryRecord {
   return { ...input, meta: { ...input.meta } };
 }
 

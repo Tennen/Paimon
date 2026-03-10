@@ -2,26 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { OllamaReAgentLlmClient } from "../core/re-agent/llmClient";
 import { ReAgentRuntime } from "../core/re-agent/runtime";
-import { ReAgentMemoryCompactor } from "./reAgentMemoryCompactor";
-import { ReAgentRawMemoryStore } from "./reAgentRawMemoryStore";
-import { ReAgentSummaryMemoryStore } from "./reAgentSummaryMemoryStore";
-import { ReAgentSummaryVectorIndex } from "./reAgentSummaryVectorIndex";
+import { MemoryCompactor } from "./memoryCompactor";
+import { RawMemoryStore } from "./rawMemoryStore";
+import { SummaryMemoryStore } from "./summaryMemoryStore";
+import { SummaryVectorIndex } from "./summaryVectorIndex";
 
 function token(): string {
   return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
 }
 
 test("hybrid memory e2e: raw -> compact -> summary search -> raw replay -> prompt injection", { concurrency: false }, async () => {
-  const rawStore = new ReAgentRawMemoryStore();
-  const summaryStore = new ReAgentSummaryMemoryStore();
-  const vectorIndex = new ReAgentSummaryVectorIndex({ dimension: 256 });
+  const rawStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const vectorIndex = new SummaryVectorIndex({ dimension: 256 });
   const t = token();
   const sessionId = `re/hybrid:${t}`;
   const rawId1 = `raw-${t}-1`;
   const rawId2 = `raw-${t}-2`;
   const sentRequests: Array<Record<string, unknown>> = [];
 
-  const compactor = new ReAgentMemoryCompactor({
+  const compactor = new MemoryCompactor({
     rawStore,
     summaryStore,
     summaryVectorIndex: vectorIndex,

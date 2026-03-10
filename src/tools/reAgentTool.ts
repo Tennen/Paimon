@@ -1,8 +1,8 @@
 import { isReAgentCommandInput, parseReAgentCommand, withReAgentPrefix } from "../core/re-agent";
-import { ReAgentMemoryStore } from "../memory/reAgentMemoryStore";
-import { ReAgentRawMemoryStore } from "../memory/reAgentRawMemoryStore";
-import { ReAgentSummaryMemoryStore } from "../memory/reAgentSummaryMemoryStore";
-import { ReAgentSummaryVectorIndex } from "../memory/reAgentSummaryVectorIndex";
+import { MemoryStore } from "../memory/memoryStore";
+import { RawMemoryStore } from "../memory/rawMemoryStore";
+import { SummaryMemoryStore } from "../memory/summaryMemoryStore";
+import { SummaryVectorIndex } from "../memory/summaryVectorIndex";
 import { ToolResult } from "../types";
 import { DirectShortcutContext, ToolDependencies, ToolRegistry } from "./toolRegistry";
 
@@ -88,7 +88,7 @@ function buildReAgentHelpText(): string {
     "/re 使用说明：",
     "/re <问题> 触发子 agent 对话",
     "/re help 查看帮助",
-    "/re reset 重置子 agent 会话记忆"
+    "/re reset 重置当前会话全局记忆"
   ].join("\n");
 }
 
@@ -103,8 +103,8 @@ async function resetReAgentMemory(sessionId: string, runtime?: ReAgentRuntimeBri
     return;
   }
 
-  new ReAgentMemoryStore().clear(key);
-  new ReAgentRawMemoryStore().clear(key);
-  new ReAgentSummaryMemoryStore().clear(key);
-  new ReAgentSummaryVectorIndex().clear(key);
+  new MemoryStore().clear(key);
+  new RawMemoryStore().clear(key);
+  new SummaryMemoryStore().clear(key);
+  new SummaryVectorIndex().clear(key);
 }

@@ -14,15 +14,25 @@ export class MemoryStore {
 
   read(sessionId: string): string {
     const store = this.readStore();
-    const key = this.toSessionKey(sessionId);
+    const key = normalizeMemorySessionKey(sessionId);
     return store.sessions[key] ?? "";
   }
 
   append(sessionId: string, entry: string): void {
     const store = this.readStore();
-    const key = this.toSessionKey(sessionId);
+    const key = normalizeMemorySessionKey(sessionId);
     const current = store.sessions[key] ?? "";
     store.sessions[key] = `${current}${entry}\n`;
+    setStore(this.storeName, store);
+  }
+
+  clear(sessionId: string): void {
+    const store = this.readStore();
+    const key = normalizeMemorySessionKey(sessionId);
+    if (!(key in store.sessions)) {
+      return;
+    }
+    delete store.sessions[key];
     setStore(this.storeName, store);
   }
 
@@ -30,10 +40,10 @@ export class MemoryStore {
     const parsed = getStore<unknown>(this.storeName);
     return normalizeMemoryStore(parsed);
   }
+}
 
-  private toSessionKey(sessionId: string): string {
-    return sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  }
+export function normalizeMemorySessionKey(sessionId: string): string {
+  return sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 function createDefaultMemoryStore(): MemorySessionsStore {
@@ -55,7 +65,7 @@ function normalizeMemoryStore(input: unknown): MemorySessionsStore {
 
   const normalized: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(sessions)) {
-    const key = rawKey.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const key = normalizeMemorySessionKey(rawKey);
     if (!key) {
       continue;
     }

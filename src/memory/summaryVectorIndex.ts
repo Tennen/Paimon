@@ -1,15 +1,15 @@
 import { DATA_STORE, getStore, registerStore, setStore } from "../storage/persistence";
-import { ReAgentSummaryMemoryRecord, normalizeReAgentSummaryMemorySessionKey } from "./reAgentSummaryMemoryStore";
+import { SummaryMemoryRecord, normalizeSummaryMemorySessionKey } from "./summaryMemoryStore";
 
 const DEFAULT_DIMENSION = 128;
 const DEFAULT_TOP_K = 5;
 
 type VectorStoreState = {
   version: 1;
-  sessions: Record<string, ReAgentSummaryVectorRecord[]>;
+  sessions: Record<string, SummaryVectorRecord[]>;
 };
 
-export type ReAgentSummaryVectorRecord = {
+export type SummaryVectorRecord = {
   id: string;
   sessionId: string;
   text: string;
@@ -18,7 +18,7 @@ export type ReAgentSummaryVectorRecord = {
   updatedAt: string;
 };
 
-export type ReAgentSummaryVectorInput = {
+export type SummaryVectorInput = {
   id?: string;
   sessionId: string;
   text?: string;
@@ -30,7 +30,7 @@ export type ReAgentSummaryVectorInput = {
   updatedAt?: string;
 };
 
-export type ReAgentSummaryVectorHit = {
+export type SummaryVectorHit = {
   id: string;
   sessionId: string;
   text: string;
@@ -39,8 +39,8 @@ export type ReAgentSummaryVectorHit = {
   updatedAt: string;
 };
 
-export class ReAgentSummaryVectorIndex {
-  private readonly storeName = DATA_STORE.RE_AGENT_MEMORY_SUMMARY_INDEX;
+export class SummaryVectorIndex {
+  private readonly storeName = DATA_STORE.MEMORY_SUMMARY_INDEX;
   private readonly dimension: number;
 
   constructor(options: { dimension?: number } = {}) {
@@ -48,7 +48,7 @@ export class ReAgentSummaryVectorIndex {
     registerStore(this.storeName, () => ({ version: 1, sessions: {} }));
   }
 
-  upsert(input: ReAgentSummaryVectorInput): ReAgentSummaryVectorRecord {
+  upsert(input: SummaryVectorInput): SummaryVectorRecord {
     const store = this.readStore();
     const key = toSessionKey(input.sessionId);
     const list = store.sessions[key] ?? [];
@@ -61,7 +61,7 @@ export class ReAgentSummaryVectorIndex {
     return cloneRecord(record);
   }
 
-  upsertFromSummary(summary: ReAgentSummaryMemoryRecord): ReAgentSummaryVectorRecord {
+  upsertFromSummary(summary: SummaryMemoryRecord): SummaryVectorRecord {
     return this.upsert({
       id: summary.id,
       sessionId: summary.sessionId,
@@ -82,7 +82,7 @@ export class ReAgentSummaryVectorIndex {
     setStore(this.storeName, store);
   }
 
-  search(sessionId: string, query: string, topK: number = DEFAULT_TOP_K): ReAgentSummaryVectorHit[] {
+  search(sessionId: string, query: string, topK: number = DEFAULT_TOP_K): SummaryVectorHit[] {
     const limit = normalizeTopK(topK);
     const records = (this.readStore().sessions[toSessionKey(sessionId)] ?? []).map(cloneRecord);
     if (limit <= 0 || records.length === 0) return [];
@@ -102,8 +102,8 @@ export class ReAgentSummaryVectorIndex {
   }
 }
 
-export function normalizeReAgentSummaryVectorSessionKey(sessionId: string): string {
-  return normalizeReAgentSummaryMemorySessionKey(sessionId);
+export function normalizeSummaryVectorSessionKey(sessionId: string): string {
+  return normalizeSummaryMemorySessionKey(sessionId);
 }
 
 export function buildHashedVector(input: string, dimension: number = DEFAULT_DIMENSION): number[] {
@@ -128,11 +128,11 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 function normalizeStore(input: unknown, dimension: number): VectorStoreState {
   if (!isRecord(input) || !isRecord(input.sessions)) return { version: 1, sessions: {} };
-  const sessions: Record<string, ReAgentSummaryVectorRecord[]> = {};
+  const sessions: Record<string, SummaryVectorRecord[]> = {};
   for (const [rawSessionKey, rawValue] of Object.entries(input.sessions)) {
     const key = toSessionKey(rawSessionKey);
     const seen = new Set<string>();
-    const records: ReAgentSummaryVectorRecord[] = [];
+    const records: SummaryVectorRecord[] = [];
     for (const rawItem of Array.isArray(rawValue) ? rawValue : []) {
       if (!isRecord(rawItem)) continue;
       const id = text(rawItem.id) || makeId();
@@ -153,7 +153,7 @@ function normalizeStore(input: unknown, dimension: number): VectorStoreState {
   return { version: 1, sessions };
 }
 
-function toRecord(input: ReAgentSummaryVectorInput, fallbackSessionId: string, dimension: number): ReAgentSummaryVectorRecord {
+function toRecord(input: SummaryVectorInput, fallbackSessionId: string, dimension: number): SummaryVectorRecord {
   const summaryText = text(input.text) || [
     ...toStringList(input.user_facts),
     ...toStringList(input.environment),
@@ -170,20 +170,20 @@ function toRecord(input: ReAgentSummaryVectorInput, fallbackSessionId: string, d
   };
 }
 
-function toHit(record: ReAgentSummaryVectorRecord, score: number): ReAgentSummaryVectorHit {
+function toHit(record: SummaryVectorRecord, score: number): SummaryVectorHit {
   return { id: record.id, sessionId: record.sessionId, text: record.text, rawRefs: [...record.rawRefs], score, updatedAt: record.updatedAt };
 }
 
-function cloneRecord(record: ReAgentSummaryVectorRecord): ReAgentSummaryVectorRecord {
+function cloneRecord(record: SummaryVectorRecord): SummaryVectorRecord {
   return { ...record, rawRefs: [...record.rawRefs], vector: [...record.vector] };
 }
 
-function byRecent(a: ReAgentSummaryVectorRecord, b: ReAgentSummaryVectorRecord): number {
+function byRecent(a: SummaryVectorRecord, b: SummaryVectorRecord): number {
   return a.updatedAt === b.updatedAt ? b.id.localeCompare(a.id) : b.updatedAt.localeCompare(a.updatedAt);
 }
 
 function toSessionKey(sessionId: string): string {
-  const key = normalizeReAgentSummaryVectorSessionKey(sessionId);
+  const key = normalizeSummaryVectorSessionKey(sessionId);
   return key || "_";
 }
 

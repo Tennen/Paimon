@@ -10,18 +10,16 @@ import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { sttRuntime } from "../engines/stt";
 import { isReAgentCommandInput, parseReAgentCommand } from "./re-agent";
-import { ReAgentMemoryStore } from "../memory/reAgentMemoryStore";
-import { ReAgentRawMemoryMeta, ReAgentRawMemoryStore } from "../memory/reAgentRawMemoryStore";
-import { ReAgentMemoryCompactor } from "../memory/reAgentMemoryCompactor";
+import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
+import { MemoryCompactor } from "../memory/memoryCompactor";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
   private readonly toolRouter: ToolRouter;
   private readonly llmEngine: LLMEngine;
   private readonly memoryStore: MemoryStore;
-  private readonly reAgentMemoryStore: ReAgentMemoryStore;
-  private readonly reAgentRawMemoryStore: ReAgentRawMemoryStore;
-  private readonly reAgentMemoryCompactor: ReAgentMemoryCompactor;
+  private readonly rawMemoryStore: RawMemoryStore;
+  private readonly memoryCompactor: MemoryCompactor;
   private readonly skillManager: SkillManager;
   private readonly maxIterations: number;
   private readonly toolRegistry: ToolRegistry;
@@ -35,16 +33,14 @@ export class Orchestrator {
     skillManager: SkillManager,
     toolRegistry: ToolRegistry,
     callbackDispatcher: CallbackDispatcher,
-    reAgentMemoryStore: ReAgentMemoryStore = new ReAgentMemoryStore(),
-    reAgentRawMemoryStore: ReAgentRawMemoryStore = new ReAgentRawMemoryStore(),
-    reAgentMemoryCompactor?: ReAgentMemoryCompactor
+    rawMemoryStore: RawMemoryStore = new RawMemoryStore(),
+    memoryCompactor?: MemoryCompactor
   ) {
     this.toolRouter = toolRouter;
     this.llmEngine = llmEngine;
     this.memoryStore = memoryStore;
-    this.reAgentMemoryStore = reAgentMemoryStore;
-    this.reAgentRawMemoryStore = reAgentRawMemoryStore;
-    this.reAgentMemoryCompactor = reAgentMemoryCompactor ?? new ReAgentMemoryCompactor({ rawStore: reAgentRawMemoryStore });
+    this.rawMemoryStore = rawMemoryStore;
+    this.memoryCompactor = memoryCompactor ?? new MemoryCompactor({ rawStore: rawMemoryStore });
     this.skillManager = skillManager;
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
@@ -60,7 +56,7 @@ export class Orchestrator {
     }
 
     const text = await sttRuntime.transcribe(envelope);
-    const memory = this.readSessionMemory(envelope.sessionId, text);
+    const memory = this.readSessionMemory(envelope.sessionId);
 
     try {
       const directRouteResponse = await this.handleDirectCommandRoute(text, memory, envelope, start);
@@ -278,7 +274,7 @@ export class Orchestrator {
     taskEnvelope: Envelope,
     start: number
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.readSessionMemory(envelope.sessionId, text);
+    const latestMemory = this.readSessionMemory(envelope.sessionId);
     const toolExecution: ToolExecution = {
       tool: matched.tool,
       op: matched.op,
@@ -329,7 +325,7 @@ export class Orchestrator {
     taskEnvelope: Envelope,
     start: number
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.readSessionMemory(envelope.sessionId, text);
+    const latestMemory = this.readSessionMemory(envelope.sessionId);
     const response = await this.executeDirectShortcut(
       matched,
       text,
@@ -608,35 +604,28 @@ export class Orchestrator {
       return;
     }
     const entry = formatMemoryEntry(memoryText, response);
-    if (shouldUseReAgentMemory(memoryText, response.text)) {
-      this.reAgentMemoryStore.append(envelope.sessionId, entry);
-      const rawMeta = normalizeReAgentRawMeta(envelope.meta);
-      this.reAgentRawMemoryStore.append({
-        sessionId: envelope.sessionId,
-        requestId: envelope.requestId,
-        source: envelope.source,
-        user: memoryText,
-        assistant: response.text ?? "",
-        meta: rawMeta,
-        createdAt: envelope.receivedAt
-      });
-      void this.reAgentMemoryCompactor.maybeCompact({
-        sessionId: envelope.sessionId,
-        requestId: envelope.requestId,
-        source: envelope.source,
-        meta: rawMeta
-      }).catch((error) => {
-        console.error("re-agent memory compaction failed:", error);
-      });
-      return;
-    }
     this.memoryStore.append(envelope.sessionId, entry);
+    const rawMeta = normalizeRawMemoryMeta(envelope.meta);
+    this.rawMemoryStore.append({
+      sessionId: envelope.sessionId,
+      requestId: envelope.requestId,
+      source: envelope.source,
+      user: memoryText,
+      assistant: response.text ?? "",
+      meta: rawMeta,
+      createdAt: envelope.receivedAt
+    });
+    void this.memoryCompactor.maybeCompact({
+      sessionId: envelope.sessionId,
+      requestId: envelope.requestId,
+      source: envelope.source,
+      meta: rawMeta
+    }).catch((error) => {
+      console.error("memory compaction failed:", error);
+    });
   }
 
-  private readSessionMemory(sessionId: string, inputText: string): string {
-    if (isReAgentCommandInput(inputText)) {
-      return this.reAgentMemoryStore.read(sessionId);
-    }
+  private readSessionMemory(sessionId: string): string {
     return this.memoryStore.read(sessionId);
   }
 }
@@ -657,11 +646,7 @@ function formatMemoryEntry(userText: string, response: Response): string {
   return `- ${now}\\n  - user: ${userText}\\n  - assistant: ${assistantText}`;
 }
 
-function shouldUseReAgentMemory(userText: string, assistantText: string | undefined): boolean {
-  return isReAgentCommandInput(userText) || isReAgentCommandInput(assistantText);
-}
-
-function normalizeReAgentRawMeta(meta: unknown): ReAgentRawMemoryMeta {
+function normalizeRawMemoryMeta(meta: unknown): RawMemoryMeta {
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
     return {};
   }

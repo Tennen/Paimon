@@ -8,7 +8,8 @@ import { LLMChatRequest, LLMEngine, LLMExecutionStep } from "../engines/llm/llm"
 import { SkillManager } from "../skills/skillManager";
 import { Envelope, Response, SkillPlanningResult, SkillSelectionResult } from "../types";
 import { MemoryStore } from "../memory/memoryStore";
-import { ReAgentMemoryStore } from "../memory/reAgentMemoryStore";
+import { RawMemoryAppendInput, RawMemoryStore } from "../memory/rawMemoryStore";
+import { MemoryCompactor, MemoryCompactorInput } from "../memory/memoryCompactor";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 
 class StubSessionMemoryStore {
@@ -27,6 +28,41 @@ class StubSessionMemoryStore {
   }
 
   clear(_sessionId: string): void {}
+}
+
+class StubRawMemoryStore {
+  public readonly appendCalls: RawMemoryAppendInput[] = [];
+
+  append(input: RawMemoryAppendInput): void {
+    this.appendCalls.push({ ...input, meta: input.meta ? { ...input.meta } : {} });
+  }
+}
+
+class StubMemoryCompactor {
+  public readonly maybeCompactCalls: MemoryCompactorInput[] = [];
+
+  async maybeCompact(input: MemoryCompactorInput): Promise<{
+    sessionId: string;
+    compacted: boolean;
+    forced: boolean;
+    reason: "threshold_not_met";
+    pendingCount: number;
+    batchCount: number;
+    rawIds: string[];
+    usedFallback: boolean;
+  }> {
+    this.maybeCompactCalls.push({ ...input, ...(input.meta ? { meta: { ...input.meta } } : {}) });
+    return {
+      sessionId: input.sessionId,
+      compacted: false,
+      forced: false,
+      reason: "threshold_not_met",
+      pendingCount: 1,
+      batchCount: 0,
+      rawIds: [],
+      usedFallback: false
+    };
+  }
 }
 
 class StubLLMEngine implements LLMEngine {
@@ -78,7 +114,8 @@ function createEnvelope(requestId: string, text: string): Envelope {
 function createOrchestrator(
   registry: ToolRegistry,
   memoryStore: StubSessionMemoryStore,
-  reAgentMemoryStore: StubSessionMemoryStore,
+  rawMemoryStore: StubRawMemoryStore = new StubRawMemoryStore(),
+  memoryCompactor: StubMemoryCompactor = new StubMemoryCompactor(),
   llmEngine: LLMEngine = new StubLLMEngine()
 ): Orchestrator {
   const toolRouter = new ToolRouter(registry);
@@ -92,13 +129,15 @@ function createOrchestrator(
     skillManager,
     registry,
     callbackDispatcher,
-    reAgentMemoryStore as unknown as ReAgentMemoryStore
+    rawMemoryStore as unknown as RawMemoryStore,
+    memoryCompactor as unknown as MemoryCompactor
   );
 }
 
-test("routes /re user input memory to re-agent store", async () => {
+test("routes /re user input to shared memory and global raw memory", async () => {
   const memoryStore = new StubSessionMemoryStore("main-memory");
-  const reAgentMemoryStore = new StubSessionMemoryStore("re-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
   const registry = new ToolRegistry();
   let seenMemory = "";
   registry.registerDirectShortcut({
@@ -109,20 +148,21 @@ test("routes /re user input memory to re-agent store", async () => {
     }
   });
 
-  const orchestrator = createOrchestrator(registry, memoryStore, reAgentMemoryStore);
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor);
   const response = await orchestrator.handle(createEnvelope("req-1", "/re 你好"));
 
   assert.equal(response.text, "普通回复");
-  assert.equal(seenMemory, "re-memory");
-  assert.equal(memoryStore.readCalls.length, 0);
-  assert.equal(reAgentMemoryStore.readCalls.length, 1);
-  assert.equal(memoryStore.appendCalls.length, 0);
-  assert.equal(reAgentMemoryStore.appendCalls.length, 1);
+  assert.equal(seenMemory, "main-memory");
+  assert.equal(memoryStore.readCalls.length, 1);
+  assert.equal(memoryStore.appendCalls.length, 1);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
 });
 
-test("routes /re assistant output memory to re-agent store", async () => {
+test("routes /re assistant output to shared memory and global raw memory", async () => {
   const memoryStore = new StubSessionMemoryStore("main-memory");
-  const reAgentMemoryStore = new StubSessionMemoryStore("re-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
   const registry = new ToolRegistry();
   let seenMemory = "";
   registry.registerDirectShortcut({
@@ -133,20 +173,21 @@ test("routes /re assistant output memory to re-agent store", async () => {
     }
   });
 
-  const orchestrator = createOrchestrator(registry, memoryStore, reAgentMemoryStore);
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor);
   const response = await orchestrator.handle(createEnvelope("req-2", "/ask test"));
 
   assert.equal(response.text, "/re 子 agent 回复");
   assert.equal(seenMemory, "main-memory");
   assert.equal(memoryStore.readCalls.length, 1);
-  assert.equal(reAgentMemoryStore.readCalls.length, 0);
-  assert.equal(memoryStore.appendCalls.length, 0);
-  assert.equal(reAgentMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryStore.appendCalls.length, 1);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
 });
 
-test("routes normal dialogue memory to default memory store", async () => {
+test("routes normal dialogue memory to shared memory and global raw memory", async () => {
   const memoryStore = new StubSessionMemoryStore("main-memory");
-  const reAgentMemoryStore = new StubSessionMemoryStore("re-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
   const registry = new ToolRegistry();
   let seenMemory = "";
   registry.registerDirectShortcut({
@@ -157,20 +198,21 @@ test("routes normal dialogue memory to default memory store", async () => {
     }
   });
 
-  const orchestrator = createOrchestrator(registry, memoryStore, reAgentMemoryStore);
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor);
   const response = await orchestrator.handle(createEnvelope("req-3", "/ask test"));
 
   assert.equal(response.text, "常规回复");
   assert.equal(seenMemory, "main-memory");
   assert.equal(memoryStore.readCalls.length, 1);
-  assert.equal(reAgentMemoryStore.readCalls.length, 0);
   assert.equal(memoryStore.appendCalls.length, 1);
-  assert.equal(reAgentMemoryStore.appendCalls.length, 0);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
 });
 
 test("supports local planning respond path from routing use_planning", async () => {
   const memoryStore = new StubSessionMemoryStore("main-memory");
-  const reAgentMemoryStore = new StubSessionMemoryStore("re-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
   const registry = new ToolRegistry();
   let planningCalled = 0;
 
@@ -198,12 +240,32 @@ test("supports local planning respond path from routing use_planning", async () 
     }
   };
 
-  const orchestrator = createOrchestrator(registry, memoryStore, reAgentMemoryStore, llmEngine);
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
   const response = await orchestrator.handle(createEnvelope("req-4", "解释一下这个数学题"));
 
   assert.equal(response.text, "本地thinking已完成并直接回复");
   assert.equal(planningCalled, 1);
   assert.equal(memoryStore.readCalls.length, 1);
   assert.equal(memoryStore.appendCalls.length, 1);
-  assert.equal(reAgentMemoryStore.appendCalls.length, 0);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+});
+
+test("skips shared/global memory append for /re reset command", async () => {
+  const memoryStore = new StubSessionMemoryStore("main-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
+  const registry = new ToolRegistry();
+  registry.registerDirectShortcut({
+    command: "/re",
+    execute: async () => ({ ok: true, output: { text: "/re 会话记忆已重置。" } })
+  });
+
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor);
+  const response = await orchestrator.handle(createEnvelope("req-5", "/re reset"));
+
+  assert.equal(response.text, "/re 会话记忆已重置。");
+  assert.equal(memoryStore.appendCalls.length, 0);
+  assert.equal(rawMemoryStore.appendCalls.length, 0);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 0);
 });
