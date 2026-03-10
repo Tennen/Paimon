@@ -51,7 +51,7 @@ function resolveQuery(params: Record<string, unknown>): string {
 
 function createSummaryMemoryRetriever(
   index: SummaryVectorIndex = new SummaryVectorIndex(),
-  topK: number = readPositiveInt(process.env.RE_AGENT_RAG_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K)
+  topK: number = readPositiveInt(process.env.MEMORY_RAG_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K)
 ): RagRetriever {
   return {
     search: async (query: string, sessionId: string): Promise<RagSearchHit[]> => {

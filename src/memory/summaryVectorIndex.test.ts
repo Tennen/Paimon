@@ -119,3 +119,33 @@ test("SummaryVectorIndex falls back to recent summaries on empty query", { concu
     index.clear(sessionId);
   }
 });
+
+test("SummaryVectorIndex boosts exact query match in hybrid ranking", { concurrency: false }, () => {
+  const index = new SummaryVectorIndex({ dimension: 256 });
+  const token = createToken();
+  const sessionId = `re/vector-hybrid:${token}`;
+  const exactId = `sum-exact-${token}`;
+  const relatedId = `sum-related-${token}`;
+  const query = "release checklist for project alpha";
+
+  try {
+    index.clear(sessionId);
+    index.upsert({
+      id: relatedId,
+      sessionId,
+      text: "project alpha timeline planning and work breakdown"
+    });
+    index.upsert({
+      id: exactId,
+      sessionId,
+      text: "release checklist for project alpha"
+    });
+
+    const hits = index.search(sessionId, query, 2);
+    assert.equal(hits.length, 2);
+    assert.equal(hits[0].id, exactId);
+    assert.ok(hits[0].score > hits[1].score);
+  } finally {
+    index.clear(sessionId);
+  }
+});

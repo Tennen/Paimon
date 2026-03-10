@@ -31,6 +31,13 @@ export function FeatureMenu(props: FeatureMenuProps) {
           </Button>
           <Button
             type="button"
+            variant={props.activeMenu === "memory" ? "default" : "outline"}
+            onClick={() => props.onChange("memory")}
+          >
+            Memory
+          </Button>
+          <Button
+            type="button"
             variant={props.activeMenu === "messages" ? "default" : "outline"}
             onClick={() => props.onChange("messages")}
           >

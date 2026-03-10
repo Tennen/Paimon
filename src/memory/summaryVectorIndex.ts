@@ -86,12 +86,52 @@ export class SummaryVectorIndex {
     const limit = normalizeTopK(topK);
     const records = (this.readStore().sessions[toSessionKey(sessionId)] ?? []).map(cloneRecord);
     if (limit <= 0 || records.length === 0) return [];
-    const queryVector = buildHashedVector(query, this.dimension);
-    if (isZeroVector(queryVector)) {
+    const normalizedQuery = normalizeSearchText(query);
+    const queryTokens = tokenize(normalizedQuery);
+    if (queryTokens.length === 0) {
       return records.sort(byRecent).slice(0, limit).map((item) => toHit(item, 0));
     }
+    const queryVector = buildHashedVector(normalizedQuery, this.dimension);
+    const queryTokenFreq = countTokens(queryTokens);
+    const queryTokenSet = new Set(queryTokens);
+
+    const docs = records.map((item) => {
+      const normalizedText = normalizeSearchText(item.text);
+      const tokens = tokenize(normalizedText);
+      const tokenFreq = countTokens(tokens);
+      return {
+        item,
+        normalizedText,
+        tokenFreq,
+        docLen: Math.max(1, tokens.length)
+      };
+    });
+
+    const avgDocLen = Math.max(1, docs.reduce((sum, doc) => sum + doc.docLen, 0) / docs.length);
+    const idf = buildInverseDocumentFrequency(docs.map((doc) => doc.tokenFreq), docs.length);
+
+    const scored = docs.map((doc) => {
+      const vectorScore = isZeroVector(queryVector) ? 0 : Math.max(0, cosineSimilarity(queryVector, doc.item.vector));
+      const bm25 = bm25Score(queryTokenFreq, doc.tokenFreq, doc.docLen, avgDocLen, idf);
+      const coverage = tokenCoverage(queryTokenSet, doc.tokenFreq);
+      const exact = exactMatchScore(normalizedQuery, doc.normalizedText);
+      return { doc, vectorScore, bm25, coverage, exact };
+    });
+
+    const maxBm25 = Math.max(...scored.map((item) => item.bm25), 0);
+    const scoredById = new Map(scored.map((item) => [item.doc.item.id, item]));
+
     return records
-      .map((item) => ({ item, score: cosineSimilarity(queryVector, item.vector) }))
+      .map((item) => {
+        const scoreItem = scoredById.get(item.id);
+        if (!scoreItem) {
+          return { item, score: 0 };
+        }
+        const bm25Norm = maxBm25 > 0 ? scoreItem.bm25 / maxBm25 : 0;
+        const lexicalScore = 0.55 * bm25Norm + 0.25 * scoreItem.coverage + 0.2 * scoreItem.exact;
+        const score = 0.6 * scoreItem.vectorScore + 0.4 * lexicalScore;
+        return { item, score };
+      })
       .sort((a, b) => (b.score !== a.score ? b.score - a.score : byRecent(a.item, b.item)))
       .slice(0, limit)
       .map(({ item, score }) => toHit(item, score));
@@ -205,8 +245,76 @@ function normalizeVector(vector: number[]): number[] {
   return vector.map((value) => value / length);
 }
 
+function countTokens(tokens: string[]): Map<string, number> {
+  const freq = new Map<string, number>();
+  for (const token of tokens) {
+    freq.set(token, (freq.get(token) ?? 0) + 1);
+  }
+  return freq;
+}
+
+function buildInverseDocumentFrequency(
+  docs: Array<Map<string, number>>,
+  docCount: number
+): Map<string, number> {
+  const docFreq = new Map<string, number>();
+  for (const doc of docs) {
+    for (const token of doc.keys()) {
+      docFreq.set(token, (docFreq.get(token) ?? 0) + 1);
+    }
+  }
+  const idf = new Map<string, number>();
+  for (const [token, df] of docFreq.entries()) {
+    idf.set(token, Math.log(1 + (docCount - df + 0.5) / (df + 0.5)));
+  }
+  return idf;
+}
+
+function bm25Score(
+  queryTokenFreq: Map<string, number>,
+  docTokenFreq: Map<string, number>,
+  docLen: number,
+  avgDocLen: number,
+  idf: Map<string, number>
+): number {
+  const k1 = 1.2;
+  const b = 0.75;
+  let score = 0;
+  for (const [token, qtf] of queryTokenFreq.entries()) {
+    const tf = docTokenFreq.get(token) ?? 0;
+    if (tf <= 0) continue;
+    const tokenIdf = idf.get(token) ?? 0;
+    const denom = tf + k1 * (1 - b + b * (docLen / avgDocLen));
+    score += tokenIdf * ((tf * (k1 + 1)) / denom) * Math.max(1, qtf);
+  }
+  return score;
+}
+
+function tokenCoverage(queryTokens: Set<string>, docTokenFreq: Map<string, number>): number {
+  if (queryTokens.size === 0) return 0;
+  let matched = 0;
+  for (const token of queryTokens) {
+    if ((docTokenFreq.get(token) ?? 0) > 0) {
+      matched += 1;
+    }
+  }
+  return matched / queryTokens.size;
+}
+
+function exactMatchScore(query: string, document: string): number {
+  if (!query || !document) return 0;
+  if (document === query) return 1;
+  if (document.startsWith(query)) return 0.9;
+  if (document.includes(query)) return 0.75;
+  return 0;
+}
+
 function tokenize(input: string): string[] {
   return text(input).toLowerCase().match(/[a-z0-9]+|[\u4e00-\u9fff]/g) ?? [];
+}
+
+function normalizeSearchText(input: string): string {
+  return text(input).toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function fnv1a(value: string): number {

@@ -195,6 +195,12 @@ export class AdminIngressAdapter implements IngressAdapter {
         thinkingBudget: thinkingBudgetDefault,
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
+        memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
+        memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
+        memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
+        memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
+        memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
+        memoryRagSummaryTopK: getEnvValue(envPath, "MEMORY_RAG_SUMMARY_TOP_K"),
         envPath,
         taskStore: this.scheduler.getTaskStore(),
         userStore: this.scheduler.getUserStore(),
@@ -462,6 +468,56 @@ export class AdminIngressAdapter implements IngressAdapter {
           error: (error as Error).message ?? "pm2 restart failed"
         });
       }
+    });
+
+    app.post("/admin/api/config/memory", async (req: Request, res: ExResponse) => {
+      const body = (req.body ?? {}) as {
+        memoryCompactEveryRounds?: unknown;
+        memoryCompactMaxBatchSize?: unknown;
+        memorySummaryTopK?: unknown;
+        memoryRawRefLimit?: unknown;
+        memoryRawRecordLimit?: unknown;
+        memoryRagSummaryTopK?: unknown;
+      };
+
+      const envPath = this.envStore.getPath();
+      const updates: Array<{ envKey: string; value: string | null }> = [
+        { envKey: "MEMORY_COMPACT_EVERY_ROUNDS", value: normalizeOptionalIntegerString(body.memoryCompactEveryRounds) },
+        { envKey: "MEMORY_COMPACT_MAX_BATCH_SIZE", value: normalizeOptionalIntegerString(body.memoryCompactMaxBatchSize) },
+        { envKey: "MEMORY_SUMMARY_TOP_K", value: normalizeOptionalIntegerString(body.memorySummaryTopK) },
+        { envKey: "MEMORY_RAW_REF_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRefLimit) },
+        { envKey: "MEMORY_RAW_RECORD_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRecordLimit) },
+        { envKey: "MEMORY_RAG_SUMMARY_TOP_K", value: normalizeOptionalIntegerString(body.memoryRagSummaryTopK) }
+      ];
+
+      const invalid = updates.find((item) => item.value === null);
+      if (invalid) {
+        res.status(400).json({ error: `${invalid.envKey} must be a positive integer or empty` });
+        return;
+      }
+
+      try {
+        for (const update of updates) {
+          if (update.value) {
+            setEnvValue(envPath, update.envKey, update.value);
+          } else {
+            unsetEnvValue(envPath, update.envKey);
+          }
+        }
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message ?? "failed to save memory config" });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
+        memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
+        memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
+        memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
+        memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
+        memoryRagSummaryTopK: getEnvValue(envPath, "MEMORY_RAG_SUMMARY_TOP_K")
+      });
     });
 
     app.post("/admin/api/restart", async (_req: Request, res: ExResponse) => {

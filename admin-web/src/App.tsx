@@ -3,6 +3,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EvolutionSection } from "@/components/admin/EvolutionSection";
 import { FeatureMenu } from "@/components/admin/FeatureMenu";
 import { MarketSection } from "@/components/admin/MarketSection";
+import { MemorySection } from "@/components/admin/MemorySection";
 import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
 import { TopicPushSection } from "@/components/admin/TopicPushSection";
@@ -55,11 +56,18 @@ export default function App() {
   const [thinkingBudgetDraft, setThinkingBudgetDraft] = useState("");
   const [codexModelDraft, setCodexModelDraft] = useState("");
   const [codexReasoningEffortDraft, setCodexReasoningEffortDraft] = useState("");
+  const [memoryCompactEveryRoundsDraft, setMemoryCompactEveryRoundsDraft] = useState("");
+  const [memoryCompactMaxBatchSizeDraft, setMemoryCompactMaxBatchSizeDraft] = useState("");
+  const [memorySummaryTopKDraft, setMemorySummaryTopKDraft] = useState("");
+  const [memoryRawRefLimitDraft, setMemoryRawRefLimitDraft] = useState("");
+  const [memoryRawRecordLimitDraft, setMemoryRawRecordLimitDraft] = useState("");
+  const [memoryRagSummaryTopKDraft, setMemoryRagSummaryTopKDraft] = useState("");
 
   const [notice, setNotice] = useState<Notice>(null);
 
   const [savingModel, setSavingModel] = useState(false);
   const [savingCodexConfig, setSavingCodexConfig] = useState(false);
+  const [savingMemoryConfig, setSavingMemoryConfig] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [pullingRepo, setPullingRepo] = useState(false);
   const [buildingRepo, setBuildingRepo] = useState(false);
@@ -218,6 +226,12 @@ export default function App() {
     setThinkingBudgetDraft(payload.thinkingBudgetDefault ?? payload.thinkingBudget ?? "");
     setCodexModelDraft(payload.codexModel || "");
     setCodexReasoningEffortDraft(payload.codexReasoningEffort || "");
+    setMemoryCompactEveryRoundsDraft(payload.memoryCompactEveryRounds || "");
+    setMemoryCompactMaxBatchSizeDraft(payload.memoryCompactMaxBatchSize || "");
+    setMemorySummaryTopKDraft(payload.memorySummaryTopK || "");
+    setMemoryRawRefLimitDraft(payload.memoryRawRefLimit || "");
+    setMemoryRawRecordLimitDraft(payload.memoryRawRecordLimit || "");
+    setMemoryRagSummaryTopKDraft(payload.memoryRagSummaryTopK || "");
   }
 
   async function loadModels(): Promise<void> {
@@ -399,6 +413,32 @@ export default function App() {
       notifyError("保存 Codex 配置失败", error);
     } finally {
       setSavingCodexConfig(false);
+    }
+  }
+
+  async function handleSaveMemoryConfig(): Promise<void> {
+    setSavingMemoryConfig(true);
+    try {
+      await request<{ ok: boolean }>("/admin/api/config/memory", {
+        method: "POST",
+        body: JSON.stringify({
+          memoryCompactEveryRounds: memoryCompactEveryRoundsDraft.trim(),
+          memoryCompactMaxBatchSize: memoryCompactMaxBatchSizeDraft.trim(),
+          memorySummaryTopK: memorySummaryTopKDraft.trim(),
+          memoryRawRefLimit: memoryRawRefLimitDraft.trim(),
+          memoryRawRecordLimit: memoryRawRecordLimitDraft.trim(),
+          memoryRagSummaryTopK: memoryRagSummaryTopKDraft.trim()
+        })
+      });
+      await loadConfig();
+      setNotice({
+        type: "success",
+        title: "Memory 配置已保存"
+      });
+    } catch (error) {
+      notifyError("保存 Memory 配置失败", error);
+    } finally {
+      setSavingMemoryConfig(false);
     }
   }
 
@@ -1337,6 +1377,27 @@ export default function App() {
           onRestartPm2={() => void handleRestartPm2()}
           onPullRepo={() => void handlePullRepo()}
           onBuildRepo={() => void handleBuildRepo()}
+        />
+      ) : null}
+
+      {activeMenu === "memory" ? (
+        <MemorySection
+          config={config}
+          memoryCompactEveryRoundsDraft={memoryCompactEveryRoundsDraft}
+          memoryCompactMaxBatchSizeDraft={memoryCompactMaxBatchSizeDraft}
+          memorySummaryTopKDraft={memorySummaryTopKDraft}
+          memoryRawRefLimitDraft={memoryRawRefLimitDraft}
+          memoryRawRecordLimitDraft={memoryRawRecordLimitDraft}
+          memoryRagSummaryTopKDraft={memoryRagSummaryTopKDraft}
+          savingMemoryConfig={savingMemoryConfig}
+          onMemoryCompactEveryRoundsDraftChange={setMemoryCompactEveryRoundsDraft}
+          onMemoryCompactMaxBatchSizeDraftChange={setMemoryCompactMaxBatchSizeDraft}
+          onMemorySummaryTopKDraftChange={setMemorySummaryTopKDraft}
+          onMemoryRawRefLimitDraftChange={setMemoryRawRefLimitDraft}
+          onMemoryRawRecordLimitDraftChange={setMemoryRawRecordLimitDraft}
+          onMemoryRagSummaryTopKDraftChange={setMemoryRagSummaryTopKDraft}
+          onSaveMemoryConfig={() => void handleSaveMemoryConfig()}
+          onRefresh={() => void loadConfig()}
         />
       ) : null}
 

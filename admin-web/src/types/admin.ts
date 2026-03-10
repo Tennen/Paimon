@@ -13,6 +13,12 @@ export type AdminConfig = {
   thinkingBudget?: string;
   codexModel: string;
   codexReasoningEffort: string;
+  memoryCompactEveryRounds: string;
+  memoryCompactMaxBatchSize: string;
+  memorySummaryTopK: string;
+  memoryRawRefLimit: string;
+  memoryRawRecordLimit: string;
+  memoryRagSummaryTopK: string;
   envPath: string;
   taskStore: DataStoreDescriptor;
   userStore: DataStoreDescriptor;
@@ -356,7 +362,7 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "messages" | "market" | "topic" | "evolution";
+export type MenuKey = "system" | "memory" | "messages" | "market" | "topic" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",

@@ -63,7 +63,7 @@ Note: `handler.js` is deprecated. Keep runtime execution in `src/tools/` and int
 - All dialogue traffic appends immutable raw records into `raw memory`.
 - Background low-frequency `compaction` converts unsummarized raw batches into structured `summary memory`.
 - `summary memory` keeps high-density fields: `user_facts/environment/long_term_preferences/task_results/rawRefs`.
-- RAG retrieval indexes only `summary memory` vectors, not raw transcript chunks.
+- RAG retrieval runs hybrid ranking on `summary memory` (lexical exact matching + vector similarity), not raw transcript chunks.
 - If recalled summary references history, runtime resolves `rawRefs` IDs and loads only a small raw slice.
 
 ### `/re` Memory Data Files

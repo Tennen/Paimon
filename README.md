@@ -232,7 +232,7 @@ Memory 规则（global hybrid memory）：
 - 所有会话消息都会完整写入 `raw memory`（不改写原文）
 - 系统在低频触发 `compaction`（例如每 N 轮或任务结束）把未摘要批次提炼为结构化 `summary memory`
 - `summary memory` 结构包含 `user_facts`、`environment`、`long_term_preferences`、`task_results` 与 `rawRefs`
-- 运行时先做 `RAG` summary 检索，再按 `rawRefs` 按 ID 回补少量原文上下文
+- 运行时先做 `RAG` summary 混合检索（词法精确匹配 + 向量相似度融合排序），再按 `rawRefs` 按 ID 回补少量原文上下文
 - `/re` 会在该全局记忆上执行子 agent 循环
 
 ## 数据与持久化
