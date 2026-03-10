@@ -61,6 +61,32 @@ function parseOptionalPositiveInteger(
   return value;
 }
 
+function parseOptionalMemoryMode(
+  obj: Record<string, unknown>,
+  key: string
+): "on" | "off" | undefined {
+  if (!(key in obj) || obj[key] === undefined || obj[key] === null) {
+    return undefined;
+  }
+  const value = obj[key];
+  if (value !== "on" && value !== "off") {
+    throw new Error(`Invalid ${key}: must be 'on' or 'off'`);
+  }
+  return value;
+}
+
+function parseOptionalString(obj: Record<string, unknown>, key: string): string | undefined {
+  if (!(key in obj) || obj[key] === undefined || obj[key] === null) {
+    return undefined;
+  }
+  const value = obj[key];
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${key}: must be a string`);
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 export function parseSkillSelectionResult(rawText: string): SkillSelectionResult {
   console.log("rawText", rawText);
   const obj = parseJsonObject(rawText);
@@ -75,6 +101,8 @@ export function parseSkillSelectionResult(rawText: string): SkillSelectionResult
     skill_name: typeof obj.skill_name === "string" ? obj.skill_name : undefined,
     planning_thinking_budget: parseOptionalPositiveInteger(obj, "planning_thinking_budget"),
     response_text: typeof obj.response_text === "string" ? obj.response_text : undefined,
+    memory_mode: parseOptionalMemoryMode(obj, "memory_mode"),
+    memory_query: parseOptionalString(obj, "memory_query")
   };
 }
 

@@ -46,6 +46,23 @@ test("parseSkillSelectionResult accepts use_planning decision", () => {
   assert.equal(result.planning_thinking_budget, 1024);
 });
 
+test("parseSkillSelectionResult parses memory policy fields", () => {
+  const result = parseSkillSelectionResult(
+    '{"decision":"use_planning","memory_mode":"on","memory_query":"上周会议结论"}'
+  );
+
+  assert.equal(result.decision, "use_planning");
+  assert.equal(result.memory_mode, "on");
+  assert.equal(result.memory_query, "上周会议结论");
+});
+
+test("parseSkillSelectionResult rejects invalid memory_mode", () => {
+  assert.throws(
+    () => parseSkillSelectionResult('{"decision":"use_planning","memory_mode":"auto"}'),
+    /Invalid memory_mode/
+  );
+});
+
 test("parseSkillPlanningResult parses direct respond output", () => {
   const result = parseSkillPlanningResult(
     '{"decision":"respond","response_text":"本地思考后直接回复"}'

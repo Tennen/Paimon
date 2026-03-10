@@ -251,6 +251,92 @@ test("supports local planning respond path from routing use_planning", async () 
   assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
 });
 
+test("routing memory_mode=off skips session memory loading for planning", async () => {
+  const memoryStore = new StubSessionMemoryStore("main-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
+  const registry = new ToolRegistry();
+
+  const llmEngine: LLMEngine = {
+    async chat(_request: LLMChatRequest): Promise<string> {
+      return "stub-chat-response";
+    },
+    async route(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
+      return {
+        decision: "use_planning",
+        planning_thinking_budget: 512,
+        memory_mode: "off"
+      };
+    },
+    async plan(
+      _text: string,
+      runtimeContext: Record<string, unknown>,
+      planningOptions?: { thinkingBudgetOverride?: number }
+    ): Promise<SkillPlanningResult> {
+      assert.equal(runtimeContext.memory, undefined);
+      assert.equal(planningOptions?.thinkingBudgetOverride, 512);
+      return { decision: "respond", response_text: "不需要记忆也能回答" };
+    },
+    getModelForStep(): string {
+      return "stub-model";
+    },
+    getProviderName(): "ollama" {
+      return "ollama";
+    }
+  };
+
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
+  const response = await orchestrator.handle(createEnvelope("req-4b", "介绍一下今天的天气"));
+
+  assert.equal(response.text, "不需要记忆也能回答");
+  assert.equal(memoryStore.readCalls.length, 0);
+  assert.equal(memoryStore.appendCalls.length, 1);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+});
+
+test("routing memory_mode=on loads session memory before planning", async () => {
+  const memoryStore = new StubSessionMemoryStore("main-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
+  const registry = new ToolRegistry();
+
+  const llmEngine: LLMEngine = {
+    async chat(_request: LLMChatRequest): Promise<string> {
+      return "stub-chat-response";
+    },
+    async route(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
+      return {
+        decision: "use_planning",
+        memory_mode: "on",
+        memory_query: "上次的偏好设置"
+      };
+    },
+    async plan(
+      _text: string,
+      runtimeContext: Record<string, unknown>
+    ): Promise<SkillPlanningResult> {
+      assert.equal(runtimeContext.memory, "main-memory");
+      return { decision: "respond", response_text: "已使用会话记忆" };
+    },
+    getModelForStep(): string {
+      return "stub-model";
+    },
+    getProviderName(): "ollama" {
+      return "ollama";
+    }
+  };
+
+  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
+  const response = await orchestrator.handle(createEnvelope("req-4c", "继续上个任务"));
+
+  assert.equal(response.text, "已使用会话记忆");
+  assert.equal(memoryStore.readCalls.length, 1);
+  assert.equal(memoryStore.appendCalls.length, 1);
+  assert.equal(rawMemoryStore.appendCalls.length, 1);
+  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+});
+
 test("skips shared/global memory append for /re reset command", async () => {
   const memoryStore = new StubSessionMemoryStore("main-memory");
   const rawMemoryStore = new StubRawMemoryStore();

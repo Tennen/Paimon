@@ -128,9 +128,9 @@ function getRoutingInstructions(): string[] {
     "Output format:",
     '  {"decision":"respond","response_text":"your response here"}',
     '  OR',
-    '  {"decision":"use_planning","planning_thinking_budget":1024}',
+    '  {"decision":"use_planning","planning_thinking_budget":1024,"memory_mode":"on","memory_query":"optional query"}',
     '  OR',
-    '  {"decision":"use_skill","skill_name":"skill_name","planning_thinking_budget":1024}',
+    '  {"decision":"use_skill","skill_name":"skill_name","planning_thinking_budget":1024,"memory_mode":"on","memory_query":"optional query"}',
     "",
     "Decision logic:",
     "- If request is conversational and no extra reasoning is needed, use decision='respond'",
@@ -139,6 +139,9 @@ function getRoutingInstructions(): string[] {
     "- If CONTEXT_JSON.thinking_budget.enabled=true and decision is 'use_skill' or 'use_planning', planning_thinking_budget is required",
     "- planning_thinking_budget must be an integer within [CONTEXT_JSON.thinking_budget.min, CONTEXT_JSON.thinking_budget.max]",
     "- If CONTEXT_JSON.thinking_budget.enabled=false, omit planning_thinking_budget for all decisions",
+    "- memory_mode is optional; allowed values are 'on' and 'off'",
+    "- For use_skill/use_planning, prefer memory_mode='on' when request depends on prior session context; otherwise set memory_mode='off'",
+    "- If memory_mode='on', optionally provide memory_query as a concise retrieval hint",
     "- Keep decision/skill_name keys and decision values in English exactly as specified",
   ];
 }

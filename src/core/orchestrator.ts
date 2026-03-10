@@ -56,16 +56,24 @@ export class Orchestrator {
     }
 
     const text = await sttRuntime.transcribe(envelope);
-    const memory = this.readSessionMemory(envelope.sessionId);
+    let memoryLoaded = false;
+    let memoryCache = "";
+    const readSessionMemory = (): string => {
+      if (!memoryLoaded) {
+        memoryCache = this.readSessionMemory(envelope.sessionId);
+        memoryLoaded = true;
+      }
+      return memoryCache;
+    };
 
     try {
-      const directRouteResponse = await this.handleDirectCommandRoute(text, memory, envelope, start);
+      const directRouteResponse = await this.handleDirectCommandRoute(text, envelope, start, readSessionMemory);
       if (directRouteResponse) {
         return directRouteResponse;
       }
 
       // Step 1: Routing - Decide direct response / planning / tool-oriented skill path
-      const routingResult = await this.routingStep(text, memory, envelope, start);
+      const routingResult = await this.routingStep(text, envelope, start, readSessionMemory);
       if (routingResult.response) {
         this.processed.set(envelope.requestId, routingResult.response);
         this.appendMemory(envelope, text, routingResult.response);
@@ -77,7 +85,7 @@ export class Orchestrator {
         routingResult.skillName,
         routingResult.planningThinkingBudget,
         text,
-        memory,
+        routingResult.memory,
         envelope,
         start
       );
@@ -94,7 +102,7 @@ export class Orchestrator {
         this.appendMemory(envelope, text, response);
         return response;
       }
-      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, memory, envelope, start);
+      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, routingResult.memory, envelope, start);
 
       // Step 4: Respond - Generate final response based on tool result and prepared templates
       const response = await this.respondStep(
@@ -117,9 +125,9 @@ export class Orchestrator {
   // New step-based processing methods
   private async handleDirectCommandRoute(
     text: string,
-    memory: string,
     envelope: Envelope,
-    start: number
+    start: number,
+    readSessionMemory: () => string
   ): Promise<Response | null> {
     const shortcutMatched = this.toolRegistry.matchDirectShortcut(text);
     if (shortcutMatched) {
@@ -172,7 +180,7 @@ export class Orchestrator {
         return acceptedResponse;
       }
 
-      return this.executeDirectShortcut(shortcutMatched, text, memory, envelope, start);
+      return this.executeDirectShortcut(shortcutMatched, text, readSessionMemory(), envelope, start);
     }
 
     const matched = this.toolRegistry.matchDirectToolCall(text);
@@ -235,7 +243,7 @@ export class Orchestrator {
       op: matched.op,
       args: matched.args
     };
-    const toolResult = await this.toolCallStep(toolExecution, text, memory, envelope, start);
+    const toolResult = await this.toolCallStep(toolExecution, text, readSessionMemory(), envelope, start);
     const response = await this.respondStep(
       toolResult.result,
       "",
@@ -338,10 +346,10 @@ export class Orchestrator {
 
   private async routingStep(
     text: string,
-    memory: string,
     envelope: Envelope,
-    start: number
-  ): Promise<{ response?: Response; skillName?: string; planningThinkingBudget?: number }> {
+    start: number,
+    readSessionMemory: () => string
+  ): Promise<{ response?: Response; skillName?: string; planningThinkingBudget?: number; memory: string }> {
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
     const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
 
@@ -355,6 +363,10 @@ export class Orchestrator {
     };
 
     const result = await this.llmEngine.route(text, runtimeContext);
+    const memoryDecision = resolveMemoryDecision(result, text);
+    const memory = memoryDecision.enabled
+      ? this.loadMemoryForNextStep(envelope.sessionId, memoryDecision.query, readSessionMemory)
+      : "";
 
     // Write audit log
     const llmMeta: LLMPlanMeta = {
@@ -370,25 +382,27 @@ export class Orchestrator {
     if (result.decision === "respond") {
       const response = { text: result.response_text || "OK" };
       this.appendMemory(envelope, text, response);
-      return { response };
+      return { response, memory };
     }
 
     if (result.decision === "use_skill" && result.skill_name) {
       return {
         skillName: result.skill_name,
-        planningThinkingBudget: result.planning_thinking_budget
+        planningThinkingBudget: result.planning_thinking_budget,
+        memory
       };
     }
 
     if (result.decision === "use_planning") {
       return {
-        planningThinkingBudget: result.planning_thinking_budget
+        planningThinkingBudget: result.planning_thinking_budget,
+        memory
       };
     }
 
     const response = { text: "I don't understand. Please try rephrasing." };
     this.appendMemory(envelope, text, response);
-    return { response };
+    return { response, memory };
   }
 
   private async planningStep(
@@ -433,8 +447,7 @@ export class Orchestrator {
     const runtimeContext: Record<string, unknown> = {
       isoTime: new Date().toISOString(),
       userTimezone: "Asia/Shanghai",
-      // small model may confuse with extra context
-      // memory,
+      ...(memory ? { memory } : {}),
       // action_history: actionHistory,
       // skills_context: skillContext,
       tools_context: toolContext,
@@ -598,6 +611,17 @@ export class Orchestrator {
     });
   }
 
+  private loadMemoryForNextStep(
+    sessionId: string,
+    _query: string,
+    readSessionMemory: () => string
+  ): string {
+    if (!sessionId) {
+      return "";
+    }
+    return readSessionMemory();
+  }
+
   private appendMemory(envelope: Envelope, text: string, response: Response): void {
     const memoryText = text || inferNonTextMemoryMarker(envelope.kind);
     if (isReAgentResetInput(memoryText)) {
@@ -658,6 +682,25 @@ function isReAgentResetInput(userText: string): boolean {
     return false;
   }
   return parseReAgentCommand(userText).kind === "reset";
+}
+
+function resolveMemoryDecision(
+  result: { decision: "respond" | "use_skill" | "use_planning"; memory_mode?: "on" | "off"; memory_query?: string },
+  text: string
+): { enabled: boolean; query: string } {
+  if (result.decision === "respond") {
+    return { enabled: false, query: text };
+  }
+  const defaultEnabled = true;
+  const enabled = result.memory_mode === "on"
+    ? true
+    : result.memory_mode === "off"
+      ? false
+      : defaultEnabled;
+  const query = typeof result.memory_query === "string" && result.memory_query.trim().length > 0
+    ? result.memory_query.trim()
+    : text;
+  return { enabled, query };
 }
 
 function sanitizeToolResult(input: unknown): unknown {

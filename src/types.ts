@@ -14,6 +14,8 @@ export type SkillSelectionResult = {
   skill_name?: string;
   planning_thinking_budget?: number;
   response_text?: string;
+  memory_mode?: "on" | "off";
+  memory_query?: string;
 };
 
 export type SkillPlanningResult =
