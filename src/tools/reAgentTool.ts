@@ -1,9 +1,14 @@
 import { isReAgentCommandInput, parseReAgentCommand, withReAgentPrefix } from "../core/re-agent";
+import { ReAgentMemoryStore } from "../memory/reAgentMemoryStore";
+import { ReAgentRawMemoryStore } from "../memory/reAgentRawMemoryStore";
+import { ReAgentSummaryMemoryStore } from "../memory/reAgentSummaryMemoryStore";
+import { ReAgentSummaryVectorIndex } from "../memory/reAgentSummaryVectorIndex";
 import { ToolResult } from "../types";
 import { DirectShortcutContext, ToolDependencies, ToolRegistry } from "./toolRegistry";
 
 type ReAgentRuntimeBridge = {
   run: (input: { sessionId: string; input: string; maxSteps?: number }) => Promise<{ response: string }>;
+  resetSession?: (sessionId: string) => void | Promise<void>;
 };
 
 export function registerTool(registry: ToolRegistry, deps: ToolDependencies): void {
@@ -31,6 +36,7 @@ async function executeReAgentShortcut(
   }
 
   if (parsed.kind === "reset") {
+    await resetReAgentMemory(context.sessionId, runtime);
     return {
       ok: true,
       output: {
@@ -84,4 +90,21 @@ function buildReAgentHelpText(): string {
     "/re help 查看帮助",
     "/re reset 重置子 agent 会话记忆"
   ].join("\n");
+}
+
+async function resetReAgentMemory(sessionId: string, runtime?: ReAgentRuntimeBridge): Promise<void> {
+  const key = String(sessionId ?? "").trim();
+  if (!key) {
+    return;
+  }
+
+  if (runtime && typeof runtime.resetSession === "function") {
+    await runtime.resetSession(key);
+    return;
+  }
+
+  new ReAgentMemoryStore().clear(key);
+  new ReAgentRawMemoryStore().clear(key);
+  new ReAgentSummaryMemoryStore().clear(key);
+  new ReAgentSummaryVectorIndex().clear(key);
 }

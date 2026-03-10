@@ -1,10 +1,12 @@
-import { RagService } from "../../../integrations/rag/service";
+import { RagRetriever, RagSearchHit, RagService } from "../../../integrations/rag/service";
+import { ReAgentSummaryVectorIndex } from "../../../memory/reAgentSummaryVectorIndex";
 import { ReAgentModule } from "../types";
 
 export const RAG_MODULE_NAME = "rag";
 export const RAG_MODULE_SEARCH_ACTION = "search";
+const DEFAULT_SUMMARY_TOP_K = 4;
 
-export function createRagModule(service: RagService = new RagService()): ReAgentModule {
+export function createRagModule(service: RagService = new RagService(createSummaryMemoryRetriever())): ReAgentModule {
   return {
     name: RAG_MODULE_NAME,
     description: "Search knowledge with RAG and return grounded snippets.",
@@ -45,4 +47,31 @@ function resolveQuery(params: Record<string, unknown>): string {
     (typeof params.query === "string" ? params.query : "") ||
     (typeof params.input === "string" ? params.input : "");
   return raw.trim();
+}
+
+function createSummaryMemoryRetriever(
+  index: ReAgentSummaryVectorIndex = new ReAgentSummaryVectorIndex(),
+  topK: number = readPositiveInt(process.env.RE_AGENT_RAG_SUMMARY_TOP_K, DEFAULT_SUMMARY_TOP_K)
+): RagRetriever {
+  return {
+    search: async (query: string, sessionId: string): Promise<RagSearchHit[]> => {
+      const hits = index.search(sessionId, query, topK);
+      return hits.map((item) => ({
+        id: item.id,
+        content: item.text,
+        source: `re-agent-summary:${item.id}`,
+        score: item.score,
+        metadata: {
+          rawRefs: item.rawRefs,
+          updatedAt: item.updatedAt,
+          memoryType: "summary"
+        }
+      }));
+    }
+  };
+}
+
+function readPositiveInt(raw: unknown, fallback: number): number {
+  const parsed = Number.parseInt(String(raw ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }

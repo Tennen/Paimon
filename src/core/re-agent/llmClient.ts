@@ -1,4 +1,4 @@
-import { ReActAction, ReAgentTraceStep } from "./types";
+import { ReActAction, ReAgentMemoryContext, ReAgentTraceStep } from "./types";
 
 export type ReAgentToolDescriptor = { name: string; description?: string };
 export type ReAgentLlmStepInput = {
@@ -8,6 +8,7 @@ export type ReAgentLlmStepInput = {
   maxSteps: number;
   history: ReAgentTraceStep[];
   tools: ReAgentToolDescriptor[];
+  memoryContext?: ReAgentMemoryContext;
 };
 
 export interface ReAgentLlmClient {
@@ -24,7 +25,7 @@ export type OllamaReAgentLlmClientOptions = {
 const DEFAULT_MODEL = "qwen3.5:9b";
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_TIMEOUT_MS = 30_000;
-const SYSTEM_PROMPT = "You are a ReAct sub-agent. Output one JSON object only. tool={\"kind\":\"tool\",\"tool\":\"name\",\"action\":\"op\",\"params\":{}} respond={\"kind\":\"respond\",\"response\":\"text\"}";
+const SYSTEM_PROMPT = "You are a ReAct sub-agent. Output one JSON object only. tool={\"kind\":\"tool\",\"tool\":\"name\",\"action\":\"op\",\"params\":{}} respond={\"kind\":\"respond\",\"response\":\"text\"}. Use memoryContext when present.";
 
 export class OllamaReAgentLlmClient implements ReAgentLlmClient {
   private readonly baseUrl: string;
@@ -54,7 +55,21 @@ export class OllamaReAgentLlmClient implements ReAgentLlmClient {
           stream: false,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: JSON.stringify({ sessionId: input.sessionId, step: `${input.step}/${input.maxSteps}`, input: input.input, tools: input.tools, history: input.history }, null, 2) }
+            {
+              role: "user",
+              content: JSON.stringify(
+                {
+                  sessionId: input.sessionId,
+                  step: `${input.step}/${input.maxSteps}`,
+                  input: input.input,
+                  tools: input.tools,
+                  history: input.history,
+                  ...(input.memoryContext ? { memoryContext: toPromptMemoryContext(input.memoryContext) } : {})
+                },
+                null,
+                2
+              )
+            }
           ]
         }),
         ...(controller ? { signal: controller.signal } : {})
@@ -67,6 +82,21 @@ export class OllamaReAgentLlmClient implements ReAgentLlmClient {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+function toPromptMemoryContext(input: ReAgentMemoryContext): ReAgentMemoryContext {
+  return {
+    summaries: input.summaries.slice(0, 5).map((item) => ({
+      ...item,
+      text: clip(item.text, 320),
+      rawRefs: item.rawRefs.slice(0, 8)
+    })),
+    rawRecords: input.rawRecords.slice(0, 3).map((item) => ({
+      ...item,
+      user: clip(item.user, 220),
+      assistant: clip(item.assistant, 260)
+    }))
+  };
 }
 
 function parseAction(text: string): ReActAction {
@@ -114,4 +144,10 @@ function readPositiveInt(raw: unknown, envRaw: unknown, fallback: number): numbe
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return fallback;
+}
+
+function clip(input: string, max: number): string {
+  const value = String(input ?? "");
+  if (value.length <= max) return value;
+  return `${value.slice(0, Math.max(0, max - 3))}...`;
 }

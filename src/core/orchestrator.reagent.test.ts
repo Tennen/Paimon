@@ -4,7 +4,7 @@ import path from "path";
 import { Orchestrator } from "./orchestrator";
 import { ToolRouter } from "../tools/toolRouter";
 import { ToolRegistry } from "../tools/toolRegistry";
-import { LLMChatRequest, LLMEngine } from "../engines/llm/llm";
+import { LLMChatRequest, LLMEngine, LLMExecutionStep } from "../engines/llm/llm";
 import { SkillManager } from "../skills/skillManager";
 import { Envelope, Response, SkillPlanningResult, SkillSelectionResult } from "../types";
 import { MemoryStore } from "../memory/memoryStore";
@@ -38,6 +38,10 @@ class StubLLMEngine implements LLMEngine {
     return { decision: "respond", response_text: "not-used" };
   }
 
+  async selectSkill(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
+    return { decision: "respond", response_text: "not-used" };
+  }
+
   async plan(
     _text: string,
     _runtimeContext: Record<string, unknown>
@@ -51,7 +55,7 @@ class StubLLMEngine implements LLMEngine {
     };
   }
 
-  getModelForStep(): string {
+  getModelForStep(_step: LLMExecutionStep): string {
     return "stub-model";
   }
 

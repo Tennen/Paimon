@@ -18,6 +18,9 @@ export const DATA_STORE = {
   ENV_CONFIG: "env.config",
   MEMORY_SESSIONS: "memory.sessions",
   RE_AGENT_MEMORY_SESSIONS: "re-agent.memory.sessions",
+  RE_AGENT_MEMORY_RAW: "re-agent.memory.raw",
+  RE_AGENT_MEMORY_SUMMARY: "re-agent.memory.summary",
+  RE_AGENT_MEMORY_SUMMARY_INDEX: "re-agent.memory.summary_index",
   AUDIT_LOG: "audit.log",
   TOPIC_PUSH_CONFIG: "topic-push.config",
   TOPIC_PUSH_STATE: "topic-push.state"
@@ -38,6 +41,9 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.ENV_CONFIG]: "config/.env",
   [DATA_STORE.MEMORY_SESSIONS]: "memory/sessions.json",
   [DATA_STORE.RE_AGENT_MEMORY_SESSIONS]: "memory/re-agent-sessions.json",
+  [DATA_STORE.RE_AGENT_MEMORY_RAW]: "memory/re-agent-memory-raw.json",
+  [DATA_STORE.RE_AGENT_MEMORY_SUMMARY]: "memory/re-agent-memory-summary.json",
+  [DATA_STORE.RE_AGENT_MEMORY_SUMMARY_INDEX]: "memory/re-agent-memory-summary-index.json",
   [DATA_STORE.AUDIT_LOG]: "audit.jsonl",
   [DATA_STORE.TOPIC_PUSH_CONFIG]: "topic-push/config.json",
   [DATA_STORE.TOPIC_PUSH_STATE]: "topic-push/state.json"

@@ -40,12 +40,35 @@ export type ReAgentTraceStep = {
   observation?: ReActObservation;
 };
 
+export type ReAgentSummaryMemoryContextItem = {
+  id: string;
+  text: string;
+  score: number;
+  rawRefs: string[];
+  updatedAt: string;
+};
+
+export type ReAgentRawMemoryContextItem = {
+  id: string;
+  requestId: string;
+  source: string;
+  user: string;
+  assistant: string;
+  createdAt: string;
+};
+
+export type ReAgentMemoryContext = {
+  summaries: ReAgentSummaryMemoryContextItem[];
+  rawRecords: ReAgentRawMemoryContextItem[];
+};
+
 export type ReAgentModuleContext = {
   sessionId: string;
   input: string;
   step: number;
   maxSteps: number;
   history: ReAgentTraceStep[];
+  memoryContext?: ReAgentMemoryContext;
 };
 
 export type ReAgentModuleResult = {

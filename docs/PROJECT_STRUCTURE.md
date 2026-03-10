@@ -19,7 +19,7 @@ src/
   tools/   # Tool handlers and schemas (one tool per file, self-register)
   storage/         # Persistence abstraction (store registration/get/set)
   scheduler/       # Schedule/user domain
-  memory/          # Session memory domain
+  memory/          # Session memory domain (raw memory + summary memory + compaction + summary index)
   engines/         # LLM engine implementations
   config/          # Runtime config services
   skills/          # Skill metadata manager only
@@ -59,15 +59,25 @@ Note: `handler.js` is deprecated. Keep runtime execution in `src/tools/` and int
 
 ## `/re` Memory Routing
 
-- User input with `/re` prefix reads/writes ReAgent memory store.
-- Assistant output with `/re` prefix writes ReAgent memory store.
+- User input with `/re` prefix appends immutable raw records into `raw memory`.
+- Assistant output with `/re` prefix appends immutable raw records into `raw memory`.
+- Background low-frequency `compaction` converts unsummarized raw batches into structured `summary memory`.
+- `summary memory` keeps high-density fields: `user_facts/environment/long_term_preferences/task_results/rawRefs`.
+- RAG retrieval indexes only `summary memory` vectors, not raw transcript chunks.
+- If recalled summary references history, runtime resolves `rawRefs` IDs and loads only a small raw slice.
 - Non-`/re` traffic uses the default session memory store.
+
+### `/re` Memory Data Files
+
+- `data/memory/re-agent-memory-raw.json`
+- `data/memory/re-agent-memory-summary.json`
+- `data/memory/re-agent-memory-summary-index.json`
 
 ## `/re` Command Contract
 
 - `/re <question>`: start sub-agent conversation.
 - `/re help`: show help text.
-- `/re reset`: reset sub-agent memory for current session.
+- `/re reset`: reset sub-agent memory for current session (legacy session memory + raw/summary/index stores).
 - Sub-agent replies should keep `/re` prefix.
 
 ## Refactor Checklist For Future Moves
