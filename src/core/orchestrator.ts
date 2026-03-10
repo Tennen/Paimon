@@ -260,7 +260,7 @@ export class Orchestrator {
     const prior = this.asyncDirectQueues.get(sessionId) ?? Promise.resolve();
     const running = prior
       .catch(() => undefined)
-      .then(task);
+      .then(() => runDeferred(task));
     const next = running
       .then(() => undefined)
       .catch((error) => {
@@ -924,4 +924,12 @@ async function waitForPromiseWithTimeout<T>(
   }
 
   return settled;
+}
+
+function runDeferred<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    setImmediate(() => {
+      void task().then(resolve).catch(reject);
+    });
+  });
 }

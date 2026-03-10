@@ -168,8 +168,7 @@ export async function execute(input, context) {
   if (command.kind === "tick") {
     const trigger = typeof api.triggerNowAsync === "function" ? api.triggerNowAsync : api.triggerNow;
     void Promise.resolve(trigger()).catch(() => undefined);
-    const snapshot = await Promise.resolve(api.getSnapshot());
-    return { text: buildTickResponse(snapshot) };
+    return { text: buildTickAcceptedText() };
   }
 
   if (command.kind === "status") {
@@ -575,14 +574,10 @@ function buildCodexStatusText(config) {
   ].join("\n");
 }
 
-function buildTickResponse(snapshot) {
-  const state = snapshot && snapshot.state ? snapshot.state : {};
-  const retryQueue = snapshot && snapshot.retryQueue ? snapshot.retryQueue : {};
+function buildTickAcceptedText() {
   return [
     "已受理 Evolution Tick（异步执行）。",
-    `引擎状态: ${state.status || "unknown"}`,
-    `当前任务: ${state.currentGoalId || "-"}`,
-    `重试队列: ${Array.isArray(retryQueue.items) ? retryQueue.items.length : 0}`,
+    "可用：/evolve status 查看状态",
     "可用：/evolve logs 查看最新日志"
   ].join("\n");
 }
