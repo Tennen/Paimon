@@ -2,6 +2,13 @@
 
 This file defines hard constraints for coding agents working in this repository.
 
+## What Belongs Here
+
+- `AGENTS.md` is for implementation constraints, architecture boundaries, and change safety rules.
+- `README.md` is for product capabilities, setup, and operator-facing usage.
+- `docs/PROJECT_STRUCTURE.md` is the detailed module map and placement reference.
+- When behavior/config/API changes are user-visible, update both docs in the same change.
+
 ## Architecture Boundaries
 
 - `src/ingress/`
@@ -9,11 +16,32 @@ This file defines hard constraints for coding agents working in this repository.
   - Parse/validate request and translate to internal envelope/service calls.
   - Do not embed external API client logic here.
 
+- `src/core/`
+  - Orchestration and tool routing.
+  - No direct filesystem persistence and no vendor-specific API code.
+  - `src/core/re-agent/` keeps ReAct loop/runtime orchestration only; tool/vendor protocol details stay outside core.
+
+- `src/config/`
+  - Runtime configuration readers/writers and config services only.
+  - No business orchestration logic.
+
+- `src/engines/llm/`
+  - Provider runtime adapters only (`ollama`, `llama-server`, `openai`, etc.).
+  - Keep a unified `LLMEngine` contract; do not add skill/business workflow branching here.
+  - Provider-specific quota/account state belongs in `src/integrations/<provider>/` + `src/storage/`.
+
+- `src/engines/stt/`
+  - STT provider runtime adapters only (`fast-whisper`, etc.).
+  - Keep provider selection/retry/timeout behavior here, not in ingress/core.
+
 - `src/integrations/`
-  - External system adapters only (Home Assistant, WeCom, etc.).
-  - Encapsulate HTTP/WebSocket protocol details.
-  - Default: no orchestration/business workflow state.
-  - Exception: `src/integrations/evolution-operator/` hosts evolution runtime orchestration and state machine.
+  - External system adapters and domain runtime modules.
+  - Encapsulate HTTP/WebSocket/protocol details.
+  - Default: no cross-domain orchestration/business workflow state.
+  - Runtime-domain exceptions currently allowed:
+    - `src/integrations/evolution-operator/`
+    - `src/integrations/topic-push/`
+    - `src/integrations/market-analysis/`
   - Keep integrations flat by domain (`src/integrations/<domain>/`), no `integrations/tools` layer.
 
 - `src/tools/`
@@ -21,18 +49,18 @@ This file defines hard constraints for coding agents working in this repository.
   - Register schemas/handlers and call integrations.
   - Must not contain skill-specific orchestration logic or persistence policy.
 
-- `src/core/`
-  - Orchestration and tool routing.
-  - No direct filesystem persistence and no vendor-specific API code.
-
 - `src/storage/`
   - Single persistence gateway.
   - Callers should use `registerStore`, `getStore`, `setStore`.
   - Business modules must not depend on file paths.
 
-- `src/integrations/evolution-operator/`, `src/scheduler/`, `src/memory/`
-  - Evolution operator domain runtime lives under integration layer.
+- `src/scheduler/`, `src/memory/`
+  - Domain services and state management.
   - Persistence access only through `src/storage/persistence.ts`.
+
+- `admin-web/`
+  - Admin UI only.
+  - Must consume backend contracts from shared type definitions (`admin-web/src/types/admin.ts`).
 
 ## Directory Rules
 
@@ -59,6 +87,13 @@ This file defines hard constraints for coding agents working in this repository.
   - `action`
   - `params`
 
+## API And Contract Rules
+
+- Keep request/response schemas backward compatible unless the change explicitly includes migration.
+- If admin API schema changes, update `admin-web/src/types/admin.ts` and affected UI components in the same change.
+- New env vars must be documented in `.env.example`; remove dead env vars when no longer used.
+- LLM provider selection contract must stay centralized in `src/engines/llm/engine_factory.ts`.
+
 ## Persistence Rules
 
 - Do not add feature-specific `*_FILE`, `*_DIR`, or path env variables for persistent state.
@@ -67,18 +102,42 @@ This file defines hard constraints for coding agents working in this repository.
 - Use `getStore<T>(name)` and `setStore(name, payload)` for all reads/writes.
 - Keep migration logic inside owning store/service when schema/location changes.
 
+## Memory Rules
+
+- Keep global memory semantics stable:
+  - raw memory stores original conversation records (no semantic rewrite of original content)
+  - summary memory is derived/structured and references raw records via ids/refs
+- Do not couple memory logic to concrete filesystem paths.
+- Changes to memory schema must include normalization/migration in memory service layer.
+
+## Re-Agent Rules
+
+- `/re` runtime contract belongs in `src/core/re-agent/` + `src/memory/`, not in ingress/integration shims.
+- Keep `/re` command semantics stable unless change explicitly includes README/docs updates.
+- If `/re` command contract or memory routing changes, sync `README.md` and `docs/PROJECT_STRUCTURE.md`.
+
 ## Code Style Rules
 
 - TypeScript first; keep exported APIs explicitly typed.
 - Avoid `any`; if unavoidable, isolate and narrow quickly.
+- Avoid `// @ts-nocheck` for new code; if unavoidable, document reason and scope narrowly.
 - Keep functions focused; split large mixed-responsibility functions.
 - Prefer pure helpers for normalization/validation.
+- Validate external input at boundaries (`ingress`, integration adapters) before entering core flow.
 - Preserve existing language style in user-facing text (current codebase mixes Chinese/English intentionally).
+- Keep logs actionable: include subsystem context and avoid swallowing errors silently.
 
 ## Change Safety Checklist
 
 - Update imports after any directory/module move.
+- If you add/change an LLM provider:
+  - update `src/engines/llm/engine_factory.ts` provider normalization + factory branch
+  - keep provider fallback logic inside engine/integration layer (not ingress/core)
+  - update `.env.example` and `README.md` provider config examples in the same change
+- If you add/change STT provider behavior, keep provider selection in `src/engines/stt/` and sync `.env.example`.
+- If admin API or `admin-web/` is changed, run `npm run build` (includes admin-web build) before merge.
 - Run at least:
   - `npx tsc -p tsconfig.json`
   - `npm run test:evolution`
-- If admin API schema changes, update `admin-web/src/types/admin.ts` and affected UI components in same change.
+- If user-visible command/API/config changes, sync README sections in the same change.
+- If directory/module placement changes, sync both `AGENTS.md` and `docs/PROJECT_STRUCTURE.md` in the same change.

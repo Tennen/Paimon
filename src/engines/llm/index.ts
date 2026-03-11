@@ -4,3 +4,4 @@ export type { InternalChatRequest } from "./chat_engine";
 
 export { OllamaLLMEngine } from "./ollama";
 export { LlamaServerLLMEngine } from "./llama-server";
+export { OpenAILLMEngine } from "./openai";

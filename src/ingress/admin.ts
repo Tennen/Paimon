@@ -36,6 +36,10 @@ import {
   updateTopicPushProfile,
   useTopicPushProfile
 } from "../integrations/topic-push/service";
+import {
+  OpenAIQuotaManager,
+  readOpenAIQuotaPolicyFromEnv
+} from "../integrations/openai/quotaManager";
 
 const execAsync = promisify(exec);
 
@@ -157,6 +161,7 @@ export class AdminIngressAdapter implements IngressAdapter {
   private readonly codexConfigService: EvolutionCodexConfigService;
   private readonly evolutionService?: EvolutionOperatorService;
   private readonly adminDistCandidates: string[];
+  private readonly openAIQuotaManager: OpenAIQuotaManager;
 
   constructor(
     envStore: EnvConfigStore,
@@ -173,6 +178,7 @@ export class AdminIngressAdapter implements IngressAdapter {
     this.adminDistCandidates = adminDistCandidates && adminDistCandidates.length > 0
       ? adminDistCandidates.map((candidate) => path.resolve(process.cwd(), candidate))
       : DEFAULT_ADMIN_DIST_CANDIDATES;
+    this.openAIQuotaManager = new OpenAIQuotaManager();
   }
 
   register(app: Express, _sessionManager: SessionManager): void {
@@ -275,6 +281,58 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(502).json({
           error: (error as Error).message ?? "failed to fetch ollama models"
+        });
+      }
+    });
+
+    app.get("/admin/api/llm/openai/quota", (_req: Request, res: ExResponse) => {
+      try {
+        const policy = readOpenAIQuotaPolicyFromEnv();
+        const snapshot = this.openAIQuotaManager.getSnapshot(policy);
+        res.json({
+          ok: true,
+          ...snapshot
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to read openai quota"
+        });
+      }
+    });
+
+    app.post("/admin/api/llm/openai/quota", (req: Request, res: ExResponse) => {
+      const body = (req.body ?? {}) as {
+        action?: unknown;
+      };
+      const action = typeof body.action === "string" ? body.action.trim().toLowerCase() : "";
+      const policy = readOpenAIQuotaPolicyFromEnv();
+
+      try {
+        if (!action || action === "unblock") {
+          this.openAIQuotaManager.markAvailable(policy, "manual_unblock");
+        } else if (action === "exhaust") {
+          this.openAIQuotaManager.markExhausted(policy, "manual_exhausted");
+        } else if (action === "reset") {
+          this.openAIQuotaManager.resetUsage(policy);
+        } else {
+          res.status(400).json({
+            ok: false,
+            error: "action must be one of: unblock | exhaust | reset"
+          });
+          return;
+        }
+
+        const snapshot = this.openAIQuotaManager.getSnapshot(policy);
+        res.json({
+          ok: true,
+          action: action || "unblock",
+          ...snapshot
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to update openai quota"
         });
       }
     });

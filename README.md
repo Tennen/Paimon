@@ -67,7 +67,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 ### 2. LLM 与智能体编排
 
-- 支持 `Ollama` 和 `llama-server`
+- 支持 `Ollama`、`llama-server` 和 `OpenAI(ChatGPT API)`
 - 支持技能发现、技能规划、工具调用的分步式执行
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
@@ -104,7 +104,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 按场景可选：
 
-- `Ollama` 或 `llama-server`，用于 LLM 推理
+- `Ollama`、`llama-server` 或 OpenAI API，作为 LLM provider
 - `Python 3`，如果要启用 `fast-whisper` 语音转写
 - `Home Assistant`，如果要启用智能家居能力
 - 企业微信应用配置，若要通过 WeCom 收发消息
@@ -151,6 +151,33 @@ LLAMA_SERVER_MODEL=qwen3-thinking
 HA_BASE_URL=http://homeassistant.local:8123
 HA_TOKEN=your_home_assistant_token
 ```
+
+#### 使用 OpenAI / ChatGPT API（可自动回落到 gptbridge）
+
+```env
+PORT=3000
+
+LLM_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-4.1-mini
+OPENAI_PLANNING_MODEL=gpt-4.1-mini
+OPENAI_FALLBACK_TO_CHATGPT_BRIDGE=true
+OPENAI_QUOTA_RESET_DAY=1
+OPENAI_MONTHLY_TOKEN_LIMIT=
+OPENAI_MONTHLY_BUDGET_USD=
+OPENAI_COST_INPUT_PER_1M=
+OPENAI_COST_OUTPUT_PER_1M=
+
+HA_BASE_URL=http://homeassistant.local:8123
+HA_TOKEN=your_home_assistant_token
+```
+
+说明：
+
+- 当 API 返回 `insufficient_quota` / billing limit 时，系统会自动切到 `chatgpt-bridge`（若 `OPENAI_FALLBACK_TO_CHATGPT_BRIDGE=true`）。
+- 可通过 Admin API 查看与管理额度状态：
+  - `GET /admin/api/llm/openai/quota`
+  - `POST /admin/api/llm/openai/quota`（`action=unblock|exhaust|reset`）
 
 #### 启用企业微信
 

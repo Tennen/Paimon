@@ -1,87 +1,87 @@
-# Project Structure Plan
+# Project Structure Reference
 
-This document explains the intended module layout and placement rules.
+This document describes the current module layout and placement decisions.
 
-## Current Structure (Target)
+## Doc Responsibilities
+
+- `AGENTS.md`: hard constraints for coding agents (architecture boundaries, code rules, change safety).
+- `README.md`: product capability, setup, and operator-facing usage.
+- `docs/PROJECT_STRUCTURE.md` (this file): detailed module map and placement examples.
+
+If these docs diverge, align them in the same change. For implementation constraints, `AGENTS.md` is authoritative.
+
+## Current Structure
 
 ```text
 src/
-  core/            # Orchestrator, router, core runtime flow
-    re-agent/      # /re sub-agent runtime (ReAct loop + modules)
+  config/          # Runtime config services/read-write helpers
+  core/            # Orchestrator and runtime flow
+    re-agent/      # /re sub-agent runtime (ReAct loop + module contracts)
+  engines/         # Provider runtimes
+    llm/           # LLM provider adapters (ollama/llama-server/openai)
+    stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
-  integrations/    # External API adapters (flat by domain)
-    rag/           # RAG search adapter
-    mcp/           # MCP JSON-RPC adapter
-    multiagent/    # Planner/Critic collaboration adapter
-    topic-push/    # Topic push runtime (planning/mutations/storage split)
-    market-analysis/ # Market analysis runtime (signals/storage/format split)
-    evolution-operator/ # Evolution runtime engine + state orchestration
-  tools/   # Tool handlers and schemas (one tool per file, self-register)
-  storage/         # Persistence abstraction (store registration/get/set)
-  scheduler/       # Schedule/user domain
-  memory/          # Session memory domain (raw memory + summary memory + compaction + summary index)
-  engines/         # LLM engine implementations
-  config/          # Runtime config services
+  integrations/    # Outbound adapters and domain runtimes (flat by domain)
+    chatgpt-bridge/
+    evolution-operator/
+    homeassistant/
+    market-analysis/
+    mcp/
+    multiagent/
+    openai/
+    rag/
+    system-maintenance/
+    terminal/
+    topic-push/
+    wecom/
+  memory/          # Memory domain (session/raw/summary/index/compaction)
+  scheduler/       # Scheduler and push-user domain
   skills/          # Skill metadata manager only
-  callback/        # Async callback dispatch
+  storage/         # Persistence abstraction (register/get/set)
+  tools/           # LLM-callable tool handlers + schemas
 ```
 
 Repo root:
 
 ```text
-tools/             # Standalone scripts and bridge binaries/helpers
-skills/            # Skill packages (SKILL.md declarations only)
 admin-web/         # Admin frontend
+docs/              # Design/structure docs
+skills/            # Skill packages (declarative SKILL.md only)
+tools/             # Standalone scripts/binaries/helpers
+data/              # Runtime data files
 ```
 
-Note: `handler.js` is deprecated. Keep runtime execution in `src/tools/` and integrations flat under `src/integrations/`.
+## Placement Rules (Quick)
 
-## Why This Refactor
+- Inbound request translation only -> `src/ingress/`.
+- Core orchestration/runtime loop -> `src/core/` (including `src/core/re-agent/`).
+- Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
+- Third-party protocol/client adapters -> `src/integrations/<domain>/`.
+- Domain runtime exceptions under integrations are allowed only for explicit runtime domains:
+  - `evolution-operator`
+  - `topic-push`
+  - `market-analysis`
+- LLM-callable tools (schema + execute handler) -> `src/tools/`.
+- Persistent state access -> `src/storage/persistence.ts` API only.
+- Runtime config services -> `src/config/`.
 
-1. `src/tools` and root `tools/` were semantically different but name-colliding.
-2. `endpoints` and `ingress` responsibilities were close enough to blur module boundaries.
-3. Persistence access was becoming path-centric in domain modules.
+## `/re` Runtime And Memory Routing
 
-## Naming Decisions
+- `/re` runtime loop stays in `src/core/re-agent/`.
+- All dialogue traffic appends to unified session memory and raw memory.
+- Raw memory keeps original records; summary memory is derived and references raw ids/refs.
+- Retrieval is summary-first, with optional raw backfill by references.
+- Keep `/re` command contract stable:
+  - `/re <question>`
+  - `/re help`
+  - `/re reset`
 
-- `src/tools` -> `src/tools`
-  - Clarifies: this is tool layer, not scripts.
-- `src/endpoints` -> `src/integrations`
-  - Clarifies: these modules are outbound adapters to third-party systems.
-
-## Placement Rules
-
-- If code consumes third-party API protocol directly -> `src/integrations/`.
-- If code is LLM-callable tool (including skill-bound tools) -> `src/tools/`.
-- If code only translates inbound requests to internal model -> `src/ingress/`.
-- If code belongs to `/re` sub-agent runtime loop or module contract -> `src/core/re-agent/`.
-- If code stores persistent domain state -> use `src/storage/persistence.ts` API only.
-
-## `/re` Memory Routing
-
-- All dialogue traffic appends to unified session memory (`MemoryStore`).
-- All dialogue traffic appends immutable raw records into `raw memory`.
-- Background low-frequency `compaction` converts unsummarized raw batches into structured `summary memory`.
-- `summary memory` keeps high-density fields: `user_facts/environment/long_term_preferences/task_results/rawRefs`.
-- RAG retrieval runs hybrid ranking on `summary memory` (lexical exact matching + vector similarity), not raw transcript chunks.
-- If recalled summary references history, runtime resolves `rawRefs` IDs and loads only a small raw slice.
-
-### `/re` Memory Data Files
-
-- `data/memory/raw.json`
-- `data/memory/summary.json`
-- `data/memory/summary-index.json`
-
-## `/re` Command Contract
-
-- `/re <question>`: start sub-agent conversation.
-- `/re help`: show help text.
-- `/re reset`: reset global session memory for current session (session memory + raw/summary/index stores).
-- Sub-agent replies should keep `/re` prefix.
-
-## Refactor Checklist For Future Moves
+## Structural Change Checklist
 
 1. Move directories/files.
-2. Update all imports (`rg` the old path).
-3. Update runtime docs (`README.md`, `AGENTS.md`, this file if needed).
-4. Run `npx tsc -p tsconfig.json` and domain tests.
+2. Update imports (`rg` old paths).
+3. Update docs together: `AGENTS.md`, `README.md`, and this file when relevant.
+4. Run validation:
+   - `npx tsc -p tsconfig.json`
+   - `npm run test:evolution`
+   - `npm run build` when admin API/admin-web is touched.

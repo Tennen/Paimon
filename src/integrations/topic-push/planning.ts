@@ -295,43 +295,24 @@ async function chatWithPlanningModel(
   const llmEngine = createLLMEngine();
   const provider = llmEngine.getProviderName();
 
-  if (provider === "llama-server") {
-    const model = String(
-      process.env.LLAMA_SERVER_PLANNING_MODEL
-      ?? process.env.LLAMA_SERVER_MODEL
-      ?? process.env.OLLAMA_PLANNING_MODEL
-      ?? process.env.OLLAMA_MODEL
-      ?? ""
-    ).trim();
-    if (!model) {
-      throw new Error("missing planning model for llama-server");
-    }
-
-    return llmEngine.chat({
-      step: "general",
-      model,
-      timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ]
-    });
-  }
-
-  const model = String(process.env.OLLAMA_PLANNING_MODEL ?? process.env.OLLAMA_MODEL ?? "").trim();
+  const model = String(llmEngine.getModelForStep("planning") || "").trim();
   if (!model) {
-    throw new Error("missing planning model for ollama");
+    throw new Error(`missing planning model for ${provider}`);
   }
 
   return llmEngine.chat({
     step: "general",
     model,
     timeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000),
-    options: {
-      temperature: 0.2,
-      top_p: 0.9,
-      num_predict: 2048
-    },
+    ...(provider === "ollama"
+      ? {
+          options: {
+            temperature: 0.2,
+            top_p: 0.9,
+            num_predict: 2048
+          }
+        }
+      : {}),
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
