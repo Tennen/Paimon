@@ -3,27 +3,25 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { EvolutionSection } from "@/components/admin/EvolutionSection";
 import { FeatureMenu } from "@/components/admin/FeatureMenu";
 import { MarketSection } from "@/components/admin/MarketSection";
-import { MemorySection } from "@/components/admin/MemorySection";
 import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
 import type {
-  SystemCodexDraft,
+  SystemMemoryDraft,
   SystemOllamaDraft,
   SystemOpenAIDraft,
   SystemOperationState
 } from "@/components/admin/SystemSection";
-import { TopicPushSection } from "@/components/admin/TopicPushSection";
+import { TopicSummarySection } from "@/components/admin/TopicSummarySection";
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
-  DEFAULT_TOPIC_PUSH_CONFIG,
-  DEFAULT_TOPIC_PUSH_STATE,
+  DEFAULT_TOPIC_SUMMARY_CONFIG,
+  DEFAULT_TOPIC_SUMMARY_STATE,
   DEFAULT_MARKET_ANALYSIS_CONFIG,
   DEFAULT_MARKET_PORTFOLIO,
   EMPTY_TASK_FORM,
   EMPTY_USER_FORM,
   EvolutionGoal,
-  EvolutionGoalHistory,
   EvolutionStateSnapshot,
   MarketConfig,
   MarketAnalysisConfig,
@@ -39,14 +37,14 @@ import {
   PushUser,
   ScheduledTask,
   TaskFormState,
-  TopicPushCategory,
-  TopicPushConfig,
-  TopicPushDigestLanguage,
-  TopicPushProfile,
-  TopicPushProfilesPayload,
-  TopicPushSummaryEngine,
-  TopicPushSource,
-  TopicPushState,
+  TopicSummaryCategory,
+  TopicSummaryConfig,
+  TopicSummaryDigestLanguage,
+  TopicSummaryProfile,
+  TopicSummaryProfilesPayload,
+  TopicSummaryEngine,
+  TopicSummarySource,
+  TopicSummaryState,
   UserFormState
 } from "@/types/admin";
 
@@ -74,14 +72,27 @@ const EMPTY_OPENAI_DRAFT: SystemOpenAIDraft = {
   costOutputPer1M: ""
 };
 
-const EMPTY_CODEX_DRAFT: SystemCodexDraft = {
+type CodexDraft = {
+  model: string;
+  reasoningEffort: string;
+};
+
+const EMPTY_CODEX_DRAFT: CodexDraft = {
   model: "",
   reasoningEffort: ""
 };
 
+const EMPTY_MEMORY_DRAFT: SystemMemoryDraft = {
+  memoryCompactEveryRounds: "",
+  memoryCompactMaxBatchSize: "",
+  memorySummaryTopK: "",
+  memoryRawRefLimit: "",
+  memoryRawRecordLimit: "",
+  memoryRagSummaryTopK: ""
+};
+
 const DEFAULT_SYSTEM_OPERATION_STATE: SystemOperationState = {
   savingModel: false,
-  savingCodexConfig: false,
   restarting: false,
   pullingRepo: false,
   buildingRepo: false,
@@ -95,17 +106,13 @@ export default function App() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [ollamaDraft, setOllamaDraft] = useState<SystemOllamaDraft>(EMPTY_OLLAMA_DRAFT);
   const [openaiDraft, setOpenaiDraft] = useState<SystemOpenAIDraft>(EMPTY_OPENAI_DRAFT);
-  const [codexDraft, setCodexDraft] = useState<SystemCodexDraft>(EMPTY_CODEX_DRAFT);
-  const [memoryCompactEveryRoundsDraft, setMemoryCompactEveryRoundsDraft] = useState("");
-  const [memoryCompactMaxBatchSizeDraft, setMemoryCompactMaxBatchSizeDraft] = useState("");
-  const [memorySummaryTopKDraft, setMemorySummaryTopKDraft] = useState("");
-  const [memoryRawRefLimitDraft, setMemoryRawRefLimitDraft] = useState("");
-  const [memoryRawRecordLimitDraft, setMemoryRawRecordLimitDraft] = useState("");
-  const [memoryRagSummaryTopKDraft, setMemoryRagSummaryTopKDraft] = useState("");
+  const [codexDraft, setCodexDraft] = useState<CodexDraft>(EMPTY_CODEX_DRAFT);
+  const [memoryDraft, setMemoryDraft] = useState<SystemMemoryDraft>(EMPTY_MEMORY_DRAFT);
 
   const [notice, setNotice] = useState<Notice>(null);
 
   const [systemOperationState, setSystemOperationState] = useState<SystemOperationState>(DEFAULT_SYSTEM_OPERATION_STATE);
+  const [savingCodexConfig, setSavingCodexConfig] = useState(false);
   const [savingMemoryConfig, setSavingMemoryConfig] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState("");
@@ -137,14 +144,14 @@ export default function App() {
   const [marketSearchInputs, setMarketSearchInputs] = useState<string[]>([]);
   const [marketSearchResults, setMarketSearchResults] = useState<MarketSecuritySearchItem[][]>([]);
   const [searchingMarketFundIndex, setSearchingMarketFundIndex] = useState<number | null>(null);
-  const [topicPushConfig, setTopicPushConfig] = useState<TopicPushConfig>(DEFAULT_TOPIC_PUSH_CONFIG);
-  const [topicPushState, setTopicPushState] = useState<TopicPushState>(DEFAULT_TOPIC_PUSH_STATE);
-  const [topicPushProfiles, setTopicPushProfiles] = useState<TopicPushProfile[]>([]);
-  const [topicPushActiveProfileId, setTopicPushActiveProfileId] = useState("");
-  const [topicPushSelectedProfileId, setTopicPushSelectedProfileId] = useState("");
-  const [savingTopicPushProfileAction, setSavingTopicPushProfileAction] = useState(false);
-  const [savingTopicPushConfig, setSavingTopicPushConfig] = useState(false);
-  const [clearingTopicPushState, setClearingTopicPushState] = useState(false);
+  const [topicSummaryConfig, setTopicSummaryConfig] = useState<TopicSummaryConfig>(DEFAULT_TOPIC_SUMMARY_CONFIG);
+  const [topicSummaryState, setTopicSummaryState] = useState<TopicSummaryState>(DEFAULT_TOPIC_SUMMARY_STATE);
+  const [topicSummaryProfiles, setTopicSummaryProfiles] = useState<TopicSummaryProfile[]>([]);
+  const [topicSummaryActiveProfileId, setTopicSummaryActiveProfileId] = useState("");
+  const [topicSummarySelectedProfileId, setTopicSummarySelectedProfileId] = useState("");
+  const [savingTopicSummaryProfileAction, setSavingTopicSummaryProfileAction] = useState(false);
+  const [savingTopicSummaryConfig, setSavingTopicSummaryConfig] = useState(false);
+  const [clearingTopicSummaryState, setClearingTopicSummaryState] = useState(false);
 
   const [evolutionSnapshot, setEvolutionSnapshot] = useState<EvolutionStateSnapshot | null>(null);
   const [loadingEvolution, setLoadingEvolution] = useState(false);
@@ -167,8 +174,12 @@ export default function App() {
     setOpenaiDraft((prev) => ({ ...prev, [key]: value }));
   }
 
-  function updateCodexDraft<K extends keyof SystemCodexDraft>(key: K, value: SystemCodexDraft[K]): void {
+  function updateCodexDraft<K extends keyof CodexDraft>(key: K, value: CodexDraft[K]): void {
     setCodexDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateMemoryDraft<K extends keyof SystemMemoryDraft>(key: K, value: SystemMemoryDraft[K]): void {
+    setMemoryDraft((prev) => ({ ...prev, [key]: value }));
   }
 
   function updateSystemOperationState<K extends keyof SystemOperationState>(key: K, value: SystemOperationState[K]): void {
@@ -198,19 +209,6 @@ export default function App() {
       retryItems: evolutionSnapshot?.retryQueue.items
     });
   }, [evolutionSnapshot]);
-
-  const evolutionGoalById = new Map(
-    (evolutionSnapshot?.state.goals ?? []).map((goal) => [goal.id, goal] as const)
-  );
-  const evolutionHistoryById = new Map(
-    (evolutionSnapshot?.state.history ?? []).map((item) => [item.id, item] as const)
-  );
-  const evolutionGoalsInQueueOrder = evolutionQueueRows
-    .map((row) => evolutionGoalById.get(row.goalId))
-    .filter((goal): goal is EvolutionGoal => Boolean(goal));
-  const evolutionHistoryInQueueOrder = evolutionQueueRows
-    .map((row) => evolutionHistoryById.get(row.goalId))
-    .filter((item): item is EvolutionGoalHistory => Boolean(item));
 
   const marketFundSaveStates = useMemo<Array<"saved" | "dirty" | "saving">>(() => {
     return marketPortfolio.funds.map((fund, index) => {
@@ -259,7 +257,7 @@ export default function App() {
         loadTasks(),
         loadMarketConfig(),
         loadMarketRuns(),
-        loadTopicPushConfig(),
+        loadTopicSummaryConfig(),
         loadEvolutionState({ silent: true })
       ]);
       setNotice(null);
@@ -297,12 +295,14 @@ export default function App() {
       model: payload.codexModel || "",
       reasoningEffort: payload.codexReasoningEffort || ""
     });
-    setMemoryCompactEveryRoundsDraft(payload.memoryCompactEveryRounds || "");
-    setMemoryCompactMaxBatchSizeDraft(payload.memoryCompactMaxBatchSize || "");
-    setMemorySummaryTopKDraft(payload.memorySummaryTopK || "");
-    setMemoryRawRefLimitDraft(payload.memoryRawRefLimit || "");
-    setMemoryRawRecordLimitDraft(payload.memoryRawRecordLimit || "");
-    setMemoryRagSummaryTopKDraft(payload.memoryRagSummaryTopK || "");
+    setMemoryDraft({
+      memoryCompactEveryRounds: payload.memoryCompactEveryRounds || "",
+      memoryCompactMaxBatchSize: payload.memoryCompactMaxBatchSize || "",
+      memorySummaryTopK: payload.memorySummaryTopK || "",
+      memoryRawRefLimit: payload.memoryRawRefLimit || "",
+      memoryRawRecordLimit: payload.memoryRawRecordLimit || "",
+      memoryRagSummaryTopK: payload.memoryRagSummaryTopK || ""
+    });
   }
 
   async function loadModels(): Promise<void> {
@@ -351,22 +351,22 @@ export default function App() {
     setMarketRuns(Array.isArray(payload.runs) ? payload.runs : []);
   }
 
-  async function loadTopicPushConfig(): Promise<void> {
-    const payload = await request<TopicPushProfilesPayload>("/admin/api/topic-push/config");
-    const normalized = normalizeTopicPushProfilesPayload(payload);
-    setTopicPushProfiles(normalized.profiles);
-    setTopicPushActiveProfileId(normalized.activeProfileId);
+  async function loadTopicSummaryConfig(): Promise<void> {
+    const payload = await request<TopicSummaryProfilesPayload>("/admin/api/topic-summary/config");
+    const normalized = normalizeTopicSummaryProfilesPayload(payload);
+    setTopicSummaryProfiles(normalized.profiles);
+    setTopicSummaryActiveProfileId(normalized.activeProfileId);
 
-    const selectedId = normalized.profiles.some((item) => item.id === topicPushSelectedProfileId)
-      ? topicPushSelectedProfileId
+    const selectedId = normalized.profiles.some((item) => item.id === topicSummarySelectedProfileId)
+      ? topicSummarySelectedProfileId
       : normalized.activeProfileId;
-    setTopicPushSelectedProfileId(selectedId);
+    setTopicSummarySelectedProfileId(selectedId);
 
     const selectedProfile = normalized.profiles.find((item) => item.id === selectedId)
       ?? normalized.profiles[0]
       ?? null;
-    setTopicPushConfig(normalizeTopicPushConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_PUSH_CONFIG));
-    setTopicPushState(normalizeTopicPushState(selectedProfile?.state ?? payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
+    setTopicSummaryConfig(normalizeTopicSummaryConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG));
+    setTopicSummaryState(normalizeTopicSummaryState(selectedProfile?.state ?? payload.state ?? DEFAULT_TOPIC_SUMMARY_STATE));
   }
 
   async function loadEvolutionState(options?: { silent?: boolean }): Promise<void> {
@@ -547,7 +547,7 @@ export default function App() {
       }
     }
 
-    updateSystemOperationState("savingCodexConfig", true);
+    setSavingCodexConfig(true);
     try {
       await request<{ ok: boolean }>("/admin/api/config/codex", {
         method: "POST",
@@ -564,7 +564,7 @@ export default function App() {
     } catch (error) {
       notifyError("保存 Codex 配置失败", error);
     } finally {
-      updateSystemOperationState("savingCodexConfig", false);
+      setSavingCodexConfig(false);
     }
   }
 
@@ -574,12 +574,12 @@ export default function App() {
       await request<{ ok: boolean }>("/admin/api/config/memory", {
         method: "POST",
         body: JSON.stringify({
-          memoryCompactEveryRounds: memoryCompactEveryRoundsDraft.trim(),
-          memoryCompactMaxBatchSize: memoryCompactMaxBatchSizeDraft.trim(),
-          memorySummaryTopK: memorySummaryTopKDraft.trim(),
-          memoryRawRefLimit: memoryRawRefLimitDraft.trim(),
-          memoryRawRecordLimit: memoryRawRecordLimitDraft.trim(),
-          memoryRagSummaryTopK: memoryRagSummaryTopKDraft.trim()
+          memoryCompactEveryRounds: memoryDraft.memoryCompactEveryRounds.trim(),
+          memoryCompactMaxBatchSize: memoryDraft.memoryCompactMaxBatchSize.trim(),
+          memorySummaryTopK: memoryDraft.memorySummaryTopK.trim(),
+          memoryRawRefLimit: memoryDraft.memoryRawRefLimit.trim(),
+          memoryRawRecordLimit: memoryDraft.memoryRawRecordLimit.trim(),
+          memoryRagSummaryTopK: memoryDraft.memoryRagSummaryTopK.trim()
         })
       });
       await loadConfig();
@@ -1221,13 +1221,13 @@ export default function App() {
   }
 
   function handleTopicProfileSelect(profileId: string): void {
-    const target = topicPushProfiles.find((item) => item.id === profileId);
+    const target = topicSummaryProfiles.find((item) => item.id === profileId);
     if (!target) {
       return;
     }
-    setTopicPushSelectedProfileId(target.id);
-    setTopicPushConfig(normalizeTopicPushConfig(target.config));
-    setTopicPushState(normalizeTopicPushState(target.state));
+    setTopicSummarySelectedProfileId(target.id);
+    setTopicSummaryConfig(normalizeTopicSummaryConfig(target.config));
+    setTopicSummaryState(normalizeTopicSummaryState(target.state));
   }
 
   async function handleAddTopicProfile(): Promise<void> {
@@ -1239,11 +1239,11 @@ export default function App() {
 
     const rawId = window.prompt("请输入 profile id（可留空自动生成）");
     const normalizedId = normalizeTopicProfileId(String(rawId ?? "").trim());
-    const cloneFrom = topicPushSelectedProfileId || topicPushActiveProfileId;
+    const cloneFrom = topicSummarySelectedProfileId || topicSummaryActiveProfileId;
 
-    setSavingTopicPushProfileAction(true);
+    setSavingTopicSummaryProfileAction(true);
     try {
-      await request<{ ok: boolean }>("/admin/api/topic-push/profiles", {
+      await request<{ ok: boolean }>("/admin/api/topic-summary/profiles", {
         method: "POST",
         body: JSON.stringify({
           name: normalizedName,
@@ -1251,17 +1251,17 @@ export default function App() {
           ...(cloneFrom ? { cloneFrom } : {})
         })
       });
-      await loadTopicPushConfig();
-      setNotice({ type: "success", title: "Topic Push profile 已创建" });
+      await loadTopicSummaryConfig();
+      setNotice({ type: "success", title: "Topic Summary profile 已创建" });
     } catch (error) {
-      notifyError("创建 Topic Push profile 失败", error);
+      notifyError("创建 Topic Summary profile 失败", error);
     } finally {
-      setSavingTopicPushProfileAction(false);
+      setSavingTopicSummaryProfileAction(false);
     }
   }
 
   async function handleRenameTopicProfile(): Promise<void> {
-    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    const selected = topicSummaryProfiles.find((item) => item.id === topicSummarySelectedProfileId);
     if (!selected) {
       setNotice({ type: "error", title: "请先选择 profile" });
       return;
@@ -1273,48 +1273,48 @@ export default function App() {
       return;
     }
 
-    setSavingTopicPushProfileAction(true);
+    setSavingTopicSummaryProfileAction(true);
     try {
-      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}`, {
+      await request<{ ok: boolean }>(`/admin/api/topic-summary/profiles/${encodeURIComponent(selected.id)}`, {
         method: "PUT",
         body: JSON.stringify({ name: normalizedName })
       });
-      await loadTopicPushConfig();
-      setNotice({ type: "success", title: "Topic Push profile 已重命名" });
+      await loadTopicSummaryConfig();
+      setNotice({ type: "success", title: "Topic Summary profile 已重命名" });
     } catch (error) {
-      notifyError("重命名 Topic Push profile 失败", error);
+      notifyError("重命名 Topic Summary profile 失败", error);
     } finally {
-      setSavingTopicPushProfileAction(false);
+      setSavingTopicSummaryProfileAction(false);
     }
   }
 
   async function handleUseTopicProfile(): Promise<void> {
-    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    const selected = topicSummaryProfiles.find((item) => item.id === topicSummarySelectedProfileId);
     if (!selected) {
       setNotice({ type: "error", title: "请先选择 profile" });
       return;
     }
-    if (selected.id === topicPushActiveProfileId) {
+    if (selected.id === topicSummaryActiveProfileId) {
       return;
     }
 
-    setSavingTopicPushProfileAction(true);
+    setSavingTopicSummaryProfileAction(true);
     try {
-      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}/use`, {
+      await request<{ ok: boolean }>(`/admin/api/topic-summary/profiles/${encodeURIComponent(selected.id)}/use`, {
         method: "POST",
         body: "{}"
       });
-      await loadTopicPushConfig();
+      await loadTopicSummaryConfig();
       setNotice({ type: "success", title: "已切换 active profile" });
     } catch (error) {
-      notifyError("切换 Topic Push profile 失败", error);
+      notifyError("切换 Topic Summary profile 失败", error);
     } finally {
-      setSavingTopicPushProfileAction(false);
+      setSavingTopicSummaryProfileAction(false);
     }
   }
 
   async function handleDeleteTopicProfile(): Promise<void> {
-    const selected = topicPushProfiles.find((item) => item.id === topicPushSelectedProfileId);
+    const selected = topicSummaryProfiles.find((item) => item.id === topicSummarySelectedProfileId);
     if (!selected) {
       setNotice({ type: "error", title: "请先选择 profile" });
       return;
@@ -1325,28 +1325,28 @@ export default function App() {
       return;
     }
 
-    setSavingTopicPushProfileAction(true);
+    setSavingTopicSummaryProfileAction(true);
     try {
-      await request<{ ok: boolean }>(`/admin/api/topic-push/profiles/${encodeURIComponent(selected.id)}`, {
+      await request<{ ok: boolean }>(`/admin/api/topic-summary/profiles/${encodeURIComponent(selected.id)}`, {
         method: "DELETE",
         body: "{}"
       });
-      await loadTopicPushConfig();
-      setNotice({ type: "success", title: "Topic Push profile 已删除" });
+      await loadTopicSummaryConfig();
+      setNotice({ type: "success", title: "Topic Summary profile 已删除" });
     } catch (error) {
-      notifyError("删除 Topic Push profile 失败", error);
+      notifyError("删除 Topic Summary profile 失败", error);
     } finally {
-      setSavingTopicPushProfileAction(false);
+      setSavingTopicSummaryProfileAction(false);
     }
   }
 
-  function handleTopicSourceChange(index: number, patch: Partial<TopicPushSource>): void {
-    setTopicPushConfig((prev) => {
+  function handleTopicSourceChange(index: number, patch: Partial<TopicSummarySource>): void {
+    setTopicSummaryConfig((prev) => {
       const nextSources = prev.sources.map((item, rowIndex) => {
         if (rowIndex !== index) {
           return item;
         }
-        return normalizeTopicPushSource({ ...item, ...patch }, rowIndex);
+        return normalizeTopicSummarySource({ ...item, ...patch }, rowIndex);
       });
       return {
         ...prev,
@@ -1355,22 +1355,22 @@ export default function App() {
     });
   }
 
-  function handleTopicSummaryEngineChange(value: TopicPushSummaryEngine): void {
-    setTopicPushConfig((prev) => ({
+  function handleTopicSummaryEngineChange(value: TopicSummaryEngine): void {
+    setTopicSummaryConfig((prev) => ({
       ...prev,
       summaryEngine: value
     }));
   }
 
-  function handleTopicDefaultLanguageChange(value: TopicPushDigestLanguage): void {
-    setTopicPushConfig((prev) => ({
+  function handleTopicDefaultLanguageChange(value: TopicSummaryDigestLanguage): void {
+    setTopicSummaryConfig((prev) => ({
       ...prev,
       defaultLanguage: value
     }));
   }
 
   function handleAddTopicSource(): void {
-    setTopicPushConfig((prev) => {
+    setTopicSummaryConfig((prev) => {
       const baseId = `source-${prev.sources.length + 1}`;
       const dedupId = buildNextTopicSourceId(baseId, prev.sources.map((item) => item.id));
       return {
@@ -1390,20 +1390,20 @@ export default function App() {
   }
 
   function handleRemoveTopicSource(index: number): void {
-    setTopicPushConfig((prev) => ({
+    setTopicSummaryConfig((prev) => ({
       ...prev,
       sources: prev.sources.filter((_, rowIndex) => rowIndex !== index)
     }));
   }
 
-  async function handleSaveTopicPushConfig(): Promise<void> {
-    const profileId = topicPushSelectedProfileId || topicPushActiveProfileId;
+  async function handleSaveTopicSummaryConfig(): Promise<void> {
+    const profileId = topicSummarySelectedProfileId || topicSummaryActiveProfileId;
     if (!profileId) {
       setNotice({ type: "error", title: "请先选择 profile" });
       return;
     }
 
-    const normalizedConfig = normalizeTopicPushConfig(topicPushConfig);
+    const normalizedConfig = normalizeTopicSummaryConfig(topicSummaryConfig);
     const invalid = normalizedConfig.sources.find((item) => !item.id || !item.name || !item.feedUrl);
     if (invalid) {
       setNotice({ type: "error", title: `RSS 源字段不完整: ${invalid.id || "(id为空)"}` });
@@ -1419,45 +1419,45 @@ export default function App() {
       idSet.add(source.id);
     }
 
-    setSavingTopicPushConfig(true);
+    setSavingTopicSummaryConfig(true);
     try {
-      const payload = await request<{ ok: boolean; config: TopicPushConfig }>("/admin/api/topic-push/config", {
+      const payload = await request<{ ok: boolean; config: TopicSummaryConfig }>("/admin/api/topic-summary/config", {
         method: "PUT",
         body: JSON.stringify({
           profileId,
           config: normalizedConfig
         })
       });
-      setTopicPushConfig(normalizeTopicPushConfig(payload.config ?? normalizedConfig));
-      await loadTopicPushConfig();
-      setNotice({ type: "success", title: "Topic Push 配置已保存" });
+      setTopicSummaryConfig(normalizeTopicSummaryConfig(payload.config ?? normalizedConfig));
+      await loadTopicSummaryConfig();
+      setNotice({ type: "success", title: "Topic Summary 配置已保存" });
     } catch (error) {
-      notifyError("保存 Topic Push 配置失败", error);
+      notifyError("保存 Topic Summary 配置失败", error);
     } finally {
-      setSavingTopicPushConfig(false);
+      setSavingTopicSummaryConfig(false);
     }
   }
 
-  async function handleClearTopicPushState(): Promise<void> {
-    const profileId = topicPushSelectedProfileId || topicPushActiveProfileId;
+  async function handleClearTopicSummaryState(): Promise<void> {
+    const profileId = topicSummarySelectedProfileId || topicSummaryActiveProfileId;
     if (!profileId) {
       setNotice({ type: "error", title: "请先选择 profile" });
       return;
     }
 
-    setClearingTopicPushState(true);
+    setClearingTopicSummaryState(true);
     try {
-      const payload = await request<{ ok: boolean; state: TopicPushState }>("/admin/api/topic-push/state/clear", {
+      const payload = await request<{ ok: boolean; state: TopicSummaryState }>("/admin/api/topic-summary/state/clear", {
         method: "POST",
         body: JSON.stringify({ profileId })
       });
-      setTopicPushState(normalizeTopicPushState(payload.state ?? DEFAULT_TOPIC_PUSH_STATE));
-      await loadTopicPushConfig();
-      setNotice({ type: "success", title: "Topic Push sent log 已清空" });
+      setTopicSummaryState(normalizeTopicSummaryState(payload.state ?? DEFAULT_TOPIC_SUMMARY_STATE));
+      await loadTopicSummaryConfig();
+      setNotice({ type: "success", title: "Topic Summary sent log 已清空" });
     } catch (error) {
-      notifyError("清空 Topic Push sent log 失败", error);
+      notifyError("清空 Topic Summary sent log 失败", error);
     } finally {
-      setClearingTopicPushState(false);
+      setClearingTopicSummaryState(false);
     }
   }
 
@@ -1529,168 +1529,155 @@ export default function App() {
         </Alert>
       ) : null}
 
-      <FeatureMenu activeMenu={activeMenu} onChange={setActiveMenu} />
+      <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <FeatureMenu activeMenu={activeMenu} onChange={setActiveMenu} />
 
-      {activeMenu === "system" ? (
-        <SystemSection
-          config={config}
-          models={models}
-          modelFromList={modelFromList}
-          planningModelFromList={planningModelFromList}
-          ollamaDraft={ollamaDraft}
-          openaiDraft={openaiDraft}
-          codexDraft={codexDraft}
-          operationState={systemOperationState}
-          onOllamaDraftChange={updateOllamaDraft}
-          onOpenAIDraftChange={updateOpenAIDraft}
-          onCodexDraftChange={updateCodexDraft}
-          onRefreshModels={() => void loadModels()}
-          onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
-          onSaveCodexConfig={() => void handleSaveCodexConfig()}
-          onRestartPm2={() => void handleRestartPm2()}
-          onPullRepo={() => void handlePullRepo()}
-          onBuildRepo={() => void handleBuildRepo()}
-          onDeployRepo={() => void handleDeployRepo()}
-        />
-      ) : null}
+        <section className="min-w-0 space-y-4">
+          {activeMenu === "system" ? (
+            <SystemSection
+              config={config}
+              models={models}
+              modelFromList={modelFromList}
+              planningModelFromList={planningModelFromList}
+              ollamaDraft={ollamaDraft}
+              openaiDraft={openaiDraft}
+              memoryDraft={memoryDraft}
+              operationState={systemOperationState}
+              savingMemoryConfig={savingMemoryConfig}
+              onOllamaDraftChange={updateOllamaDraft}
+              onOpenAIDraftChange={updateOpenAIDraft}
+              onMemoryDraftChange={updateMemoryDraft}
+              onRefreshModels={() => void loadModels()}
+              onRefreshConfig={() => void loadConfig()}
+              onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
+              onSaveMemoryConfig={() => void handleSaveMemoryConfig()}
+              onRestartPm2={() => void handleRestartPm2()}
+              onPullRepo={() => void handlePullRepo()}
+              onBuildRepo={() => void handleBuildRepo()}
+              onDeployRepo={() => void handleDeployRepo()}
+            />
+          ) : null}
 
-      {activeMenu === "memory" ? (
-        <MemorySection
-          config={config}
-          memoryCompactEveryRoundsDraft={memoryCompactEveryRoundsDraft}
-          memoryCompactMaxBatchSizeDraft={memoryCompactMaxBatchSizeDraft}
-          memorySummaryTopKDraft={memorySummaryTopKDraft}
-          memoryRawRefLimitDraft={memoryRawRefLimitDraft}
-          memoryRawRecordLimitDraft={memoryRawRecordLimitDraft}
-          memoryRagSummaryTopKDraft={memoryRagSummaryTopKDraft}
-          savingMemoryConfig={savingMemoryConfig}
-          onMemoryCompactEveryRoundsDraftChange={setMemoryCompactEveryRoundsDraft}
-          onMemoryCompactMaxBatchSizeDraftChange={setMemoryCompactMaxBatchSizeDraft}
-          onMemorySummaryTopKDraftChange={setMemorySummaryTopKDraft}
-          onMemoryRawRefLimitDraftChange={setMemoryRawRefLimitDraft}
-          onMemoryRawRecordLimitDraftChange={setMemoryRawRecordLimitDraft}
-          onMemoryRagSummaryTopKDraftChange={setMemoryRagSummaryTopKDraft}
-          onSaveMemoryConfig={() => void handleSaveMemoryConfig()}
-          onRefresh={() => void loadConfig()}
-        />
-      ) : null}
+          {activeMenu === "evolution" ? (
+            <EvolutionSection
+              evolutionSnapshot={evolutionSnapshot}
+              currentEvolutionGoal={currentEvolutionGoal}
+              evolutionQueueRows={evolutionQueueRows}
+              loadingEvolution={loadingEvolution}
+              evolutionGoalDraft={evolutionGoalDraft}
+              evolutionCommitDraft={evolutionCommitDraft}
+              submittingEvolutionGoal={submittingEvolutionGoal}
+              triggeringEvolutionTick={triggeringEvolutionTick}
+              codexModelDraft={codexDraft.model}
+              codexReasoningEffortDraft={codexDraft.reasoningEffort}
+              savingCodexConfig={savingCodexConfig}
+              onGoalDraftChange={setEvolutionGoalDraft}
+              onCommitDraftChange={setEvolutionCommitDraft}
+              onCodexModelDraftChange={(value) => updateCodexDraft("model", value)}
+              onCodexReasoningEffortDraftChange={(value) => updateCodexDraft("reasoningEffort", value)}
+              onSubmitGoal={(event) => void handleSubmitEvolutionGoal(event)}
+              onTriggerTick={() => void handleTriggerEvolutionTick()}
+              onRefresh={() => void loadEvolutionState()}
+              onSaveCodexConfig={() => void handleSaveCodexConfig()}
+            />
+          ) : null}
 
-      {activeMenu === "evolution" ? (
-        <EvolutionSection
-          evolutionSnapshot={evolutionSnapshot}
-          currentEvolutionGoal={currentEvolutionGoal}
-          {...{
-            evolutionQueueRows,
-            sortedEvolutionGoals: evolutionGoalsInQueueOrder,
-            sortedEvolutionHistory: evolutionHistoryInQueueOrder
-          }}
-          loadingEvolution={loadingEvolution}
-          evolutionGoalDraft={evolutionGoalDraft}
-          evolutionCommitDraft={evolutionCommitDraft}
-          submittingEvolutionGoal={submittingEvolutionGoal}
-          triggeringEvolutionTick={triggeringEvolutionTick}
-          onGoalDraftChange={setEvolutionGoalDraft}
-          onCommitDraftChange={setEvolutionCommitDraft}
-          onSubmitGoal={(event) => void handleSubmitEvolutionGoal(event)}
-          onTriggerTick={() => void handleTriggerEvolutionTick()}
-          onRefresh={() => void loadEvolutionState()}
-        />
-      ) : null}
+          {activeMenu === "market" ? (
+            <MarketSection
+              marketConfig={marketConfig}
+              marketPortfolio={marketPortfolio}
+              marketAnalysisConfig={marketAnalysisConfig}
+              marketRuns={marketRuns}
+              savingMarketPortfolio={savingMarketPortfolio}
+              savingMarketAnalysisConfig={savingMarketAnalysisConfig}
+              marketFundSaveStates={marketFundSaveStates}
+              bootstrappingMarketTasks={bootstrappingMarketTasks}
+              runningMarketOncePhase={runningMarketOncePhase}
+              marketRunOnceWithExplanation={marketRunOnceWithExplanation}
+              enabledUsers={enabledUsers}
+              marketTaskUserId={marketTaskUserId}
+              marketMiddayTime={marketMiddayTime}
+              marketCloseTime={marketCloseTime}
+              marketSearchInputs={marketSearchInputs}
+              marketSearchResults={marketSearchResults}
+              searchingMarketFundIndex={searchingMarketFundIndex}
+              onCashChange={handleMarketCashChange}
+              onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
+              onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
+              onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
+              onMarketTaskUserIdChange={setMarketTaskUserId}
+              onMarketMiddayTimeChange={setMarketMiddayTime}
+              onMarketCloseTimeChange={setMarketCloseTime}
+              onAddMarketFund={handleAddMarketFund}
+              onRemoveMarketFund={handleRemoveMarketFund}
+              onMarketFundChange={handleMarketFundChange}
+              onMarketSearchInputChange={handleMarketSearchInputChange}
+              onSearchMarketByName={(index) => void handleSearchMarketByName(index)}
+              onApplyMarketSearchResult={handleApplyMarketSearchResult}
+              onSaveMarketFund={(index) => void handleSaveMarketFund(index)}
+              onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
+              onSaveMarketAnalysisConfig={() => void handleSaveMarketAnalysisConfig()}
+              onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
+              onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
+              onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
+              onRunMarketOnce={(phase, withExplanation) => void handleRunMarketOnce(phase, withExplanation)}
+            />
+          ) : null}
 
-      {activeMenu === "market" ? (
-        <MarketSection
-          marketConfig={marketConfig}
-          marketPortfolio={marketPortfolio}
-          marketAnalysisConfig={marketAnalysisConfig}
-          marketRuns={marketRuns}
-          savingMarketPortfolio={savingMarketPortfolio}
-          savingMarketAnalysisConfig={savingMarketAnalysisConfig}
-          marketFundSaveStates={marketFundSaveStates}
-          bootstrappingMarketTasks={bootstrappingMarketTasks}
-          runningMarketOncePhase={runningMarketOncePhase}
-          marketRunOnceWithExplanation={marketRunOnceWithExplanation}
-          enabledUsers={enabledUsers}
-          marketTaskUserId={marketTaskUserId}
-          marketMiddayTime={marketMiddayTime}
-          marketCloseTime={marketCloseTime}
-          marketSearchInputs={marketSearchInputs}
-          marketSearchResults={marketSearchResults}
-          searchingMarketFundIndex={searchingMarketFundIndex}
-          onCashChange={handleMarketCashChange}
-          onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
-          onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
-          onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
-          onMarketTaskUserIdChange={setMarketTaskUserId}
-          onMarketMiddayTimeChange={setMarketMiddayTime}
-          onMarketCloseTimeChange={setMarketCloseTime}
-          onAddMarketFund={handleAddMarketFund}
-          onRemoveMarketFund={handleRemoveMarketFund}
-          onMarketFundChange={handleMarketFundChange}
-          onMarketSearchInputChange={handleMarketSearchInputChange}
-          onSearchMarketByName={(index) => void handleSearchMarketByName(index)}
-          onApplyMarketSearchResult={handleApplyMarketSearchResult}
-          onSaveMarketFund={(index) => void handleSaveMarketFund(index)}
-          onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
-          onSaveMarketAnalysisConfig={() => void handleSaveMarketAnalysisConfig()}
-          onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
-          onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
-          onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
-          onRunMarketOnce={(phase, withExplanation) => void handleRunMarketOnce(phase, withExplanation)}
-        />
-      ) : null}
+          {activeMenu === "topic" ? (
+            <TopicSummarySection
+              topicSummaryProfiles={topicSummaryProfiles}
+              topicSummaryActiveProfileId={topicSummaryActiveProfileId}
+              topicSummarySelectedProfileId={topicSummarySelectedProfileId}
+              topicSummaryConfig={topicSummaryConfig}
+              topicSummaryState={topicSummaryState}
+              savingTopicSummaryProfileAction={savingTopicSummaryProfileAction}
+              savingTopicSummaryConfig={savingTopicSummaryConfig}
+              clearingTopicSummaryState={clearingTopicSummaryState}
+              onSelectProfile={handleTopicProfileSelect}
+              onAddProfile={() => void handleAddTopicProfile()}
+              onRenameProfile={() => void handleRenameTopicProfile()}
+              onUseProfile={() => void handleUseTopicProfile()}
+              onDeleteProfile={() => void handleDeleteTopicProfile()}
+              onSummaryEngineChange={handleTopicSummaryEngineChange}
+              onDefaultLanguageChange={handleTopicDefaultLanguageChange}
+              onSourceChange={handleTopicSourceChange}
+              onAddSource={handleAddTopicSource}
+              onRemoveSource={handleRemoveTopicSource}
+              onSaveConfig={() => void handleSaveTopicSummaryConfig()}
+              onRefresh={() => void loadTopicSummaryConfig()}
+              onClearSentLog={() => void handleClearTopicSummaryState()}
+            />
+          ) : null}
 
-      {activeMenu === "topic" ? (
-        <TopicPushSection
-          topicPushProfiles={topicPushProfiles}
-          topicPushActiveProfileId={topicPushActiveProfileId}
-          topicPushSelectedProfileId={topicPushSelectedProfileId}
-          topicPushConfig={topicPushConfig}
-          topicPushState={topicPushState}
-          savingTopicPushProfileAction={savingTopicPushProfileAction}
-          savingTopicPushConfig={savingTopicPushConfig}
-          clearingTopicPushState={clearingTopicPushState}
-          onSelectProfile={handleTopicProfileSelect}
-          onAddProfile={() => void handleAddTopicProfile()}
-          onRenameProfile={() => void handleRenameTopicProfile()}
-          onUseProfile={() => void handleUseTopicProfile()}
-          onDeleteProfile={() => void handleDeleteTopicProfile()}
-          onSummaryEngineChange={handleTopicSummaryEngineChange}
-          onDefaultLanguageChange={handleTopicDefaultLanguageChange}
-          onSourceChange={handleTopicSourceChange}
-          onAddSource={handleAddTopicSource}
-          onRemoveSource={handleRemoveTopicSource}
-          onSaveConfig={() => void handleSaveTopicPushConfig()}
-          onRefresh={() => void loadTopicPushConfig()}
-          onClearSentLog={() => void handleClearTopicPushState()}
-        />
-      ) : null}
-
-      {activeMenu === "messages" ? (
-        <MessagesSection
-          users={users}
-          tasks={tasks}
-          userMap={userMap}
-          enabledUsers={enabledUsers}
-          editingUserId={editingUserId}
-          savingUser={savingUser}
-          userForm={userForm}
-          editingTaskId={editingTaskId}
-          savingTask={savingTask}
-          runningTaskId={runningTaskId}
-          taskForm={taskForm}
-          onUserFormChange={(patch) => setUserForm((prev) => ({ ...prev, ...patch }))}
-          onBeginCreateUser={beginCreateUser}
-          onBeginEditUser={beginEditUser}
-          onSubmitUser={(event) => void handleSubmitUser(event)}
-          onDeleteUser={(user) => void handleDeleteUser(user)}
-          onTaskFormChange={(patch) => setTaskForm((prev) => ({ ...prev, ...patch }))}
-          onBeginCreateTask={beginCreateTask}
-          onBeginEditTask={beginEditTask}
-          onSubmitTask={(event) => void handleSubmitTask(event)}
-          onDeleteTask={(task) => void handleDeleteTask(task)}
-          onRunTask={(task) => void handleRunTask(task)}
-        />
-      ) : null}
+          {activeMenu === "messages" ? (
+            <MessagesSection
+              users={users}
+              tasks={tasks}
+              userMap={userMap}
+              enabledUsers={enabledUsers}
+              editingUserId={editingUserId}
+              savingUser={savingUser}
+              userForm={userForm}
+              editingTaskId={editingTaskId}
+              savingTask={savingTask}
+              runningTaskId={runningTaskId}
+              taskForm={taskForm}
+              onUserFormChange={(patch) => setUserForm((prev) => ({ ...prev, ...patch }))}
+              onBeginCreateUser={beginCreateUser}
+              onBeginEditUser={beginEditUser}
+              onSubmitUser={(event) => void handleSubmitUser(event)}
+              onDeleteUser={(user) => void handleDeleteUser(user)}
+              onTaskFormChange={(patch) => setTaskForm((prev) => ({ ...prev, ...patch }))}
+              onBeginCreateTask={beginCreateTask}
+              onBeginEditTask={beginEditTask}
+              onSubmitTask={(event) => void handleSubmitTask(event)}
+              onDeleteTask={(task) => void handleDeleteTask(task)}
+              onRunTask={(task) => void handleRunTask(task)}
+            />
+          ) : null}
+        </section>
+      </div>
     </main>
   );
 }
@@ -1758,13 +1745,13 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
   };
 }
 
-function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): TopicPushConfig {
-  const fallback = DEFAULT_TOPIC_PUSH_CONFIG;
+function normalizeTopicSummaryConfig(config: TopicSummaryConfig | null | undefined): TopicSummaryConfig {
+  const fallback = DEFAULT_TOPIC_SUMMARY_CONFIG;
   const source = config ?? fallback;
   const rawSources = Array.isArray(source.sources) ? source.sources : [];
-  const sources = rawSources.map((item, index) => normalizeTopicPushSource(item, index));
+  const sources = rawSources.map((item, index) => normalizeTopicSummarySource(item, index));
 
-  const topicKeys: Array<keyof TopicPushConfig["topics"]> = [
+  const topicKeys: Array<keyof TopicSummaryConfig["topics"]> = [
     "llm_apps",
     "agents",
     "multimodal",
@@ -1774,7 +1761,7 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
     "on_device",
     "safety"
   ];
-  const topics = topicKeys.reduce<TopicPushConfig["topics"]>((acc, key) => {
+  const topics = topicKeys.reduce<TopicSummaryConfig["topics"]>((acc, key) => {
     const list = Array.isArray(source.topics?.[key]) ? source.topics[key] : [];
     acc[key] = Array.from(new Set(list.map((item) => String(item ?? "").trim()).filter(Boolean)));
     return acc;
@@ -1792,7 +1779,7 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
   const filters = source.filters ?? fallback.filters;
   const dailyQuota = source.dailyQuota ?? fallback.dailyQuota;
   const summaryEngine = source.summaryEngine === "gpt_plugin" ? "gpt_plugin" : "local";
-  const defaultLanguage = normalizeTopicPushDefaultLanguage(source.defaultLanguage);
+  const defaultLanguage = normalizeTopicSummaryDefaultLanguage(source.defaultLanguage);
 
   return {
     version: 1,
@@ -1822,7 +1809,7 @@ function normalizeTopicPushConfig(config: TopicPushConfig | null | undefined): T
   };
 }
 
-function normalizeTopicPushDefaultLanguage(raw: unknown): TopicPushDigestLanguage {
+function normalizeTopicSummaryDefaultLanguage(raw: unknown): TopicSummaryDigestLanguage {
   const value = String(raw ?? "").trim().toLowerCase();
   if (value.startsWith("zh")) {
     return "zh-CN";
@@ -1833,9 +1820,9 @@ function normalizeTopicPushDefaultLanguage(raw: unknown): TopicPushDigestLanguag
   return "auto";
 }
 
-function normalizeTopicPushSource(source: Partial<TopicPushSource> | null | undefined, index: number): TopicPushSource {
+function normalizeTopicSummarySource(source: Partial<TopicSummarySource> | null | undefined, index: number): TopicSummarySource {
   const id = normalizeTopicSourceId(String(source?.id ?? ""));
-  const category = normalizeTopicPushCategory(source?.category);
+  const category = normalizeTopicSummaryCategory(source?.category);
   const weight = Number(source?.weight);
   return {
     id: id || `source-${index + 1}`,
@@ -1847,7 +1834,7 @@ function normalizeTopicPushSource(source: Partial<TopicPushSource> | null | unde
   };
 }
 
-function normalizeTopicPushCategory(raw: unknown): TopicPushCategory {
+function normalizeTopicSummaryCategory(raw: unknown): TopicSummaryCategory {
   const value = String(raw ?? "").trim().toLowerCase();
   if (value === "news") {
     return "news";
@@ -1884,8 +1871,8 @@ function buildNextTopicSourceId(baseId: string, existingIds: string[]): string {
   return `${normalizedBase}-${Date.now()}`;
 }
 
-function normalizeTopicPushState(state: TopicPushState | null | undefined): TopicPushState {
-  const source = state ?? DEFAULT_TOPIC_PUSH_STATE;
+function normalizeTopicSummaryState(state: TopicSummaryState | null | undefined): TopicSummaryState {
+  const source = state ?? DEFAULT_TOPIC_SUMMARY_STATE;
   const sentLog = Array.isArray(source.sentLog)
     ? source.sentLog
         .map((item) => ({
@@ -1903,16 +1890,16 @@ function normalizeTopicPushState(state: TopicPushState | null | undefined): Topi
   };
 }
 
-function normalizeTopicPushProfilesPayload(
-  payload: TopicPushProfilesPayload | null | undefined
-): { activeProfileId: string; profiles: TopicPushProfile[] } {
+function normalizeTopicSummaryProfilesPayload(
+  payload: TopicSummaryProfilesPayload | null | undefined
+): { activeProfileId: string; profiles: TopicSummaryProfile[] } {
   const source = payload ?? {
     activeProfileId: "",
     profiles: []
-  } as TopicPushProfilesPayload;
+  } as TopicSummaryProfilesPayload;
 
   const rawProfiles = Array.isArray(source.profiles) ? source.profiles : [];
-  const profiles: TopicPushProfile[] = [];
+  const profiles: TopicSummaryProfile[] = [];
   const idSet = new Set<string>();
 
   for (let i = 0; i < rawProfiles.length; i += 1) {
@@ -1927,8 +1914,8 @@ function normalizeTopicPushProfilesPayload(
       id,
       name: String(item?.name ?? id).trim() || id,
       isActive: Boolean(item?.isActive),
-      config: normalizeTopicPushConfig(item?.config ?? DEFAULT_TOPIC_PUSH_CONFIG),
-      state: normalizeTopicPushState(item?.state ?? DEFAULT_TOPIC_PUSH_STATE)
+      config: normalizeTopicSummaryConfig(item?.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG),
+      state: normalizeTopicSummaryState(item?.state ?? DEFAULT_TOPIC_SUMMARY_STATE)
     });
   }
 
@@ -1938,8 +1925,8 @@ function normalizeTopicPushProfilesPayload(
       id: fallbackId,
       name: "AI Engineering",
       isActive: true,
-      config: normalizeTopicPushConfig(source.config ?? DEFAULT_TOPIC_PUSH_CONFIG),
-      state: normalizeTopicPushState(source.state ?? DEFAULT_TOPIC_PUSH_STATE)
+      config: normalizeTopicSummaryConfig(source.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG),
+      state: normalizeTopicSummaryState(source.state ?? DEFAULT_TOPIC_SUMMARY_STATE)
     });
   }
 

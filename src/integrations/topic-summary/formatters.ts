@@ -2,10 +2,10 @@ import { TOPIC_KEYS } from "./defaults";
 import { formatLocalDate, formatLocalTime } from "./shared";
 import { normalizeDigestLanguage } from "./planning";
 import { sanitizeDigestTitle } from "./text";
-import { DigestRunResult, TopicPushConfig, TopicPushSource, TopicPushState } from "./types";
+import { DigestRunResult, TopicSummaryConfig, TopicSummarySource, TopicSummaryState } from "./types";
 
 export function formatSources(
-  sources: TopicPushSource[],
+  sources: TopicSummarySource[],
   profile: { id: string; name: string }
 ): string {
   const sorted = sources.slice().sort((left, right) => left.id.localeCompare(right.id));
@@ -13,7 +13,7 @@ export function formatSources(
 
   const lines = [
     `profile: ${profile.id} (${profile.name})`,
-    `Topic Push RSS Sources (${enabledCount}/${sorted.length} enabled)`
+    `Topic Summary RSS Sources (${enabledCount}/${sorted.length} enabled)`
   ];
 
   if (sorted.length === 0) {
@@ -32,7 +32,7 @@ export function formatSources(
 }
 
 export function formatConfig(
-  config: TopicPushConfig,
+  config: TopicSummaryConfig,
   profile: { id: string; name: string }
 ): string {
   const topicStats = TOPIC_KEYS
@@ -40,7 +40,7 @@ export function formatConfig(
     .join(" ");
 
   return [
-    "Topic Push Config",
+    "Topic Summary Config",
     `profile: ${profile.id} (${profile.name})`,
     `summary_engine: ${config.summaryEngine}`,
     `default_language: ${config.defaultLanguage}`,
@@ -55,7 +55,7 @@ export function formatConfig(
 }
 
 export function formatState(
-  state: TopicPushState,
+  state: TopicSummaryState,
   profile: { id: string; name: string }
 ): string {
   const latest = state.sentLog[0];
@@ -64,7 +64,7 @@ export function formatState(
     : "(none)";
 
   return [
-    "Topic Push State",
+    "Topic Summary State",
     `profile: ${profile.id} (${profile.name})`,
     `sent_log_size: ${state.sentLog.length}`,
     `updated_at: ${state.updatedAt || "(empty)"}`,
@@ -81,7 +81,7 @@ export function formatDigest(
   const summaryLabel = language === "en" ? "Summary" : "简述";
   const emptyText = language === "en"
     ? "No new items were selected today. Use /topic source list to check sources, or /topic state clear to reset dedup history."
-    : "今天没有筛出新的可推送条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。";
+    : "今天没有筛出新的摘要条目。可用 /topic source list 检查源状态，或 /topic state clear 清空去重历史后重试。";
   const lines: string[] = [];
   lines.push(`${profile.name} Daily Digest (${formatLocalDate(run.now)})`);
 
@@ -105,7 +105,7 @@ export function formatDigest(
 
 export function buildHelpText(): string {
   return [
-    "Topic Push 用法",
+    "Topic Summary 用法",
     "- /topic 或 /topic run [--profile <id>] [--lang <zh-CN|en>]: 拉取 RSS 并生成该实体当日简报",
     "- /topic profile list|get|add|update|use|delete: 管理分组实体（profile）",
     "- /topic profile add --name \"AI Daily\" [--id ai-daily] [--clone-from ai-engineering]",
@@ -118,6 +118,6 @@ export function buildHelpText(): string {
     "- /topic source delete <id> [--profile <id>]",
     "- /topic config [--profile <id>]: 查看筛选与配额配置",
     "- /topic state [--profile <id>]: 查看 sent log 状态",
-    "- /topic state clear [--profile <id>]: 清空 sent log（允许重复推送历史链接）"
+    "- /topic state clear [--profile <id>]: 清空 sent log（允许重复处理历史链接）"
   ].join("\n");
 }

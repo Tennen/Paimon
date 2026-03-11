@@ -1,4 +1,4 @@
-export type TopicPushCategory = "engineering" | "news" | "ecosystem";
+export type TopicSummaryCategory = "engineering" | "news" | "ecosystem";
 
 export type TopicKey =
   | "llm_apps"
@@ -10,16 +10,16 @@ export type TopicKey =
   | "on_device"
   | "safety";
 
-export type TopicPushSource = {
+export type TopicSummarySource = {
   id: string;
   name: string;
-  category: TopicPushCategory;
+  category: TopicSummaryCategory;
   feedUrl: string;
   weight: number;
   enabled: boolean;
 };
 
-export type TopicPushFilters = {
+export type TopicSummaryFilters = {
   timeWindowHours: number;
   minTitleLength: number;
   blockedDomains: string[];
@@ -31,81 +31,81 @@ export type TopicPushFilters = {
   };
 };
 
-export type TopicPushDailyQuota = {
+export type TopicSummaryDailyQuota = {
   total: number;
   engineering: number;
   news: number;
   ecosystem: number;
 };
 
-export type TopicPushSummaryEngine = "local" | "gpt_plugin";
-export type TopicPushDigestLanguage = "auto" | "zh-CN" | "en";
+export type TopicSummaryEngine = "local" | "gpt_plugin";
+export type TopicSummaryDigestLanguage = "auto" | "zh-CN" | "en";
 
-export type TopicPushConfig = {
+export type TopicSummaryConfig = {
   version: 1;
-  summaryEngine: TopicPushSummaryEngine;
-  defaultLanguage: TopicPushDigestLanguage;
-  sources: TopicPushSource[];
+  summaryEngine: TopicSummaryEngine;
+  defaultLanguage: TopicSummaryDigestLanguage;
+  sources: TopicSummarySource[];
   topics: Record<TopicKey, string[]>;
-  filters: TopicPushFilters;
-  dailyQuota: TopicPushDailyQuota;
+  filters: TopicSummaryFilters;
+  dailyQuota: TopicSummaryDailyQuota;
 };
 
-export type TopicPushSentLogItem = {
+export type TopicSummarySentLogItem = {
   urlNormalized: string;
   sentAt: string;
   title: string;
 };
 
-export type TopicPushState = {
+export type TopicSummaryState = {
   version: 1;
-  sentLog: TopicPushSentLogItem[];
+  sentLog: TopicSummarySentLogItem[];
   updatedAt: string;
 };
 
-export type TopicPushProfileSnapshot = {
+export type TopicSummaryProfileSnapshot = {
   id: string;
   name: string;
   isActive: boolean;
-  config: TopicPushConfig;
-  state: TopicPushState;
+  config: TopicSummaryConfig;
+  state: TopicSummaryState;
 };
 
-export type TopicPushSnapshot = {
+export type TopicSummarySnapshot = {
   activeProfileId: string;
-  profiles: TopicPushProfileSnapshot[];
+  profiles: TopicSummaryProfileSnapshot[];
 };
 
-export type TopicPushProfileCreateInput = {
+export type TopicSummaryProfileCreateInput = {
   id?: string;
   name: string;
   cloneFrom?: string;
 };
 
-export type TopicPushProfileUpdateInput = {
+export type TopicSummaryProfileUpdateInput = {
   name?: string;
 };
 
-export type TopicPushProfileConfig = {
+export type TopicSummaryProfileConfig = {
   id: string;
   name: string;
-  config: TopicPushConfig;
+  config: TopicSummaryConfig;
 };
 
-export type TopicPushProfileState = {
+export type TopicSummaryProfileState = {
   id: string;
-  state: TopicPushState;
+  state: TopicSummaryState;
 };
 
-export type TopicPushConfigStore = {
+export type TopicSummaryConfigStore = {
   version: 2;
   activeProfileId: string;
-  profiles: TopicPushProfileConfig[];
+  profiles: TopicSummaryProfileConfig[];
 };
 
-export type TopicPushStateStore = {
+export type TopicSummaryStateStore = {
   version: 2;
-  profiles: TopicPushProfileState[];
+  profiles: TopicSummaryProfileState[];
 };
 
 export type FeedEntry = {
@@ -116,7 +116,7 @@ export type FeedEntry = {
 };
 
 export type FeedFetchResult = {
-  source: TopicPushSource;
+  source: TopicSummarySource;
   fetchedAt: string;
   entries: FeedEntry[];
   error?: string;
@@ -129,7 +129,7 @@ export type Candidate = {
   urlNormalized: string;
   sourceId: string;
   sourceName: string;
-  category: TopicPushCategory;
+  category: TopicSummaryCategory;
   publishedAt: string | null;
   fetchedAt: string;
   summary: string;
@@ -141,7 +141,7 @@ export type Candidate = {
 
 export type TopicDigestItemType = "news" | "deep_read";
 
-export type TopicPushExecuteOptions = {
+export type TopicSummaryExecuteOptions = {
   explicitLanguage?: string;
   inferredLanguage?: string;
 };
@@ -165,7 +165,7 @@ export type ParsedCommand =
       payload: {
         id?: string;
         name: string;
-        category: TopicPushCategory;
+        category: TopicSummaryCategory;
         feedUrl: string;
         weight?: number;
         enabled?: boolean;
@@ -177,7 +177,7 @@ export type ParsedCommand =
       profileId?: string;
       patch: {
         name?: string;
-        category?: TopicPushCategory;
+        category?: TopicSummaryCategory;
         feedUrl?: string;
         weight?: number;
         enabled?: boolean;
@@ -211,7 +211,7 @@ export type ParsedCommand =
 export type DigestRunResult = {
   now: string;
   selected: SelectedItem[];
-  selectedByCategory: Record<TopicPushCategory, number>;
+  selectedByCategory: Record<TopicSummaryCategory, number>;
   fetchedSources: number;
   totalSources: number;
   fetchErrors: Array<{ sourceId: string; sourceName: string; error: string }>;
@@ -229,9 +229,9 @@ export type PlanningDigestItemPatch = {
   topicTags?: TopicKey[];
 };
 
-export type TopicPushProfileMeta = {
+export type TopicSummaryProfileMeta = {
   id: string;
   name: string;
-  config: TopicPushConfig;
+  config: TopicSummaryConfig;
   isActive: boolean;
 };

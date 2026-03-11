@@ -1,5 +1,5 @@
 import { normalizeCategory, normalizeProfileId, normalizeSourceId, normalizeText, parseOptionalBoolean, parseOptionalNumber } from "./shared";
-import { ParsedCommand, TopicPushCategory } from "./types";
+import { ParsedCommand, TopicSummaryCategory } from "./types";
 
 export function parseCommand(input: string): ParsedCommand {
   const raw = String(input ?? "").trim();
@@ -21,7 +21,7 @@ export function parseCommand(input: string): ParsedCommand {
     return { kind: "help" };
   }
 
-  if (["run", "digest", "push", "today", "今日"].includes(first)) {
+  if (["run", "digest", "summary", "today", "今日"].includes(first)) {
     const parsed = parseFlags(tokens.slice(1));
     const profileId = readProfileId(parsed.flagValues, parsed.positionals[0]);
     return { kind: "run", ...(profileId ? { profileId } : {}) };
@@ -154,7 +154,7 @@ function parseSourceCommand(tokens: string[]): ParsedCommand {
 
     const patch: {
       name?: string;
-      category?: TopicPushCategory;
+      category?: TopicSummaryCategory;
       feedUrl?: string;
       weight?: number;
       enabled?: boolean;

@@ -31,7 +31,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `src/ingress/`: 输入适配层，负责 HTTP、企业微信回调、SSE bridge、Admin API 等入口
 - `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
 - `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
-- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Push、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
+- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
 - `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
 - `src/scheduler/`: 定时任务和推送用户管理
 - `src/memory/`: 会话记忆存储（主对话记忆与 `/re` 子 agent 记忆分流）
@@ -77,7 +77,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 - `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照
 - `terminal`: 执行本机命令
-- `topic-push`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
+- `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
 - `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
@@ -89,7 +89,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - Admin API 与 Admin Web 界面
 - 模型配置查看与更新
 - 定时任务和推送用户管理
-- Topic Push 配置管理
+- Topic Summary 配置管理
 - Market Analysis 配置与运行记录查看
 - Evolution 队列与状态管理
 - 审计日志与本地数据持久化
@@ -273,7 +273,7 @@ Memory 规则（global hybrid memory）：
   - `data/memory/summary-index.json`（summary 向量索引）
 - 审计日志
 - 定时任务和推送用户
-- Topic Push 配置与状态
+- Topic Summary 配置与状态
 - Market Analysis 配置、持仓与运行记录
 - Evolution 队列与指标
 

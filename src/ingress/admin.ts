@@ -26,16 +26,16 @@ import { EvolutionEngine } from "../integrations/evolution-operator/evolutionEng
 import { EvolutionCodexConfigService } from "../integrations/evolution-operator/codexConfigService";
 import { EvolutionOperatorService } from "../integrations/evolution-operator/service";
 import {
-  addTopicPushProfile,
-  clearTopicPushSentLog,
-  deleteTopicPushProfile,
-  getTopicPushConfig,
-  getTopicPushSnapshot,
-  getTopicPushState,
-  setTopicPushConfig,
-  updateTopicPushProfile,
-  useTopicPushProfile
-} from "../integrations/topic-push/service";
+  addTopicSummaryProfile,
+  clearTopicSummarySentLog,
+  deleteTopicSummaryProfile,
+  getTopicSummaryConfig,
+  getTopicSummarySnapshot,
+  getTopicSummaryState,
+  setTopicSummaryConfig,
+  updateTopicSummaryProfile,
+  useTopicSummaryProfile
+} from "../integrations/topic-summary/service";
 import {
   OpenAIQuotaManager,
   readOpenAIQuotaPolicyFromEnv
@@ -123,21 +123,21 @@ type RunMarketOncePayloadParseResult =
   | { payload: RunMarketOncePayload; error?: undefined }
   | { payload?: undefined; error: string };
 
-type TopicPushProfileCreatePayload = {
+type TopicSummaryProfileCreatePayload = {
   name: string;
   id?: string;
   cloneFrom?: string;
 };
 
-type TopicPushProfileUpdatePayload = {
+type TopicSummaryProfileUpdatePayload = {
   name: string;
 };
 
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
 const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
-const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
-const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
+const TOPIC_SUMMARY_CONFIG_STORE = DATA_STORE.TOPIC_SUMMARY_CONFIG;
+const TOPIC_SUMMARY_STATE_STORE = DATA_STORE.TOPIC_SUMMARY_STATE;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 
@@ -1085,24 +1085,24 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
-    app.get("/admin/api/topic-push/config", (_req: Request, res: ExResponse) => {
-      const snapshot = getTopicPushSnapshot();
+    app.get("/admin/api/topic-summary/config", (_req: Request, res: ExResponse) => {
+      const snapshot = getTopicSummarySnapshot();
       const activeProfileId = snapshot.activeProfileId;
-      const config = getTopicPushConfig(activeProfileId);
-      const state = getTopicPushState(activeProfileId);
+      const config = getTopicSummaryConfig(activeProfileId);
+      const state = getTopicSummaryState(activeProfileId);
       res.json({
         activeProfileId,
         profiles: snapshot.profiles,
         config,
         state,
-        configStore: describeStore(TOPIC_PUSH_CONFIG_STORE),
-        stateStore: describeStore(TOPIC_PUSH_STATE_STORE)
+        configStore: describeStore(TOPIC_SUMMARY_CONFIG_STORE),
+        stateStore: describeStore(TOPIC_SUMMARY_STATE_STORE)
       });
     });
 
-    app.put("/admin/api/topic-push/config", (req: Request, res: ExResponse) => {
+    app.put("/admin/api/topic-summary/config", (req: Request, res: ExResponse) => {
       if (!req.body || typeof req.body !== "object") {
-        res.status(400).json({ error: "invalid topic-push config payload" });
+        res.status(400).json({ error: "invalid topic-summary config payload" });
         return;
       }
 
@@ -1112,13 +1112,13 @@ export class AdminIngressAdapter implements IngressAdapter {
       const profileId = profileIdRaw || undefined;
 
       if (!payload || typeof payload !== "object") {
-        res.status(400).json({ error: "missing topic-push config payload" });
+        res.status(400).json({ error: "missing topic-summary config payload" });
         return;
       }
 
       try {
-        const config = setTopicPushConfig(payload, profileId);
-        const snapshot = getTopicPushSnapshot();
+        const config = setTopicSummaryConfig(payload, profileId);
+        const snapshot = getTopicSummarySnapshot();
         res.json({
           ok: true,
           profileId: profileId ?? snapshot.activeProfileId,
@@ -1128,18 +1128,18 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to save topic-push config"
+          error: (error as Error).message ?? "failed to save topic-summary config"
         });
       }
     });
 
-    app.post("/admin/api/topic-push/state/clear", (req: Request, res: ExResponse) => {
+    app.post("/admin/api/topic-summary/state/clear", (req: Request, res: ExResponse) => {
       const body = req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
       const profileIdRaw = typeof body.profileId === "string" ? body.profileId.trim() : "";
       const profileId = profileIdRaw || undefined;
       try {
-        const state = clearTopicPushSentLog(profileId);
-        const snapshot = getTopicPushSnapshot();
+        const state = clearTopicSummarySentLog(profileId);
+        const snapshot = getTopicSummarySnapshot();
         res.json({
           ok: true,
           profileId: profileId ?? snapshot.activeProfileId,
@@ -1149,20 +1149,20 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(500).json({
           ok: false,
-          error: (error as Error).message ?? "failed to clear topic-push state"
+          error: (error as Error).message ?? "failed to clear topic-summary state"
         });
       }
     });
 
-    app.post("/admin/api/topic-push/profiles", (req: Request, res: ExResponse) => {
-      const payload = parseTopicPushProfileCreatePayload(req.body);
+    app.post("/admin/api/topic-summary/profiles", (req: Request, res: ExResponse) => {
+      const payload = parseTopicSummaryProfileCreatePayload(req.body);
       if (!payload) {
-        res.status(400).json({ error: "invalid topic-push profile create payload" });
+        res.status(400).json({ error: "invalid topic-summary profile create payload" });
         return;
       }
 
       try {
-        const snapshot = addTopicPushProfile(payload);
+        const snapshot = addTopicSummaryProfile(payload);
         res.json({
           ok: true,
           snapshot
@@ -1170,21 +1170,21 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to add topic-push profile"
+          error: (error as Error).message ?? "failed to add topic-summary profile"
         });
       }
     });
 
-    app.put("/admin/api/topic-push/profiles/:id", (req: Request, res: ExResponse) => {
+    app.put("/admin/api/topic-summary/profiles/:id", (req: Request, res: ExResponse) => {
       const id = String(req.params.id ?? "").trim();
-      const payload = parseTopicPushProfileUpdatePayload(req.body);
+      const payload = parseTopicSummaryProfileUpdatePayload(req.body);
       if (!id || !payload) {
-        res.status(400).json({ error: "invalid topic-push profile update payload" });
+        res.status(400).json({ error: "invalid topic-summary profile update payload" });
         return;
       }
 
       try {
-        const snapshot = updateTopicPushProfile(id, payload);
+        const snapshot = updateTopicSummaryProfile(id, payload);
         res.json({
           ok: true,
           snapshot
@@ -1192,20 +1192,20 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to update topic-push profile"
+          error: (error as Error).message ?? "failed to update topic-summary profile"
         });
       }
     });
 
-    app.post("/admin/api/topic-push/profiles/:id/use", (req: Request, res: ExResponse) => {
+    app.post("/admin/api/topic-summary/profiles/:id/use", (req: Request, res: ExResponse) => {
       const id = String(req.params.id ?? "").trim();
       if (!id) {
-        res.status(400).json({ error: "invalid topic-push profile id" });
+        res.status(400).json({ error: "invalid topic-summary profile id" });
         return;
       }
 
       try {
-        const snapshot = useTopicPushProfile(id);
+        const snapshot = useTopicSummaryProfile(id);
         res.json({
           ok: true,
           snapshot
@@ -1213,20 +1213,20 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to switch topic-push profile"
+          error: (error as Error).message ?? "failed to switch topic-summary profile"
         });
       }
     });
 
-    app.delete("/admin/api/topic-push/profiles/:id", (req: Request, res: ExResponse) => {
+    app.delete("/admin/api/topic-summary/profiles/:id", (req: Request, res: ExResponse) => {
       const id = String(req.params.id ?? "").trim();
       if (!id) {
-        res.status(400).json({ error: "invalid topic-push profile id" });
+        res.status(400).json({ error: "invalid topic-summary profile id" });
         return;
       }
 
       try {
-        const snapshot = deleteTopicPushProfile(id);
+        const snapshot = deleteTopicSummaryProfile(id);
         res.json({
           ok: true,
           snapshot
@@ -1234,10 +1234,11 @@ export class AdminIngressAdapter implements IngressAdapter {
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to delete topic-push profile"
+          error: (error as Error).message ?? "failed to delete topic-summary profile"
         });
       }
     });
+
   }
 
   private registerAdminWebRoutes(app: Express): void {
@@ -1468,7 +1469,7 @@ function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayloadParseR
   return { payload: { userId, phase } };
 }
 
-function parseTopicPushProfileCreatePayload(rawBody: unknown): TopicPushProfileCreatePayload | null {
+function parseTopicSummaryProfileCreatePayload(rawBody: unknown): TopicSummaryProfileCreatePayload | null {
   if (!rawBody || typeof rawBody !== "object") {
     return null;
   }
@@ -1487,7 +1488,7 @@ function parseTopicPushProfileCreatePayload(rawBody: unknown): TopicPushProfileC
   };
 }
 
-function parseTopicPushProfileUpdatePayload(rawBody: unknown): TopicPushProfileUpdatePayload | null {
+function parseTopicSummaryProfileUpdatePayload(rawBody: unknown): TopicSummaryProfileUpdatePayload | null {
   if (!rawBody || typeof rawBody !== "object") {
     return null;
   }

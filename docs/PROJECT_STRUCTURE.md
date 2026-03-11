@@ -32,7 +32,7 @@ src/
     rag/
     system-maintenance/
     terminal/
-    topic-push/
+    topic-summary/
     wecom/
   memory/          # Memory domain (session/raw/summary/index/compaction)
   scheduler/       # Scheduler and push-user domain
@@ -59,7 +59,7 @@ data/              # Runtime data files
 - Third-party protocol/client adapters -> `src/integrations/<domain>/`.
 - Domain runtime exceptions under integrations are allowed only for explicit runtime domains:
   - `evolution-operator`
-  - `topic-push`
+  - `topic-summary`
   - `market-analysis`
 - LLM-callable tools (schema + execute handler) -> `src/tools/`.
 - Persistent state access -> `src/storage/persistence.ts` API only.

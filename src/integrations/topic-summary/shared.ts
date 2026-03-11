@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { TRACKING_QUERY_PARAMS } from "./defaults";
-import { TopicPushCategory } from "./types";
+import { TopicSummaryCategory } from "./types";
 
 export function normalizeText(value: unknown): string {
   if (typeof value === "string") {
@@ -40,7 +40,7 @@ export function normalizeProfileId(raw: unknown): string {
     .slice(0, 64);
 }
 
-export function normalizeCategory(raw: unknown): TopicPushCategory | null {
+export function normalizeCategory(raw: unknown): TopicSummaryCategory | null {
   const value = normalizeText(raw).toLowerCase();
   if (!value) {
     return null;

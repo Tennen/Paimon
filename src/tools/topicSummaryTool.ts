@@ -1,21 +1,21 @@
 import { ToolDependencies, ToolRegistry } from "./toolRegistry";
 import {
   directCommands,
-  execute as executeTopicPush
-} from "../integrations/topic-push/service";
+  execute as executeTopicSummary
+} from "../integrations/topic-summary/service";
 import { ToolResult } from "../types";
 
 export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): void {
   registry.register(
     {
-      name: "skill.topic-push",
+      name: "skill.topic-summary",
       execute: (op, args, context) =>
         executeInputTool(
           op,
           args,
           async (input) => {
             const explicitLanguage = readExplicitLanguageFlag(input);
-            return executeTopicPush(input, {
+            return executeTopicSummary(input, {
               explicitLanguage: explicitLanguage ?? undefined,
               inferredLanguage: explicitLanguage ? undefined : detectUserLanguage(input, context)
             });
@@ -23,12 +23,12 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
         )
     },
     {
-      name: "skill.topic-push",
+      name: "skill.topic-summary",
       description: "Generate topic-specific daily digest from RSS feeds with profile isolation and source CRUD.",
       operations: [
         {
           op: "execute",
-          description: "Execute topic-push command.",
+          description: "Execute topic-summary command.",
           params: {
             input: "string"
           }
@@ -38,7 +38,7 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
   );
 
   registerDirectCommands(registry, directCommands, {
-    tool: "skill.topic-push",
+    tool: "skill.topic-summary",
     op: "execute",
     argName: "input",
     argMode: "full_input",

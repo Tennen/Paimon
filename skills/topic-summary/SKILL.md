@@ -1,14 +1,14 @@
 ---
-name: topic-push
+name: topic-summary
 description: Generate daily AI engineering digest from configurable RSS sources, with source CRUD via direct command.
-keywords: ["topic push", "rss", "digest", "ai news", "engineering", "日报", "新闻推送", "订阅", "source", "profile", "batch"]
+keywords: ["topic summary", "rss", "digest", "ai news", "engineering", "日报", "新闻摘要", "订阅", "source", "profile", "batch"]
 preferToolResult: true
-tool: skill.topic-push
+tool: skill.topic-summary
 action: execute
 params: ["input"]
 ---
 
-# Topic Push Skill
+# Topic Summary Skill
 
 Use this skill to generate a daily AI digest and manage RSS sources.
 It also supports multi-profile isolation (for example AI profile vs non-AI profile) so subscriptions and dedup state do not mix.
@@ -35,7 +35,7 @@ Tool contract (LLM must output JSON)
 
 ```json
 {
-  "tool": "skill.topic-push",
+  "tool": "skill.topic-summary",
   "action": "execute",
   "params": {
     "input": "<完整用户请求>"

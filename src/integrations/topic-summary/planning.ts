@@ -16,15 +16,15 @@ import {
   PlanningDigestItemPatch,
   SelectedItem,
   TopicKey,
-  TopicPushConfig,
-  TopicPushExecuteOptions,
-  TopicPushSummaryEngine
+  TopicSummaryConfig,
+  TopicSummaryExecuteOptions,
+  TopicSummaryEngine
 } from "./types";
 
 export async function refineSelectedItemsWithPlanningModel(
   selected: SelectedItem[],
   targetLanguage: string,
-  summaryEngine: TopicPushSummaryEngine
+  summaryEngine: TopicSummaryEngine
 ): Promise<SelectedItem[]> {
   if (selected.length === 0) {
     return selected;
@@ -40,7 +40,7 @@ export async function refineSelectedItemsWithPlanningModel(
         refined = applyPlanningDigestPatches(selected, patches);
       }
     } catch (error) {
-      console.warn(`topic-push planning model refine failed: ${(error as Error).message ?? "unknown error"}`);
+      console.warn(`topic-summary planning model refine failed: ${(error as Error).message ?? "unknown error"}`);
     }
   }
 
@@ -62,12 +62,12 @@ export async function refineSelectedItemsWithPlanningModel(
     }
     return applyPlanningDigestPatches(refined, fallbackPatches);
   } catch (error) {
-    console.warn(`topic-push localization fallback failed: ${(error as Error).message ?? "unknown error"}`);
+    console.warn(`topic-summary localization fallback failed: ${(error as Error).message ?? "unknown error"}`);
     return refined;
   }
 }
 
-export function resolveRunTargetLanguage(config: TopicPushConfig, options?: TopicPushExecuteOptions): string {
+export function resolveRunTargetLanguage(config: TopicSummaryConfig, options?: TopicSummaryExecuteOptions): string {
   const explicitLanguage = normalizeText(options?.explicitLanguage);
   if (explicitLanguage) {
     return normalizeDigestLanguage(explicitLanguage);
@@ -82,7 +82,7 @@ export function resolveRunTargetLanguage(config: TopicPushConfig, options?: Topi
 }
 
 export function normalizeDigestLanguage(raw: unknown): string {
-  const envLanguage = normalizeText(process.env.TOPIC_PUSH_DEFAULT_LANGUAGE).toLowerCase();
+  const envLanguage = normalizeText(process.env.TOPIC_SUMMARY_DEFAULT_LANGUAGE).toLowerCase();
   const fallback = envLanguage || DEFAULT_TARGET_LANGUAGE;
   const value = normalizeText(raw).toLowerCase() || fallback;
 
@@ -196,7 +196,7 @@ function isTextLocalizedForTarget(text: string, targetLanguage: string): boolean
 async function generatePlanningDigestPatchMap(
   selected: SelectedItem[],
   targetLanguage: string,
-  summaryEngine: TopicPushSummaryEngine
+  summaryEngine: TopicSummaryEngine
 ): Promise<Map<string, PlanningDigestItemPatch>> {
   const input = selected.map((item) => ({
     id: item.candidate.id,
@@ -245,7 +245,7 @@ async function generatePlanningDigestPatchMap(
 async function generateLocalizationFallbackPatchMap(
   selected: SelectedItem[],
   targetLanguage: string,
-  summaryEngine: TopicPushSummaryEngine
+  summaryEngine: TopicSummaryEngine
 ): Promise<Map<string, PlanningDigestItemPatch>> {
   const input = selected.map((item) => ({
     id: item.candidate.id,
@@ -286,7 +286,7 @@ async function generateLocalizationFallbackPatchMap(
 async function chatWithPlanningModel(
   systemPrompt: string,
   userPrompt: string,
-  summaryEngine: TopicPushSummaryEngine
+  summaryEngine: TopicSummaryEngine
 ): Promise<string> {
   if (summaryEngine === "gpt_plugin") {
     return chatWithGptPluginBridge(systemPrompt, userPrompt);
@@ -322,7 +322,7 @@ async function chatWithPlanningModel(
 
 async function chatWithGptPluginBridge(systemPrompt: string, userPrompt: string): Promise<string> {
   const timeoutMs = parsePositiveInteger(
-    process.env.TOPIC_PUSH_GPT_PLUGIN_TIMEOUT_MS,
+    process.env.TOPIC_SUMMARY_GPT_PLUGIN_TIMEOUT_MS,
     parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000)
   );
   const prompt = buildGptPluginPlanningPrompt(systemPrompt, userPrompt);
@@ -493,7 +493,7 @@ function normalizeTopicKey(raw: unknown): TopicKey | null {
 }
 
 function shouldUsePlanningModelRefine(): boolean {
-  const raw = String(process.env.TOPIC_PUSH_USE_PLANNING_MODEL ?? "true").trim().toLowerCase();
+  const raw = String(process.env.TOPIC_SUMMARY_USE_PLANNING_MODEL ?? "true").trim().toLowerCase();
   if (["false", "0", "no", "off"].includes(raw)) {
     return false;
   }

@@ -1,4 +1,6 @@
-import { getStore, registerStore, setStore } from "../../storage/persistence";
+import fs from "fs";
+import path from "path";
+import { getStore, registerStore, resolveDataPath, setStore } from "../../storage/persistence";
 import {
   cloneDefaultConfig,
   cloneDefaultConfigStore,
@@ -13,8 +15,8 @@ import {
   LEGACY_FEED_DISABLE_LIST,
   LEGACY_FEED_URL_MIGRATION,
   SENT_LOG_MAX_ITEMS,
-  TOPIC_PUSH_CONFIG_STORE,
-  TOPIC_PUSH_STATE_STORE
+  TOPIC_SUMMARY_CONFIG_STORE,
+  TOPIC_SUMMARY_STATE_STORE
 } from "./defaults";
 import {
   asRecord,
@@ -33,53 +35,76 @@ import {
 } from "./shared";
 import {
   TopicKey,
-  TopicPushConfig,
-  TopicPushConfigStore,
-  TopicPushDigestLanguage,
-  TopicPushFilters,
-  TopicPushProfileConfig,
-  TopicPushProfileMeta,
-  TopicPushProfileState,
-  TopicPushProfileSnapshot,
-  TopicPushSnapshot,
-  TopicPushSource,
-  TopicPushState,
-  TopicPushStateStore
+  TopicSummaryConfig,
+  TopicSummaryConfigStore,
+  TopicSummaryDigestLanguage,
+  TopicSummaryFilters,
+  TopicSummaryProfileConfig,
+  TopicSummaryProfileMeta,
+  TopicSummaryProfileState,
+  TopicSummaryProfileSnapshot,
+  TopicSummarySnapshot,
+  TopicSummarySource,
+  TopicSummaryState,
+  TopicSummaryStateStore
 } from "./types";
 
-export function ensureTopicPushStorage(): void {
-  registerStore(TOPIC_PUSH_CONFIG_STORE, () => DEFAULT_CONFIG_STORE_PROXY());
-  registerStore(TOPIC_PUSH_STATE_STORE, () => DEFAULT_STATE_STORE_PROXY());
+export function ensureTopicSummaryStorage(): void {
+  migrateLegacyTopicSummaryStoreFiles();
+  registerStore(TOPIC_SUMMARY_CONFIG_STORE, () => DEFAULT_CONFIG_STORE_PROXY());
+  registerStore(TOPIC_SUMMARY_STATE_STORE, () => DEFAULT_STATE_STORE_PROXY());
 }
 
-function DEFAULT_CONFIG_STORE_PROXY(): TopicPushConfigStore {
+let legacyTopicSummaryStoreMigrated = false;
+
+function migrateLegacyTopicSummaryStoreFiles(): void {
+  if (legacyTopicSummaryStoreMigrated) {
+    return;
+  }
+  legacyTopicSummaryStoreMigrated = true;
+
+  migrateLegacyStoreFile("topic-push/config.json", "topic-summary/config.json");
+  migrateLegacyStoreFile("topic-push/state.json", "topic-summary/state.json");
+}
+
+function migrateLegacyStoreFile(legacyRelativePath: string, nextRelativePath: string): void {
+  const legacyPath = resolveDataPath(legacyRelativePath);
+  const nextPath = resolveDataPath(nextRelativePath);
+  if (!fs.existsSync(legacyPath) || fs.existsSync(nextPath)) {
+    return;
+  }
+  fs.mkdirSync(path.dirname(nextPath), { recursive: true });
+  fs.copyFileSync(legacyPath, nextPath);
+}
+
+function DEFAULT_CONFIG_STORE_PROXY(): TopicSummaryConfigStore {
   return cloneDefaultConfigStore();
 }
 
-function DEFAULT_STATE_STORE_PROXY(): TopicPushStateStore {
+function DEFAULT_STATE_STORE_PROXY(): TopicSummaryStateStore {
   return cloneDefaultStateStore();
 }
 
-export function getTopicPushConfig(profileId?: string): TopicPushConfig {
-  ensureTopicPushStorage();
+export function getTopicSummaryConfig(profileId?: string): TopicSummaryConfig {
+  ensureTopicSummaryStorage();
   return readConfig(profileId);
 }
 
-export function setTopicPushConfig(input: unknown, profileId?: string): TopicPushConfig {
-  ensureTopicPushStorage();
+export function setTopicSummaryConfig(input: unknown, profileId?: string): TopicSummaryConfig {
+  ensureTopicSummaryStorage();
   const config = normalizeConfig(input);
   writeConfig(config, profileId);
   return config;
 }
 
-export function getTopicPushState(profileId?: string): TopicPushState {
-  ensureTopicPushStorage();
+export function getTopicSummaryState(profileId?: string): TopicSummaryState {
+  ensureTopicSummaryStorage();
   return readState(profileId);
 }
 
-export function clearTopicPushSentLog(profileId?: string): TopicPushState {
-  ensureTopicPushStorage();
-  const next: TopicPushState = {
+export function clearTopicSummarySentLog(profileId?: string): TopicSummaryState {
+  ensureTopicSummaryStorage();
+  const next: TopicSummaryState = {
     version: 1,
     sentLog: [],
     updatedAt: new Date().toISOString()
@@ -88,16 +113,16 @@ export function clearTopicPushSentLog(profileId?: string): TopicPushState {
   return next;
 }
 
-export function getTopicPushSnapshot(): TopicPushSnapshot {
-  ensureTopicPushStorage();
-  return buildTopicPushSnapshot();
+export function getTopicSummarySnapshot(): TopicSummarySnapshot {
+  ensureTopicSummaryStorage();
+  return buildTopicSummarySnapshot();
 }
 
-export function buildTopicPushSnapshot(): TopicPushSnapshot {
+export function buildTopicSummarySnapshot(): TopicSummarySnapshot {
   const configStore = readConfigStore();
   const stateStore = readStateStore();
 
-  const profiles: TopicPushProfileSnapshot[] = configStore.profiles.map((profile) => {
+  const profiles: TopicSummaryProfileSnapshot[] = configStore.profiles.map((profile) => {
     const state = stateStore.profiles.find((item) => item.id === profile.id)?.state ?? cloneDefaultState();
     return {
       id: profile.id,
@@ -114,20 +139,20 @@ export function buildTopicPushSnapshot(): TopicPushSnapshot {
   };
 }
 
-export function readConfig(profileId?: string): TopicPushConfig {
+export function readConfig(profileId?: string): TopicSummaryConfig {
   const store = readConfigStore();
   const profile = getProfileById(store, profileId);
   return profile.config;
 }
 
-export function writeConfig(config: TopicPushConfig, profileId?: string): void {
+export function writeConfig(config: TopicSummaryConfig, profileId?: string): void {
   const store = readConfigStore();
   const profile = getProfileById(store, profileId);
   profile.config = normalizeConfig(config);
   writeConfigStore(store);
 }
 
-export function readState(profileId?: string): TopicPushState {
+export function readState(profileId?: string): TopicSummaryState {
   const configStore = readConfigStore();
   const profile = getProfileById(configStore, profileId);
   const stateStore = readStateStore();
@@ -135,7 +160,7 @@ export function readState(profileId?: string): TopicPushState {
   return entry?.state ? normalizeState(entry.state) : cloneDefaultState();
 }
 
-export function writeState(state: TopicPushState, profileId?: string): void {
+export function writeState(state: TopicSummaryState, profileId?: string): void {
   const configStore = readConfigStore();
   const profile = getProfileById(configStore, profileId);
   const stateStore = readStateStore();
@@ -149,25 +174,25 @@ export function writeState(state: TopicPushState, profileId?: string): void {
   writeStateStore(stateStore);
 }
 
-export function readConfigStore(): TopicPushConfigStore {
-  const parsed = getStore<unknown>(TOPIC_PUSH_CONFIG_STORE);
+export function readConfigStore(): TopicSummaryConfigStore {
+  const parsed = getStore<unknown>(TOPIC_SUMMARY_CONFIG_STORE);
   return normalizeConfigStore(parsed);
 }
 
-export function writeConfigStore(store: TopicPushConfigStore): void {
-  setStore(TOPIC_PUSH_CONFIG_STORE, normalizeConfigStore(store));
+export function writeConfigStore(store: TopicSummaryConfigStore): void {
+  setStore(TOPIC_SUMMARY_CONFIG_STORE, normalizeConfigStore(store));
 }
 
-export function readStateStore(): TopicPushStateStore {
-  const parsed = getStore<unknown>(TOPIC_PUSH_STATE_STORE);
+export function readStateStore(): TopicSummaryStateStore {
+  const parsed = getStore<unknown>(TOPIC_SUMMARY_STATE_STORE);
   return normalizeStateStore(parsed);
 }
 
-export function writeStateStore(store: TopicPushStateStore): void {
-  setStore(TOPIC_PUSH_STATE_STORE, normalizeStateStore(store));
+export function writeStateStore(store: TopicSummaryStateStore): void {
+  setStore(TOPIC_SUMMARY_STATE_STORE, normalizeStateStore(store));
 }
 
-export function getProfileById(store: TopicPushConfigStore, requestedId?: string): TopicPushProfileConfig {
+export function getProfileById(store: TopicSummaryConfigStore, requestedId?: string): TopicSummaryProfileConfig {
   const normalized = normalizeProfileId(requestedId ?? "");
   if (normalized) {
     const found = store.profiles.find((item) => item.id === normalized);
@@ -189,7 +214,7 @@ export function getProfileById(store: TopicPushConfigStore, requestedId?: string
   throw new Error("no topic profile configured");
 }
 
-export function getProfileMeta(profileId?: string): TopicPushProfileMeta {
+export function getProfileMeta(profileId?: string): TopicSummaryProfileMeta {
   const store = readConfigStore();
   const profile = getProfileById(store, profileId);
   return {
@@ -200,7 +225,7 @@ export function getProfileMeta(profileId?: string): TopicPushProfileMeta {
   };
 }
 
-export function normalizeConfigStore(input: unknown): TopicPushConfigStore {
+export function normalizeConfigStore(input: unknown): TopicSummaryConfigStore {
   const source = asRecord(input);
   if (!source || !Array.isArray(source.profiles)) {
     return {
@@ -218,8 +243,8 @@ export function normalizeConfigStore(input: unknown): TopicPushConfigStore {
 
   const normalizedProfilesRaw = toArray(source.profiles)
     .map((item, index) => normalizeConfigProfile(item, index))
-    .filter((item): item is TopicPushProfileConfig => Boolean(item));
-  const normalizedProfiles: TopicPushProfileConfig[] = [];
+    .filter((item): item is TopicSummaryProfileConfig => Boolean(item));
+  const normalizedProfiles: TopicSummaryProfileConfig[] = [];
   const idSet = new Set<string>();
   for (const profile of normalizedProfilesRaw) {
     if (idSet.has(profile.id)) {
@@ -245,7 +270,7 @@ export function normalizeConfigStore(input: unknown): TopicPushConfigStore {
   };
 }
 
-function normalizeConfigProfile(input: unknown, index: number): TopicPushProfileConfig | null {
+function normalizeConfigProfile(input: unknown, index: number): TopicSummaryProfileConfig | null {
   const source = asRecord(input);
   if (!source) {
     return null;
@@ -266,7 +291,7 @@ function normalizeConfigProfile(input: unknown, index: number): TopicPushProfile
   };
 }
 
-export function normalizeStateStore(input: unknown): TopicPushStateStore {
+export function normalizeStateStore(input: unknown): TopicSummaryStateStore {
   const source = asRecord(input);
   if (!source || !Array.isArray(source.profiles)) {
     return {
@@ -282,8 +307,8 @@ export function normalizeStateStore(input: unknown): TopicPushStateStore {
 
   const normalizedProfilesRaw = toArray(source.profiles)
     .map((item, index) => normalizeStateProfile(item, index))
-    .filter((item): item is TopicPushProfileState => Boolean(item));
-  const normalizedProfiles: TopicPushStateStore["profiles"] = [];
+    .filter((item): item is TopicSummaryProfileState => Boolean(item));
+  const normalizedProfiles: TopicSummaryStateStore["profiles"] = [];
   const idSet = new Set<string>();
   for (const profile of normalizedProfilesRaw) {
     if (idSet.has(profile.id)) {
@@ -303,7 +328,7 @@ export function normalizeStateStore(input: unknown): TopicPushStateStore {
   };
 }
 
-function normalizeStateProfile(input: unknown, index: number): TopicPushStateStore["profiles"][number] | null {
+function normalizeStateProfile(input: unknown, index: number): TopicSummaryStateStore["profiles"][number] | null {
   const source = asRecord(input);
   if (!source) {
     return null;
@@ -321,7 +346,7 @@ function normalizeStateProfile(input: unknown, index: number): TopicPushStateSto
   };
 }
 
-export function normalizeConfig(input: unknown): TopicPushConfig {
+export function normalizeConfig(input: unknown): TopicSummaryConfig {
   const source = asRecord(input);
   if (!source) {
     return cloneDefaultConfig();
@@ -354,9 +379,9 @@ export function normalizeConfig(input: unknown): TopicPushConfig {
   };
 }
 
-export function normalizeSources(input: unknown): TopicPushSource[] {
+export function normalizeSources(input: unknown): TopicSummarySource[] {
   const rows = toArray(input);
-  const out: TopicPushSource[] = [];
+  const out: TopicSummarySource[] = [];
   const idSet = new Set<string>();
 
   for (let i = 0; i < rows.length; i += 1) {
@@ -378,7 +403,7 @@ export function normalizeSources(input: unknown): TopicPushSource[] {
   return out;
 }
 
-export function normalizeSource(input: unknown, index: number): TopicPushSource | null {
+export function normalizeSource(input: unknown, index: number): TopicSummarySource | null {
   const source = asRecord(input);
   if (!source) {
     return null;
@@ -436,7 +461,7 @@ function normalizeTopics(input: unknown): Record<TopicKey, string[]> {
   return out;
 }
 
-function normalizeFilters(input: unknown): TopicPushFilters {
+function normalizeFilters(input: unknown): TopicSummaryFilters {
   const source = asRecord(input);
   const fallback = DEFAULT_CONFIG.filters;
   const dedup = asRecord(source?.dedup);
@@ -460,7 +485,7 @@ function normalizeFilters(input: unknown): TopicPushFilters {
   };
 }
 
-function normalizeDailyQuota(input: unknown): TopicPushConfig["dailyQuota"] {
+function normalizeDailyQuota(input: unknown): TopicSummaryConfig["dailyQuota"] {
   const source = asRecord(input);
   const fallback = DEFAULT_CONFIG.dailyQuota;
   const quota = {
@@ -472,7 +497,7 @@ function normalizeDailyQuota(input: unknown): TopicPushConfig["dailyQuota"] {
   return migrateLegacyDailyQuota(quota);
 }
 
-function migrateLegacyDailyQuota(quota: TopicPushConfig["dailyQuota"]): TopicPushConfig["dailyQuota"] {
+function migrateLegacyDailyQuota(quota: TopicSummaryConfig["dailyQuota"]): TopicSummaryConfig["dailyQuota"] {
   if (
     quota.total === LEGACY_DAILY_QUOTA.total
     && quota.engineering === LEGACY_DAILY_QUOTA.engineering
@@ -484,7 +509,7 @@ function migrateLegacyDailyQuota(quota: TopicPushConfig["dailyQuota"]): TopicPus
   return quota;
 }
 
-export function normalizeState(input: unknown): TopicPushState {
+export function normalizeState(input: unknown): TopicSummaryState {
   const source = asRecord(input);
   if (!source) {
     return { ...DEFAULT_STATE };
@@ -526,7 +551,7 @@ function shouldDropLegacySource(id: string, feedUrl: string): boolean {
   return LEGACY_FEED_DISABLE_LIST.has(key);
 }
 
-export function normalizeSummaryEngine(raw: unknown): TopicPushConfig["summaryEngine"] {
+export function normalizeSummaryEngine(raw: unknown): TopicSummaryConfig["summaryEngine"] {
   const value = normalizeText(raw).toLowerCase();
   if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt_plugin";
@@ -534,7 +559,7 @@ export function normalizeSummaryEngine(raw: unknown): TopicPushConfig["summaryEn
   return "local";
 }
 
-export function normalizeConfigDigestLanguage(raw: unknown): TopicPushDigestLanguage {
+export function normalizeConfigDigestLanguage(raw: unknown): TopicSummaryDigestLanguage {
   const value = normalizeText(raw).toLowerCase();
   if (!value || ["auto", "default", "detect", "auto-detect", "automatic", "自动"].includes(value)) {
     return "auto";

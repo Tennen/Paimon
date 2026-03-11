@@ -21,8 +21,8 @@ export const DATA_STORE = {
   MEMORY_SUMMARY: "memory.summary",
   MEMORY_SUMMARY_INDEX: "memory.summary_index",
   AUDIT_LOG: "audit.log",
-  TOPIC_PUSH_CONFIG: "topic-push.config",
-  TOPIC_PUSH_STATE: "topic-push.state",
+  TOPIC_SUMMARY_CONFIG: "topic-summary.config",
+  TOPIC_SUMMARY_STATE: "topic-summary.state",
   LLM_OPENAI_QUOTA: "llm.openai_quota"
 } as const;
 
@@ -44,8 +44,8 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.MEMORY_SUMMARY]: "memory/summary.json",
   [DATA_STORE.MEMORY_SUMMARY_INDEX]: "memory/summary-index.json",
   [DATA_STORE.AUDIT_LOG]: "audit.jsonl",
-  [DATA_STORE.TOPIC_PUSH_CONFIG]: "topic-push/config.json",
-  [DATA_STORE.TOPIC_PUSH_STATE]: "topic-push/state.json",
+  [DATA_STORE.TOPIC_SUMMARY_CONFIG]: "topic-summary/config.json",
+  [DATA_STORE.TOPIC_SUMMARY_STATE]: "topic-summary/state.json",
   [DATA_STORE.LLM_OPENAI_QUOTA]: "llm/openai-quota.json"
 };
 

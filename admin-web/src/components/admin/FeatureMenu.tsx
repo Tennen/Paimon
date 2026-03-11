@@ -14,56 +14,33 @@ type FeatureMenuProps = {
 };
 
 export function FeatureMenu(props: FeatureMenuProps) {
+  const items: Array<{ key: MenuKey; label: string }> = [
+    { key: "system", label: "系统设置" },
+    { key: "messages", label: "消息任务" },
+    { key: "market", label: "Market Analysis" },
+    { key: "topic", label: "Topic Summary" },
+    { key: "evolution", label: "Evolution Engine" }
+  ];
+
   return (
-    <Card>
+    <Card className="h-fit">
       <CardHeader className="pb-3">
         <CardTitle>功能菜单</CardTitle>
-        <CardDescription>按功能切换，避免一次展示全部设置</CardDescription>
+        <CardDescription>侧边导航，右侧展示当前功能模块</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant={props.activeMenu === "system" ? "default" : "outline"}
-            onClick={() => props.onChange("system")}
-          >
-            系统设置
-          </Button>
-          <Button
-            type="button"
-            variant={props.activeMenu === "memory" ? "default" : "outline"}
-            onClick={() => props.onChange("memory")}
-          >
-            Memory
-          </Button>
-          <Button
-            type="button"
-            variant={props.activeMenu === "messages" ? "default" : "outline"}
-            onClick={() => props.onChange("messages")}
-          >
-            消息任务
-          </Button>
-          <Button
-            type="button"
-            variant={props.activeMenu === "market" ? "default" : "outline"}
-            onClick={() => props.onChange("market")}
-          >
-            Market Analysis
-          </Button>
-          <Button
-            type="button"
-            variant={props.activeMenu === "topic" ? "default" : "outline"}
-            onClick={() => props.onChange("topic")}
-          >
-            Topic Push
-          </Button>
-          <Button
-            type="button"
-            variant={props.activeMenu === "evolution" ? "default" : "outline"}
-            onClick={() => props.onChange("evolution")}
-          >
-            Evolution Engine
-          </Button>
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
+          {items.map((item) => (
+            <Button
+              key={item.key}
+              type="button"
+              variant={props.activeMenu === item.key ? "default" : "outline"}
+              className="shrink-0 justify-start lg:w-full"
+              onClick={() => props.onChange(item.key)}
+            >
+              {item.label}
+            </Button>
+          ))}
         </div>
       </CardContent>
     </Card>

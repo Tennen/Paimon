@@ -40,7 +40,7 @@ This file defines hard constraints for coding agents working in this repository.
   - Default: no cross-domain orchestration/business workflow state.
   - Runtime-domain exceptions currently allowed:
     - `src/integrations/evolution-operator/`
-    - `src/integrations/topic-push/`
+    - `src/integrations/topic-summary/`
     - `src/integrations/market-analysis/`
   - Keep integrations flat by domain (`src/integrations/<domain>/`), no `integrations/tools` layer.
 

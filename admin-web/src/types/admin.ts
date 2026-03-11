@@ -166,9 +166,9 @@ export type MarketSecuritySearchItem = {
   secid?: string;
 };
 
-export type TopicPushCategory = "engineering" | "news" | "ecosystem";
+export type TopicSummaryCategory = "engineering" | "news" | "ecosystem";
 
-export type TopicPushTopicKey =
+export type TopicSummaryTopicKey =
   | "llm_apps"
   | "agents"
   | "multimodal"
@@ -178,16 +178,16 @@ export type TopicPushTopicKey =
   | "on_device"
   | "safety";
 
-export type TopicPushSource = {
+export type TopicSummarySource = {
   id: string;
   name: string;
-  category: TopicPushCategory;
+  category: TopicSummaryCategory;
   feedUrl: string;
   weight: number;
   enabled: boolean;
 };
 
-export type TopicPushFilters = {
+export type TopicSummaryFilters = {
   timeWindowHours: number;
   minTitleLength: number;
   blockedDomains: string[];
@@ -199,51 +199,51 @@ export type TopicPushFilters = {
   };
 };
 
-export type TopicPushDailyQuota = {
+export type TopicSummaryDailyQuota = {
   total: number;
   engineering: number;
   news: number;
   ecosystem: number;
 };
 
-export type TopicPushSummaryEngine = "local" | "gpt_plugin";
-export type TopicPushDigestLanguage = "auto" | "zh-CN" | "en";
+export type TopicSummaryEngine = "local" | "gpt_plugin";
+export type TopicSummaryDigestLanguage = "auto" | "zh-CN" | "en";
 
-export type TopicPushConfig = {
+export type TopicSummaryConfig = {
   version: 1;
-  summaryEngine: TopicPushSummaryEngine;
-  defaultLanguage: TopicPushDigestLanguage;
-  sources: TopicPushSource[];
-  topics: Record<TopicPushTopicKey, string[]>;
-  filters: TopicPushFilters;
-  dailyQuota: TopicPushDailyQuota;
+  summaryEngine: TopicSummaryEngine;
+  defaultLanguage: TopicSummaryDigestLanguage;
+  sources: TopicSummarySource[];
+  topics: Record<TopicSummaryTopicKey, string[]>;
+  filters: TopicSummaryFilters;
+  dailyQuota: TopicSummaryDailyQuota;
 };
 
-export type TopicPushSentLogItem = {
+export type TopicSummarySentLogItem = {
   urlNormalized: string;
   sentAt: string;
   title: string;
 };
 
-export type TopicPushState = {
+export type TopicSummaryState = {
   version: 1;
-  sentLog: TopicPushSentLogItem[];
+  sentLog: TopicSummarySentLogItem[];
   updatedAt: string;
 };
 
-export type TopicPushProfile = {
+export type TopicSummaryProfile = {
   id: string;
   name: string;
   isActive: boolean;
-  config: TopicPushConfig;
-  state: TopicPushState;
+  config: TopicSummaryConfig;
+  state: TopicSummaryState;
 };
 
-export type TopicPushProfilesPayload = {
+export type TopicSummaryProfilesPayload = {
   activeProfileId: string;
-  profiles: TopicPushProfile[];
-  config: TopicPushConfig;
-  state: TopicPushState;
+  profiles: TopicSummaryProfile[];
+  config: TopicSummaryConfig;
+  state: TopicSummaryState;
   configStore: DataStoreDescriptor;
   stateStore: DataStoreDescriptor;
 };
@@ -375,7 +375,7 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "memory" | "messages" | "market" | "topic" | "evolution";
+export type MenuKey = "system" | "messages" | "market" | "topic" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",
@@ -405,7 +405,7 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   }
 };
 
-export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
+export const DEFAULT_TOPIC_SUMMARY_CONFIG: TopicSummaryConfig = {
   version: 1,
   summaryEngine: "local",
   defaultLanguage: "auto",
@@ -439,7 +439,7 @@ export const DEFAULT_TOPIC_PUSH_CONFIG: TopicPushConfig = {
   }
 };
 
-export const DEFAULT_TOPIC_PUSH_STATE: TopicPushState = {
+export const DEFAULT_TOPIC_SUMMARY_STATE: TopicSummaryState = {
   version: 1,
   sentLog: [],
   updatedAt: ""

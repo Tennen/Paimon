@@ -16,51 +16,51 @@ import {
 import { resolveRunTargetLanguage } from "./planning";
 import { mergeSentLog, runDigest } from "./runtime";
 import {
-  clearTopicPushSentLog as clearTopicPushSentLogStore,
-  ensureTopicPushStorage,
+  clearTopicSummarySentLog as clearTopicSummarySentLogStore,
+  ensureTopicSummaryStorage,
   getProfileMeta,
-  getTopicPushConfig,
-  getTopicPushSnapshot,
-  getTopicPushState,
+  getTopicSummaryConfig,
+  getTopicSummarySnapshot,
+  getTopicSummaryState,
   readConfig,
   readState,
-  setTopicPushConfig,
+  setTopicSummaryConfig,
   writeState
 } from "./storage";
 import { parseCommand } from "./commands";
 import type {
-  TopicPushExecuteOptions,
-  TopicPushProfileCreateInput,
-  TopicPushProfileUpdateInput,
-  TopicPushSnapshot
+  TopicSummaryExecuteOptions,
+  TopicSummaryProfileCreateInput,
+  TopicSummaryProfileUpdateInput,
+  TopicSummarySnapshot
 } from "./types";
 
 export const directCommands = ["/topic"];
 
 export type {
-  TopicPushCategory,
+  TopicSummaryCategory,
   TopicKey,
-  TopicPushSource,
-  TopicPushFilters,
-  TopicPushDailyQuota,
-  TopicPushSummaryEngine,
-  TopicPushDigestLanguage,
-  TopicPushConfig,
-  TopicPushSentLogItem,
-  TopicPushState,
-  TopicPushProfileSnapshot,
-  TopicPushSnapshot,
-  TopicPushProfileCreateInput,
-  TopicPushProfileUpdateInput,
-  TopicPushExecuteOptions
+  TopicSummarySource,
+  TopicSummaryFilters,
+  TopicSummaryDailyQuota,
+  TopicSummaryEngine,
+  TopicSummaryDigestLanguage,
+  TopicSummaryConfig,
+  TopicSummarySentLogItem,
+  TopicSummaryState,
+  TopicSummaryProfileSnapshot,
+  TopicSummarySnapshot,
+  TopicSummaryProfileCreateInput,
+  TopicSummaryProfileUpdateInput,
+  TopicSummaryExecuteOptions
 } from "./types";
 
 export async function execute(
   input: string,
-  options?: TopicPushExecuteOptions
+  options?: TopicSummaryExecuteOptions
 ): Promise<{ text: string; result?: unknown }> {
   try {
-    ensureTopicPushStorage();
+    ensureTopicSummaryStorage();
     const command = parseCommand(input);
 
     switch (command.kind) {
@@ -133,38 +133,38 @@ export async function execute(
     }
   } catch (error) {
     return {
-      text: `Topic Push 执行失败: ${(error as Error).message ?? "unknown error"}`
+      text: `Topic Summary 执行失败: ${(error as Error).message ?? "unknown error"}`
     };
   }
 }
 export {
-  clearTopicPushSentLogStore as clearTopicPushSentLog,
-  getTopicPushConfig,
-  getTopicPushSnapshot,
-  getTopicPushState,
-  setTopicPushConfig
+  clearTopicSummarySentLogStore as clearTopicSummarySentLog,
+  getTopicSummaryConfig,
+  getTopicSummarySnapshot,
+  getTopicSummaryState,
+  setTopicSummaryConfig
 };
 
-export function addTopicPushProfile(input: TopicPushProfileCreateInput): TopicPushSnapshot {
-  ensureTopicPushStorage();
+export function addTopicSummaryProfile(input: TopicSummaryProfileCreateInput): TopicSummarySnapshot {
+  ensureTopicSummaryStorage();
   handleAddProfile(input);
-  return getTopicPushSnapshot();
+  return getTopicSummarySnapshot();
 }
 
-export function updateTopicPushProfile(id: string, patch: TopicPushProfileUpdateInput): TopicPushSnapshot {
-  ensureTopicPushStorage();
+export function updateTopicSummaryProfile(id: string, patch: TopicSummaryProfileUpdateInput): TopicSummarySnapshot {
+  ensureTopicSummaryStorage();
   handleUpdateProfile(id, patch);
-  return getTopicPushSnapshot();
+  return getTopicSummarySnapshot();
 }
 
-export function useTopicPushProfile(id: string): TopicPushSnapshot {
-  ensureTopicPushStorage();
+export function useTopicSummaryProfile(id: string): TopicSummarySnapshot {
+  ensureTopicSummaryStorage();
   handleUseProfile(id);
-  return getTopicPushSnapshot();
+  return getTopicSummarySnapshot();
 }
 
-export function deleteTopicPushProfile(id: string): TopicPushSnapshot {
-  ensureTopicPushStorage();
+export function deleteTopicSummaryProfile(id: string): TopicSummarySnapshot {
+  ensureTopicSummaryStorage();
   handleDeleteProfile(id);
-  return getTopicPushSnapshot();
+  return getTopicSummarySnapshot();
 }

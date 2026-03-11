@@ -1,11 +1,11 @@
 import { DATA_STORE } from "../../storage/persistence";
 import {
   TopicKey,
-  TopicPushConfig,
-  TopicPushConfigStore,
-  TopicPushSource,
-  TopicPushState,
-  TopicPushStateStore
+  TopicSummaryConfig,
+  TopicSummaryConfigStore,
+  TopicSummarySource,
+  TopicSummaryState,
+  TopicSummaryStateStore
 } from "./types";
 
 export const TOPIC_KEYS: TopicKey[] = [
@@ -56,8 +56,8 @@ export const LEGACY_DAILY_QUOTA = {
 } as const;
 export const DEFAULT_TARGET_LANGUAGE = "zh-CN";
 
-export const TOPIC_PUSH_CONFIG_STORE = DATA_STORE.TOPIC_PUSH_CONFIG;
-export const TOPIC_PUSH_STATE_STORE = DATA_STORE.TOPIC_PUSH_STATE;
+export const TOPIC_SUMMARY_CONFIG_STORE = DATA_STORE.TOPIC_SUMMARY_CONFIG;
+export const TOPIC_SUMMARY_STATE_STORE = DATA_STORE.TOPIC_SUMMARY_STATE;
 export const LEGACY_FEED_URL_MIGRATION: Record<string, string> = {
   "https://eng.uber.com/feed": "https://www.uber.com/blog/engineering/feed/",
   "https://eng.uber.com/feed/": "https://www.uber.com/blog/engineering/feed/",
@@ -69,7 +69,7 @@ export const LEGACY_FEED_DISABLE_LIST = new Set([
   "https://www.anthropic.com/news/rss.xml"
 ]);
 
-export const DEFAULT_SOURCES: TopicPushSource[] = [
+export const DEFAULT_SOURCES: TopicSummarySource[] = [
   {
     id: "openai-blog",
     name: "OpenAI Blog",
@@ -264,7 +264,7 @@ export const DEFAULT_TOPIC_KEYWORDS: Record<TopicKey, string[]> = {
   ]
 };
 
-export const DEFAULT_CONFIG: TopicPushConfig = {
+export const DEFAULT_CONFIG: TopicSummaryConfig = {
   version: 1,
   summaryEngine: "local",
   defaultLanguage: "auto",
@@ -289,13 +289,13 @@ export const DEFAULT_CONFIG: TopicPushConfig = {
   }
 };
 
-export const DEFAULT_STATE: TopicPushState = {
+export const DEFAULT_STATE: TopicSummaryState = {
   version: 1,
   sentLog: [],
   updatedAt: ""
 };
 
-export const DEFAULT_CONFIG_STORE: TopicPushConfigStore = {
+export const DEFAULT_CONFIG_STORE: TopicSummaryConfigStore = {
   version: 2,
   activeProfileId: DEFAULT_PROFILE_ID,
   profiles: [
@@ -307,7 +307,7 @@ export const DEFAULT_CONFIG_STORE: TopicPushConfigStore = {
   ]
 };
 
-export const DEFAULT_STATE_STORE: TopicPushStateStore = {
+export const DEFAULT_STATE_STORE: TopicSummaryStateStore = {
   version: 2,
   profiles: [
     {
@@ -330,7 +330,7 @@ export function createDefaultTopics(): Record<TopicKey, string[]> {
   };
 }
 
-export function cloneDefaultConfig(): TopicPushConfig {
+export function cloneDefaultConfig(): TopicSummaryConfig {
   return {
     version: 1,
     summaryEngine: DEFAULT_CONFIG.summaryEngine,
@@ -352,7 +352,7 @@ export function cloneDefaultConfig(): TopicPushConfig {
   };
 }
 
-export function cloneDefaultState(): TopicPushState {
+export function cloneDefaultState(): TopicSummaryState {
   return {
     version: 1,
     sentLog: [],
@@ -360,7 +360,7 @@ export function cloneDefaultState(): TopicPushState {
   };
 }
 
-export function cloneDefaultConfigStore(): TopicPushConfigStore {
+export function cloneDefaultConfigStore(): TopicSummaryConfigStore {
   return {
     version: 2,
     activeProfileId: DEFAULT_PROFILE_ID,
@@ -374,7 +374,7 @@ export function cloneDefaultConfigStore(): TopicPushConfigStore {
   };
 }
 
-export function cloneDefaultStateStore(): TopicPushStateStore {
+export function cloneDefaultStateStore(): TopicSummaryStateStore {
   return {
     version: 2,
     profiles: [

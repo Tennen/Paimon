@@ -13,12 +13,12 @@ import {
   writeState,
   writeStateStore
 } from "./storage";
-import { TopicPushCategory, TopicPushSource } from "./types";
+import { TopicSummaryCategory, TopicSummarySource } from "./types";
 
 export function handleAddSource(payload: {
   id?: string;
   name: string;
-  category: TopicPushCategory;
+  category: TopicSummaryCategory;
   feedUrl: string;
   weight?: number;
   enabled?: boolean;
@@ -55,7 +55,7 @@ export function handleUpdateSource(
   id: string,
   patch: {
     name?: string;
-    category?: TopicPushCategory;
+    category?: TopicSummaryCategory;
     feedUrl?: string;
     weight?: number;
     enabled?: boolean;
@@ -70,7 +70,7 @@ export function handleUpdateSource(
   }
 
   const current = config.sources[index];
-  const next: TopicPushSource = {
+  const next: TopicSummarySource = {
     ...current,
     ...(patch.name ? { name: patch.name.trim() } : {}),
     ...(patch.category ? { category: patch.category } : {}),
@@ -261,7 +261,7 @@ export function formatProfiles(): string {
   const configStore = readConfigStore();
   const stateStore = readStateStore();
   const lines = [
-    `Topic Push Profiles (${configStore.profiles.length})`,
+    `Topic Summary Profiles (${configStore.profiles.length})`,
     `active: ${configStore.activeProfileId}`
   ];
 
@@ -281,7 +281,7 @@ export function formatSingleProfile(id: string): string {
   const profile = getProfileMeta(id);
   const state = readState(profile.id);
   return [
-    `Topic Push Profile: ${profile.id}`,
+    `Topic Summary Profile: ${profile.id}`,
     `name: ${profile.name}`,
     `active: ${profile.isActive ? "true" : "false"}`,
     `sources: ${profile.config.sources.length}`,

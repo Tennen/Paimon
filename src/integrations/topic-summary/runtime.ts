@@ -34,17 +34,17 @@ import {
   FeedFetchResult,
   SelectedItem,
   TopicKey,
-  TopicPushCategory,
-  TopicPushConfig,
-  TopicPushDailyQuota,
-  TopicPushSentLogItem,
-  TopicPushState,
-  TopicPushSource
+  TopicSummaryCategory,
+  TopicSummaryConfig,
+  TopicSummaryDailyQuota,
+  TopicSummarySentLogItem,
+  TopicSummaryState,
+  TopicSummarySource
 } from "./types";
 
 export async function runDigest(
-  config: TopicPushConfig,
-  state: TopicPushState,
+  config: TopicSummaryConfig,
+  state: TopicSummaryState,
   now: Date,
   targetLanguage: string
 ): Promise<DigestRunResult> {
@@ -76,7 +76,7 @@ export async function runDigest(
     engineering: selected.filter((item) => item.candidate.category === "engineering").length,
     news: selected.filter((item) => item.candidate.category === "news").length,
     ecosystem: selected.filter((item) => item.candidate.category === "ecosystem").length
-  } as Record<TopicPushCategory, number>;
+  } as Record<TopicSummaryCategory, number>;
 
   const fetchErrors = fetchResults
     .filter((item) => typeof item.error === "string")
@@ -100,9 +100,9 @@ export async function runDigest(
   };
 }
 
-export function mergeSentLog(state: TopicPushState, selected: SelectedItem[], now: Date): TopicPushState {
+export function mergeSentLog(state: TopicSummaryState, selected: SelectedItem[], now: Date): TopicSummaryState {
   const cutoffMs = now.getTime() - SENT_LOG_RETENTION_DAYS * 24 * 3600 * 1000;
-  const merged = new Map<string, TopicPushSentLogItem>();
+  const merged = new Map<string, TopicSummarySentLogItem>();
 
   for (const item of state.sentLog) {
     const sentMs = Date.parse(item.sentAt);
@@ -135,7 +135,7 @@ export function mergeSentLog(state: TopicPushState, selected: SelectedItem[], no
   };
 }
 
-async function fetchSource(source: TopicPushSource, now: Date): Promise<FeedFetchResult> {
+async function fetchSource(source: TopicSummarySource, now: Date): Promise<FeedFetchResult> {
   const fetchedAt = now.toISOString();
 
   try {
@@ -164,7 +164,7 @@ async function fetchText(url: string, timeoutMs: number): Promise<string> {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        "User-Agent": "Paimon-TopicPush/1.0",
+        "User-Agent": "Paimon-TopicSummary/1.0",
         Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.6"
       },
       signal: controller.signal
@@ -257,7 +257,7 @@ function parseRssRdfEntries(rdf: Record<string, unknown>): FeedEntry[] {
   }));
 }
 
-function buildCandidates(fetchResults: FeedFetchResult[], config: TopicPushConfig, now: Date): Candidate[] {
+function buildCandidates(fetchResults: FeedFetchResult[], config: TopicSummaryConfig, now: Date): Candidate[] {
   const out: Candidate[] = [];
   const cutoffMs = now.getTime() - config.filters.timeWindowHours * 3600 * 1000;
   const blockedDomains = config.filters.blockedDomains.map((item) => item.toLowerCase());
@@ -359,11 +359,11 @@ function deduplicateCandidates(candidates: Candidate[], titleThreshold: number):
   return kept;
 }
 
-function selectCandidates(candidates: Candidate[], quota: TopicPushDailyQuota, maxPerDomain: number): SelectedItem[] {
+function selectCandidates(candidates: Candidate[], quota: TopicSummaryDailyQuota, maxPerDomain: number): SelectedItem[] {
   const maxDomain = maxPerDomain <= 0 ? Number.POSITIVE_INFINITY : maxPerDomain;
   const sorted = candidates.slice().sort((left, right) => right.score - left.score);
 
-  const buckets: Record<TopicPushCategory, Candidate[]> = {
+  const buckets: Record<TopicSummaryCategory, Candidate[]> = {
     engineering: sorted.filter((item) => item.category === "engineering"),
     news: sorted.filter((item) => item.category === "news"),
     ecosystem: sorted.filter((item) => item.category === "ecosystem")
@@ -405,7 +405,7 @@ function selectCandidates(candidates: Candidate[], quota: TopicPushDailyQuota, m
   let needed = Math.max(0, total - selected.length);
 
   if (needed > 0) {
-    const fallbackOrder: TopicPushCategory[] = ["engineering", "ecosystem", "news"];
+    const fallbackOrder: TopicSummaryCategory[] = ["engineering", "ecosystem", "news"];
     for (const category of fallbackOrder) {
       if (needed <= 0) break;
       const before = selected.length;
