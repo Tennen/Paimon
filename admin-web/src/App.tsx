@@ -6,6 +6,12 @@ import { MarketSection } from "@/components/admin/MarketSection";
 import { MemorySection } from "@/components/admin/MemorySection";
 import { MessagesSection } from "@/components/admin/MessagesSection";
 import { SystemSection } from "@/components/admin/SystemSection";
+import type {
+  SystemCodexDraft,
+  SystemOllamaDraft,
+  SystemOpenAIDraft,
+  SystemOperationState
+} from "@/components/admin/SystemSection";
 import { TopicPushSection } from "@/components/admin/TopicPushSection";
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
@@ -44,18 +50,52 @@ import {
   UserFormState
 } from "@/types/admin";
 
+const EMPTY_OLLAMA_DRAFT: SystemOllamaDraft = {
+  model: "",
+  planningModel: "",
+  planningTimeoutMs: "",
+  thinkingBudgetEnabled: false,
+  thinkingBudgetDefault: ""
+};
+
+const EMPTY_OPENAI_DRAFT: SystemOpenAIDraft = {
+  baseUrl: "",
+  apiKey: "",
+  model: "",
+  planningModel: "",
+  chatOptions: "",
+  planningChatOptions: "",
+  fallbackToChatgptBridge: true,
+  forceBridge: false,
+  quotaResetDay: "",
+  monthlyTokenLimit: "",
+  monthlyBudgetUsd: "",
+  costInputPer1M: "",
+  costOutputPer1M: ""
+};
+
+const EMPTY_CODEX_DRAFT: SystemCodexDraft = {
+  model: "",
+  reasoningEffort: ""
+};
+
+const DEFAULT_SYSTEM_OPERATION_STATE: SystemOperationState = {
+  savingModel: false,
+  savingCodexConfig: false,
+  restarting: false,
+  pullingRepo: false,
+  buildingRepo: false,
+  deployingRepo: false
+};
+
 export default function App() {
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [users, setUsers] = useState<PushUser[]>([]);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  const [modelDraft, setModelDraft] = useState("");
-  const [planningModelDraft, setPlanningModelDraft] = useState("");
-  const [planningTimeoutDraft, setPlanningTimeoutDraft] = useState("");
-  const [thinkingBudgetEnabledDraft, setThinkingBudgetEnabledDraft] = useState(false);
-  const [thinkingBudgetDraft, setThinkingBudgetDraft] = useState("");
-  const [codexModelDraft, setCodexModelDraft] = useState("");
-  const [codexReasoningEffortDraft, setCodexReasoningEffortDraft] = useState("");
+  const [ollamaDraft, setOllamaDraft] = useState<SystemOllamaDraft>(EMPTY_OLLAMA_DRAFT);
+  const [openaiDraft, setOpenaiDraft] = useState<SystemOpenAIDraft>(EMPTY_OPENAI_DRAFT);
+  const [codexDraft, setCodexDraft] = useState<SystemCodexDraft>(EMPTY_CODEX_DRAFT);
   const [memoryCompactEveryRoundsDraft, setMemoryCompactEveryRoundsDraft] = useState("");
   const [memoryCompactMaxBatchSizeDraft, setMemoryCompactMaxBatchSizeDraft] = useState("");
   const [memorySummaryTopKDraft, setMemorySummaryTopKDraft] = useState("");
@@ -65,12 +105,8 @@ export default function App() {
 
   const [notice, setNotice] = useState<Notice>(null);
 
-  const [savingModel, setSavingModel] = useState(false);
-  const [savingCodexConfig, setSavingCodexConfig] = useState(false);
+  const [systemOperationState, setSystemOperationState] = useState<SystemOperationState>(DEFAULT_SYSTEM_OPERATION_STATE);
   const [savingMemoryConfig, setSavingMemoryConfig] = useState(false);
-  const [restarting, setRestarting] = useState(false);
-  const [pullingRepo, setPullingRepo] = useState(false);
-  const [buildingRepo, setBuildingRepo] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState("");
   const [savingUser, setSavingUser] = useState(false);
@@ -123,14 +159,30 @@ export default function App() {
     return new Map(users.map((user) => [user.id, user]));
   }, [users]);
 
+  function updateOllamaDraft<K extends keyof SystemOllamaDraft>(key: K, value: SystemOllamaDraft[K]): void {
+    setOllamaDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateOpenAIDraft<K extends keyof SystemOpenAIDraft>(key: K, value: SystemOpenAIDraft[K]): void {
+    setOpenaiDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateCodexDraft<K extends keyof SystemCodexDraft>(key: K, value: SystemCodexDraft[K]): void {
+    setCodexDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function updateSystemOperationState<K extends keyof SystemOperationState>(key: K, value: SystemOperationState[K]): void {
+    setSystemOperationState((prev) => ({ ...prev, [key]: value }));
+  }
+
   const modelFromList = useMemo(() => {
-    return models.includes(modelDraft) ? modelDraft : undefined;
-  }, [modelDraft, models]);
+    return models.includes(ollamaDraft.model) ? ollamaDraft.model : undefined;
+  }, [ollamaDraft.model, models]);
 
   const planningModelFromList = useMemo(() => {
-    const draft = planningModelDraft.trim();
+    const draft = ollamaDraft.planningModel.trim();
     return draft && models.includes(draft) ? draft : undefined;
-  }, [planningModelDraft, models]);
+  }, [ollamaDraft.planningModel, models]);
 
   const currentEvolutionGoal = useMemo(() => {
     if (!evolutionSnapshot?.state.currentGoalId) {
@@ -219,13 +271,32 @@ export default function App() {
   async function loadConfig(): Promise<void> {
     const payload = await request<AdminConfig>("/admin/api/config");
     setConfig(payload);
-    setModelDraft(payload.model || "");
-    setPlanningModelDraft(payload.planningModel || "");
-    setPlanningTimeoutDraft(payload.planningTimeoutMs || "");
-    setThinkingBudgetEnabledDraft(payload.thinkingBudgetEnabled === true);
-    setThinkingBudgetDraft(payload.thinkingBudgetDefault ?? payload.thinkingBudget ?? "");
-    setCodexModelDraft(payload.codexModel || "");
-    setCodexReasoningEffortDraft(payload.codexReasoningEffort || "");
+    setOllamaDraft({
+      model: payload.model || "",
+      planningModel: payload.planningModel || "",
+      planningTimeoutMs: payload.planningTimeoutMs || "",
+      thinkingBudgetEnabled: payload.thinkingBudgetEnabled === true,
+      thinkingBudgetDefault: payload.thinkingBudgetDefault ?? payload.thinkingBudget ?? ""
+    });
+    setOpenaiDraft({
+      baseUrl: payload.openaiBaseUrl || "",
+      apiKey: payload.openaiApiKey || "",
+      model: payload.openaiModel || "",
+      planningModel: payload.openaiPlanningModel || "",
+      chatOptions: payload.openaiChatOptions || "",
+      planningChatOptions: payload.openaiPlanningChatOptions || "",
+      fallbackToChatgptBridge: payload.openaiFallbackToChatgptBridge !== false,
+      forceBridge: payload.openaiForceBridge === true,
+      quotaResetDay: payload.openaiQuotaResetDay || "",
+      monthlyTokenLimit: payload.openaiMonthlyTokenLimit || "",
+      monthlyBudgetUsd: payload.openaiMonthlyBudgetUsd || "",
+      costInputPer1M: payload.openaiCostInputPer1M || "",
+      costOutputPer1M: payload.openaiCostOutputPer1M || ""
+    });
+    setCodexDraft({
+      model: payload.codexModel || "",
+      reasoningEffort: payload.codexReasoningEffort || ""
+    });
     setMemoryCompactEveryRoundsDraft(payload.memoryCompactEveryRounds || "");
     setMemoryCompactMaxBatchSizeDraft(payload.memoryCompactMaxBatchSize || "");
     setMemorySummaryTopKDraft(payload.memorySummaryTopK || "");
@@ -314,14 +385,14 @@ export default function App() {
   }
 
   async function handleSaveModel(restartAfterSave: boolean): Promise<void> {
-    const model = modelDraft.trim();
+    const model = ollamaDraft.model.trim();
     if (!model) {
       setNotice({ type: "error", title: "模型不能为空" });
       return;
     }
 
-    const planningModel = planningModelDraft.trim();
-    const planningTimeoutMs = planningTimeoutDraft.trim();
+    const planningModel = ollamaDraft.planningModel.trim();
+    const planningTimeoutMs = ollamaDraft.planningTimeoutMs.trim();
     if (planningTimeoutMs) {
       const parsed = Number(planningTimeoutMs);
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -329,7 +400,7 @@ export default function App() {
         return;
       }
     }
-    const thinkingBudgetDefault = thinkingBudgetDraft.trim();
+    const thinkingBudgetDefault = ollamaDraft.thinkingBudgetDefault.trim();
     if (thinkingBudgetDefault) {
       const parsed = Number(thinkingBudgetDefault);
       if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -337,12 +408,80 @@ export default function App() {
         return;
       }
     }
-    if (thinkingBudgetEnabledDraft && !thinkingBudgetDefault) {
+    if (ollamaDraft.thinkingBudgetEnabled && !thinkingBudgetDefault) {
       setNotice({ type: "error", title: "开启 Thinking Budget 时必须设置 Planning Thinking Budget 默认值" });
       return;
     }
+    const openaiQuotaResetDay = openaiDraft.quotaResetDay.trim();
+    if (openaiQuotaResetDay) {
+      const parsed = Number(openaiQuotaResetDay);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "OpenAI Quota Reset Day 必须是正整数" });
+        return;
+      }
+    }
+    const openaiMonthlyTokenLimit = openaiDraft.monthlyTokenLimit.trim();
+    if (openaiMonthlyTokenLimit) {
+      const parsed = Number(openaiMonthlyTokenLimit);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "OpenAI Monthly Token Limit 必须是正整数" });
+        return;
+      }
+    }
+    const openaiMonthlyBudgetUsd = openaiDraft.monthlyBudgetUsd.trim();
+    if (openaiMonthlyBudgetUsd) {
+      const parsed = Number(openaiMonthlyBudgetUsd);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "OpenAI Monthly Budget USD 必须是正数" });
+        return;
+      }
+    }
+    const openaiCostInputPer1M = openaiDraft.costInputPer1M.trim();
+    if (openaiCostInputPer1M) {
+      const parsed = Number(openaiCostInputPer1M);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "OpenAI Cost Input Per 1M 必须是正数" });
+        return;
+      }
+    }
+    const openaiCostOutputPer1M = openaiDraft.costOutputPer1M.trim();
+    if (openaiCostOutputPer1M) {
+      const parsed = Number(openaiCostOutputPer1M);
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        setNotice({ type: "error", title: "OpenAI Cost Output Per 1M 必须是正数" });
+        return;
+      }
+    }
+    let openaiChatOptions = openaiDraft.chatOptions.trim();
+    if (openaiChatOptions) {
+      try {
+        const parsed = JSON.parse(openaiChatOptions) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          setNotice({ type: "error", title: "OpenAI Chat Options 必须是 JSON 对象" });
+          return;
+        }
+        openaiChatOptions = JSON.stringify(parsed);
+      } catch (_error) {
+        setNotice({ type: "error", title: "OpenAI Chat Options 不是合法 JSON" });
+        return;
+      }
+    }
+    let openaiPlanningChatOptions = openaiDraft.planningChatOptions.trim();
+    if (openaiPlanningChatOptions) {
+      try {
+        const parsed = JSON.parse(openaiPlanningChatOptions) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          setNotice({ type: "error", title: "OpenAI Planning Chat Options 必须是 JSON 对象" });
+          return;
+        }
+        openaiPlanningChatOptions = JSON.stringify(parsed);
+      } catch (_error) {
+        setNotice({ type: "error", title: "OpenAI Planning Chat Options 不是合法 JSON" });
+        return;
+      }
+    }
 
-    setSavingModel(true);
+    updateSystemOperationState("savingModel", true);
     try {
       const payload = await request<{ output?: string }>("/admin/api/config/model", {
         method: "POST",
@@ -350,9 +489,22 @@ export default function App() {
           model,
           planningModel,
           planningTimeoutMs,
-          thinkingBudgetEnabled: thinkingBudgetEnabledDraft,
+          thinkingBudgetEnabled: ollamaDraft.thinkingBudgetEnabled,
           thinkingBudgetDefault,
           thinkingBudget: thinkingBudgetDefault,
+          openaiBaseUrl: openaiDraft.baseUrl.trim(),
+          openaiApiKey: openaiDraft.apiKey.trim(),
+          openaiModel: openaiDraft.model.trim(),
+          openaiPlanningModel: openaiDraft.planningModel.trim(),
+          openaiChatOptions,
+          openaiPlanningChatOptions,
+          openaiFallbackToChatgptBridge: openaiDraft.fallbackToChatgptBridge,
+          openaiForceBridge: openaiDraft.forceBridge,
+          openaiQuotaResetDay,
+          openaiMonthlyTokenLimit,
+          openaiMonthlyBudgetUsd,
+          openaiCostInputPer1M,
+          openaiCostOutputPer1M,
           restart: restartAfterSave
         })
       });
@@ -365,12 +517,12 @@ export default function App() {
     } catch (error) {
       notifyError("保存模型配置失败", error);
     } finally {
-      setSavingModel(false);
+      updateSystemOperationState("savingModel", false);
     }
   }
 
   async function handleRestartPm2(): Promise<void> {
-    setRestarting(true);
+    updateSystemOperationState("restarting", true);
     try {
       const payload = await request<{ output?: string }>("/admin/api/restart", {
         method: "POST",
@@ -380,13 +532,13 @@ export default function App() {
     } catch (error) {
       notifyError("pm2 重启失败", error);
     } finally {
-      setRestarting(false);
+      updateSystemOperationState("restarting", false);
     }
   }
 
   async function handleSaveCodexConfig(): Promise<void> {
-    const model = codexModelDraft.trim();
-    const reasoningEffort = codexReasoningEffortDraft.trim().toLowerCase();
+    const model = codexDraft.model.trim();
+    const reasoningEffort = codexDraft.reasoningEffort.trim().toLowerCase();
     if (reasoningEffort) {
       const allowedValues = new Set(["minimal", "low", "medium", "high", "xhigh"]);
       if (!allowedValues.has(reasoningEffort)) {
@@ -395,7 +547,7 @@ export default function App() {
       }
     }
 
-    setSavingCodexConfig(true);
+    updateSystemOperationState("savingCodexConfig", true);
     try {
       await request<{ ok: boolean }>("/admin/api/config/codex", {
         method: "POST",
@@ -412,7 +564,7 @@ export default function App() {
     } catch (error) {
       notifyError("保存 Codex 配置失败", error);
     } finally {
-      setSavingCodexConfig(false);
+      updateSystemOperationState("savingCodexConfig", false);
     }
   }
 
@@ -443,7 +595,7 @@ export default function App() {
   }
 
   async function handlePullRepo(): Promise<void> {
-    setPullingRepo(true);
+    updateSystemOperationState("pullingRepo", true);
     try {
       const payload = await request<{
         ok: boolean;
@@ -469,12 +621,12 @@ export default function App() {
     } catch (error) {
       notifyError("同步远端代码失败", error);
     } finally {
-      setPullingRepo(false);
+      updateSystemOperationState("pullingRepo", false);
     }
   }
 
   async function handleBuildRepo(): Promise<void> {
-    setBuildingRepo(true);
+    updateSystemOperationState("buildingRepo", true);
     try {
       const payload = await request<{
         ok: boolean;
@@ -498,7 +650,42 @@ export default function App() {
     } catch (error) {
       notifyError("执行项目构建失败", error);
     } finally {
-      setBuildingRepo(false);
+      updateSystemOperationState("buildingRepo", false);
+    }
+  }
+
+  async function handleDeployRepo(): Promise<void> {
+    updateSystemOperationState("deployingRepo", true);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        cwd: string;
+        pullCommand: string;
+        pullOutput: string;
+        buildOutput: string;
+        restartOutput: string;
+      }>("/admin/api/repo/deploy", {
+        method: "POST",
+        body: "{}"
+      });
+
+      setNotice({
+        type: "success",
+        title: "一键部署完成",
+        text: [
+          `执行命令: ${payload.pullCommand}`,
+          `工作目录: ${payload.cwd}`,
+          payload.pullOutput,
+          payload.buildOutput,
+          payload.restartOutput
+        ]
+          .filter(Boolean)
+          .join("\n\n")
+      });
+    } catch (error) {
+      notifyError("一键部署失败", error);
+    } finally {
+      updateSystemOperationState("deployingRepo", false);
     }
   }
 
@@ -1350,33 +1537,20 @@ export default function App() {
           models={models}
           modelFromList={modelFromList}
           planningModelFromList={planningModelFromList}
-          modelDraft={modelDraft}
-          planningModelDraft={planningModelDraft}
-          planningTimeoutDraft={planningTimeoutDraft}
-          thinkingBudgetEnabledDraft={thinkingBudgetEnabledDraft}
-          thinkingBudgetDraft={thinkingBudgetDraft}
-          codexModelDraft={codexModelDraft}
-          codexReasoningEffortDraft={codexReasoningEffortDraft}
-          savingModel={savingModel}
-          savingCodexConfig={savingCodexConfig}
-          restarting={restarting}
-          pullingRepo={pullingRepo}
-          buildingRepo={buildingRepo}
-          onModelSelect={setModelDraft}
-          onModelDraftChange={setModelDraft}
-          onPlanningModelSelect={setPlanningModelDraft}
-          onPlanningModelDraftChange={setPlanningModelDraft}
-          onPlanningTimeoutDraftChange={setPlanningTimeoutDraft}
-          onThinkingBudgetEnabledDraftChange={setThinkingBudgetEnabledDraft}
-          onThinkingBudgetDraftChange={setThinkingBudgetDraft}
-          onCodexModelDraftChange={setCodexModelDraft}
-          onCodexReasoningEffortDraftChange={setCodexReasoningEffortDraft}
+          ollamaDraft={ollamaDraft}
+          openaiDraft={openaiDraft}
+          codexDraft={codexDraft}
+          operationState={systemOperationState}
+          onOllamaDraftChange={updateOllamaDraft}
+          onOpenAIDraftChange={updateOpenAIDraft}
+          onCodexDraftChange={updateCodexDraft}
           onRefreshModels={() => void loadModels()}
           onSaveModel={(restartAfterSave) => void handleSaveModel(restartAfterSave)}
           onSaveCodexConfig={() => void handleSaveCodexConfig()}
           onRestartPm2={() => void handleRestartPm2()}
           onPullRepo={() => void handlePullRepo()}
           onBuildRepo={() => void handleBuildRepo()}
+          onDeployRepo={() => void handleDeployRepo()}
         />
       ) : null}
 

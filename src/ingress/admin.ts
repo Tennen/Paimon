@@ -199,6 +199,19 @@ export class AdminIngressAdapter implements IngressAdapter {
         thinkingBudgetEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_THINKING_BUDGET_ENABLED")) ?? false,
         thinkingBudgetDefault,
         thinkingBudget: thinkingBudgetDefault,
+        openaiBaseUrl: getEnvValue(envPath, "OPENAI_BASE_URL"),
+        openaiApiKey: getEnvValue(envPath, "OPENAI_API_KEY"),
+        openaiModel: getEnvValue(envPath, "OPENAI_MODEL"),
+        openaiPlanningModel: getEnvValue(envPath, "OPENAI_PLANNING_MODEL"),
+        openaiChatOptions: getEnvValue(envPath, "OPENAI_CHAT_OPTIONS"),
+        openaiPlanningChatOptions: getEnvValue(envPath, "OPENAI_PLANNING_CHAT_OPTIONS"),
+        openaiFallbackToChatgptBridge: parseOptionalBoolean(getEnvValue(envPath, "OPENAI_FALLBACK_TO_CHATGPT_BRIDGE")) ?? true,
+        openaiForceBridge: parseOptionalBoolean(getEnvValue(envPath, "OPENAI_FORCE_BRIDGE")) ?? false,
+        openaiQuotaResetDay: getEnvValue(envPath, "OPENAI_QUOTA_RESET_DAY"),
+        openaiMonthlyTokenLimit: getEnvValue(envPath, "OPENAI_MONTHLY_TOKEN_LIMIT"),
+        openaiMonthlyBudgetUsd: getEnvValue(envPath, "OPENAI_MONTHLY_BUDGET_USD"),
+        openaiCostInputPer1M: getEnvValue(envPath, "OPENAI_COST_INPUT_PER_1M"),
+        openaiCostOutputPer1M: getEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M"),
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
         memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
@@ -345,6 +358,19 @@ export class AdminIngressAdapter implements IngressAdapter {
         thinkingBudgetEnabled?: unknown;
         thinkingBudgetDefault?: unknown;
         thinkingBudget?: unknown;
+        openaiBaseUrl?: unknown;
+        openaiApiKey?: unknown;
+        openaiModel?: unknown;
+        openaiPlanningModel?: unknown;
+        openaiChatOptions?: unknown;
+        openaiPlanningChatOptions?: unknown;
+        openaiFallbackToChatgptBridge?: unknown;
+        openaiForceBridge?: unknown;
+        openaiQuotaResetDay?: unknown;
+        openaiMonthlyTokenLimit?: unknown;
+        openaiMonthlyBudgetUsd?: unknown;
+        openaiCostInputPer1M?: unknown;
+        openaiCostOutputPer1M?: unknown;
         restart?: unknown;
       };
       const model = typeof body.model === "string" ? body.model.trim() : "";
@@ -378,6 +404,58 @@ export class AdminIngressAdapter implements IngressAdapter {
         return;
       }
 
+      const openaiBaseUrl = normalizeOptionalString(body.openaiBaseUrl);
+      const openaiApiKey = normalizeOptionalString(body.openaiApiKey);
+      const openaiModel = normalizeOptionalString(body.openaiModel);
+      const openaiPlanningModel = normalizeOptionalString(body.openaiPlanningModel);
+      const openaiChatOptionsRaw = normalizeOptionalJsonObjectString(body.openaiChatOptions);
+      if (openaiChatOptionsRaw === null) {
+        res.status(400).json({ error: "openaiChatOptions must be a JSON object or empty" });
+        return;
+      }
+      const openaiPlanningChatOptionsRaw = normalizeOptionalJsonObjectString(body.openaiPlanningChatOptions);
+      if (openaiPlanningChatOptionsRaw === null) {
+        res.status(400).json({ error: "openaiPlanningChatOptions must be a JSON object or empty" });
+        return;
+      }
+      const openaiFallbackToChatgptBridge = parseOptionalBoolean(body.openaiFallbackToChatgptBridge);
+      if (body.openaiFallbackToChatgptBridge !== undefined && openaiFallbackToChatgptBridge === undefined) {
+        res.status(400).json({ error: "openaiFallbackToChatgptBridge must be boolean" });
+        return;
+      }
+      const openaiForceBridge = parseOptionalBoolean(body.openaiForceBridge);
+      if (body.openaiForceBridge !== undefined && openaiForceBridge === undefined) {
+        res.status(400).json({ error: "openaiForceBridge must be boolean" });
+        return;
+      }
+      const openaiQuotaResetDayRaw = normalizeOptionalIntegerString(body.openaiQuotaResetDay);
+      if (openaiQuotaResetDayRaw === null) {
+        res.status(400).json({ error: "openaiQuotaResetDay must be a positive integer or empty" });
+        return;
+      }
+      const openaiMonthlyTokenLimitRaw = normalizeOptionalIntegerString(body.openaiMonthlyTokenLimit);
+      if (openaiMonthlyTokenLimitRaw === null) {
+        res.status(400).json({ error: "openaiMonthlyTokenLimit must be a positive integer or empty" });
+        return;
+      }
+      const openaiMonthlyBudgetUsdRaw = normalizeOptionalNumberString(body.openaiMonthlyBudgetUsd);
+      if (openaiMonthlyBudgetUsdRaw === null) {
+        res.status(400).json({ error: "openaiMonthlyBudgetUsd must be a positive number or empty" });
+        return;
+      }
+      const openaiCostInputPer1MRaw = normalizeOptionalNumberString(body.openaiCostInputPer1M);
+      if (openaiCostInputPer1MRaw === null) {
+        res.status(400).json({ error: "openaiCostInputPer1M must be a positive number or empty" });
+        return;
+      }
+      const openaiCostOutputPer1MRaw = normalizeOptionalNumberString(body.openaiCostOutputPer1M);
+      if (openaiCostOutputPer1MRaw === null) {
+        res.status(400).json({ error: "openaiCostOutputPer1M must be a positive number or empty" });
+        return;
+      }
+      const effectiveOpenaiFallbackToChatgptBridge = openaiFallbackToChatgptBridge ?? true;
+      const effectiveOpenaiForceBridge = openaiForceBridge ?? false;
+
       const envPath = this.envStore.getPath();
 
       try {
@@ -397,6 +475,71 @@ export class AdminIngressAdapter implements IngressAdapter {
           setEnvValue(envPath, "LLM_THINKING_BUDGET", thinkingBudgetRaw);
         } else {
           unsetEnvValue(envPath, "LLM_THINKING_BUDGET");
+        }
+        if (openaiBaseUrl) {
+          setEnvValue(envPath, "OPENAI_BASE_URL", openaiBaseUrl);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_BASE_URL");
+        }
+        if (openaiApiKey) {
+          setEnvValue(envPath, "OPENAI_API_KEY", openaiApiKey);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_API_KEY");
+        }
+        if (openaiModel) {
+          setEnvValue(envPath, "OPENAI_MODEL", openaiModel);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_MODEL");
+        }
+        if (openaiPlanningModel) {
+          setEnvValue(envPath, "OPENAI_PLANNING_MODEL", openaiPlanningModel);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_PLANNING_MODEL");
+        }
+        if (openaiChatOptionsRaw) {
+          setEnvValue(envPath, "OPENAI_CHAT_OPTIONS", openaiChatOptionsRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_CHAT_OPTIONS");
+        }
+        if (openaiPlanningChatOptionsRaw) {
+          setEnvValue(envPath, "OPENAI_PLANNING_CHAT_OPTIONS", openaiPlanningChatOptionsRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_PLANNING_CHAT_OPTIONS");
+        }
+        setEnvValue(
+          envPath,
+          "OPENAI_FALLBACK_TO_CHATGPT_BRIDGE",
+          effectiveOpenaiFallbackToChatgptBridge ? "true" : "false"
+        );
+        setEnvValue(
+          envPath,
+          "OPENAI_FORCE_BRIDGE",
+          effectiveOpenaiForceBridge ? "true" : "false"
+        );
+        if (openaiQuotaResetDayRaw) {
+          setEnvValue(envPath, "OPENAI_QUOTA_RESET_DAY", openaiQuotaResetDayRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_QUOTA_RESET_DAY");
+        }
+        if (openaiMonthlyTokenLimitRaw) {
+          setEnvValue(envPath, "OPENAI_MONTHLY_TOKEN_LIMIT", openaiMonthlyTokenLimitRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_MONTHLY_TOKEN_LIMIT");
+        }
+        if (openaiMonthlyBudgetUsdRaw) {
+          setEnvValue(envPath, "OPENAI_MONTHLY_BUDGET_USD", openaiMonthlyBudgetUsdRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_MONTHLY_BUDGET_USD");
+        }
+        if (openaiCostInputPer1MRaw) {
+          setEnvValue(envPath, "OPENAI_COST_INPUT_PER_1M", openaiCostInputPer1MRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_COST_INPUT_PER_1M");
+        }
+        if (openaiCostOutputPer1MRaw) {
+          setEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M", openaiCostOutputPer1MRaw);
+        } else {
+          unsetEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M");
         }
       } catch (error) {
         res.status(500).json({ error: (error as Error).message ?? "failed to save model config" });
@@ -616,6 +759,21 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(500).json({
           ok: false,
           error: (error as Error).message ?? "repo build failed"
+        });
+      }
+    });
+
+    app.post("/admin/api/repo/deploy", async (_req: Request, res: ExResponse) => {
+      try {
+        const result = await pullBuildAndRestart();
+        res.json({
+          ok: true,
+          ...result
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "repo deploy failed"
         });
       }
     });
@@ -2200,6 +2358,47 @@ function normalizeOptionalIntegerString(value: unknown): string | null {
   return String(Math.floor(parsed));
 }
 
+function normalizeOptionalNumberString(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  const raw = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    return "";
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return String(parsed);
+}
+
+function normalizeOptionalString(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.trim();
+}
+
+function normalizeOptionalJsonObjectString(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return null;
+  }
+}
+
 async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] }> {
   const baseUrl = (process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434").replace(/\/$/, "");
   const endpoint = `${baseUrl}/api/tags`;
@@ -2292,6 +2491,25 @@ async function buildProject(): Promise<{
   return {
     cwd,
     buildOutput: joinCommandOutput(buildResult)
+  };
+}
+
+async function pullBuildAndRestart(): Promise<{
+  cwd: string;
+  pullCommand: string;
+  pullOutput: string;
+  buildOutput: string;
+  restartOutput: string;
+}> {
+  const pullResult = await pullRepoWithRebase();
+  const buildResult = await buildProject();
+  const restartOutput = await restartPm2();
+  return {
+    cwd: buildResult.cwd,
+    pullCommand: pullResult.pullCommand,
+    pullOutput: pullResult.pullOutput,
+    buildOutput: buildResult.buildOutput,
+    restartOutput
   };
 }
 
