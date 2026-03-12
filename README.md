@@ -188,6 +188,24 @@ WECOM_APP_SECRET=your_app_secret
 WECOM_AGENT_ID=your_agent_id
 ```
 
+#### Evolution 推送通知（可选）
+
+```env
+# evolution 专用收件人（优先级高于 WECOM_NOTIFY_TO）
+EVOLUTION_NOTIFY_TO=
+
+# 通用 WeCom 收件人（当 EVOLUTION_NOTIFY_TO 为空时回退）
+WECOM_NOTIFY_TO=
+```
+
+说明：
+
+- `EVOLUTION_NOTIFY_TO` 支持多个收件人，使用空格/逗号/分号/竖线分隔。
+- 自动 tick 触发且命中可执行 Goal/Retry 时，会推送一条“自动 tick 已触发”通知。
+- Goal 完成（成功/失败）后会推送一条完成通知。
+- Goal 成功后若 `startedFromRef..push.commit` 存在新增提交，会额外推送一条简洁 git log 摘要（纯文本清洗、限制行数）。
+- 通知发送失败只记录日志，不会中断 evolution 主流程。
+
 #### 启用语音转写
 
 ```env
