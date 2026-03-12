@@ -78,6 +78,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照
 - `terminal`: 执行本机命令
 - `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
+- `writing-organizer`: 增量写作整理，支持 rolling raw 输入、summary/outline/draft 生成与上一版回滚
 - `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
@@ -90,6 +91,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 模型配置查看与更新
 - 定时任务和推送用户管理
 - Topic Summary 配置管理
+- Writing Organizer 主题列表/详情查看与整理操作
 - Market Analysis 配置与运行记录查看
 - Evolution 队列与状态管理
 - 审计日志与本地数据持久化
@@ -301,6 +303,24 @@ Memory 规则（global hybrid memory）：
 - 当 summary 检索无命中时，主 `Orchestrator` 会回退到 `MemoryStore.read(sessionId)` 的会话记忆
 - `/re` 会在该全局记忆上执行子 agent 循环
 
+## Incremental Writing Organizer
+
+写作整理能力使用 `/writing` 直达命令，数据结构固定在 `data/writing/topics/<topic-id>/` 下：
+
+- `raw/*.md`：原始片段，rolling 存储（单文件最多 200 行）
+- `state/{summary,outline,draft}.md`：当前版本
+- `backup/*.prev.md`：上一版备份
+- `meta.json`：topic 元信息（用于命令与 admin 查询）
+
+常用命令：
+
+- `/writing topics`
+- `/writing show <topic-id>`
+- `/writing append <topic-id> "一段新内容"`
+- `/writing summarize <topic-id>`
+- `/writing restore <topic-id>`
+- `/writing set <topic-id> <summary|outline|draft> "内容"`（手动整理）
+
 ## 数据与持久化
 
 项目默认把运行数据写入 `data/` 目录，主要包括：
@@ -313,6 +333,7 @@ Memory 规则（global hybrid memory）：
 - 审计日志
 - 定时任务和推送用户
 - Topic Summary 配置与状态
+- Incremental Writing Organizer 主题目录、raw/state/backup 与 meta
 - Market Analysis 配置、持仓与运行记录
 - Evolution 队列与指标
 

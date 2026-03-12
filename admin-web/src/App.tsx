@@ -12,6 +12,7 @@ import type {
   SystemOperationState
 } from "@/components/admin/SystemSection";
 import { TopicSummarySection } from "@/components/admin/TopicSummarySection";
+import { WritingOrganizerSection } from "@/components/admin/WritingOrganizerSection";
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
@@ -45,6 +46,11 @@ import {
   TopicSummaryEngine,
   TopicSummarySource,
   TopicSummaryState,
+  WritingStateSection,
+  WritingTopicDetail,
+  WritingTopicMeta,
+  WritingTopicState,
+  WritingTopicsPayload,
   UserFormState
 } from "@/types/admin";
 
@@ -97,6 +103,12 @@ const DEFAULT_SYSTEM_OPERATION_STATE: SystemOperationState = {
   pullingRepo: false,
   buildingRepo: false,
   deployingRepo: false
+};
+
+const DEFAULT_WRITING_TOPIC_STATE: WritingTopicState = {
+  summary: "",
+  outline: "",
+  draft: ""
 };
 
 export default function App() {
@@ -152,6 +164,17 @@ export default function App() {
   const [savingTopicSummaryProfileAction, setSavingTopicSummaryProfileAction] = useState(false);
   const [savingTopicSummaryConfig, setSavingTopicSummaryConfig] = useState(false);
   const [clearingTopicSummaryState, setClearingTopicSummaryState] = useState(false);
+  const [writingTopics, setWritingTopics] = useState<WritingTopicMeta[]>([]);
+  const [writingSelectedTopicId, setWritingSelectedTopicId] = useState("");
+  const [writingTopicIdDraft, setWritingTopicIdDraft] = useState("");
+  const [writingTopicTitleDraft, setWritingTopicTitleDraft] = useState("");
+  const [writingAppendDraft, setWritingAppendDraft] = useState("");
+  const [writingTopicDetail, setWritingTopicDetail] = useState<WritingTopicDetail | null>(null);
+  const [loadingWritingTopics, setLoadingWritingTopics] = useState(false);
+  const [loadingWritingDetail, setLoadingWritingDetail] = useState(false);
+  const [writingActionState, setWritingActionState] = useState<"append" | "summarize" | "restore" | "set" | null>(null);
+  const [writingManualSection, setWritingManualSection] = useState<WritingStateSection>("summary");
+  const [writingManualContent, setWritingManualContent] = useState("");
 
   const [evolutionSnapshot, setEvolutionSnapshot] = useState<EvolutionStateSnapshot | null>(null);
   const [loadingEvolution, setLoadingEvolution] = useState(false);
@@ -258,6 +281,7 @@ export default function App() {
         loadMarketConfig(),
         loadMarketRuns(),
         loadTopicSummaryConfig(),
+        loadWritingTopics(),
         loadEvolutionState({ silent: true })
       ]);
       setNotice(null);
@@ -367,6 +391,61 @@ export default function App() {
       ?? null;
     setTopicSummaryConfig(normalizeTopicSummaryConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG));
     setTopicSummaryState(normalizeTopicSummaryState(selectedProfile?.state ?? payload.state ?? DEFAULT_TOPIC_SUMMARY_STATE));
+  }
+
+  async function loadWritingTopics(options?: { preferredTopicId?: string }): Promise<void> {
+    setLoadingWritingTopics(true);
+    try {
+      const payload = await request<WritingTopicsPayload>("/admin/api/writing/topics");
+      const topics = normalizeWritingTopicMetaList(payload.topics);
+      setWritingTopics(topics);
+
+      const currentSelected = writingSelectedTopicId;
+      const preferred = normalizeWritingTopicId(options?.preferredTopicId ?? "");
+      const nextSelected = topics.some((item) => item.topicId === preferred)
+        ? preferred
+        : topics.some((item) => item.topicId === currentSelected)
+          ? currentSelected
+          : (topics[0]?.topicId ?? "");
+
+      setWritingSelectedTopicId(nextSelected);
+      if (!writingTopicIdDraft.trim() || writingTopicIdDraft.trim() === currentSelected) {
+        setWritingTopicIdDraft(nextSelected);
+      }
+
+      if (nextSelected) {
+        await loadWritingTopicDetail(nextSelected, { silent: true });
+      } else {
+        setWritingTopicDetail(null);
+      }
+    } finally {
+      setLoadingWritingTopics(false);
+    }
+  }
+
+  async function loadWritingTopicDetail(topicId: string, options?: { silent?: boolean }): Promise<void> {
+    const normalizedTopicId = normalizeWritingTopicId(topicId);
+    if (!normalizedTopicId) {
+      setWritingTopicDetail(null);
+      return;
+    }
+
+    const silent = options?.silent ?? false;
+    if (!silent) {
+      setLoadingWritingDetail(true);
+    }
+
+    try {
+      const payload = await request<WritingTopicDetail>(`/admin/api/writing/topics/${encodeURIComponent(normalizedTopicId)}`);
+      const detail = normalizeWritingTopicDetail(payload, normalizedTopicId);
+      setWritingTopicDetail(detail);
+      setWritingSelectedTopicId(detail.meta.topicId);
+      setWritingTopicTitleDraft(detail.meta.title);
+    } finally {
+      if (!silent) {
+        setLoadingWritingDetail(false);
+      }
+    }
   }
 
   async function loadEvolutionState(options?: { silent?: boolean }): Promise<void> {
@@ -1461,6 +1540,133 @@ export default function App() {
     }
   }
 
+  function handleWritingTopicSelect(topicId: string): void {
+    const normalizedTopicId = normalizeWritingTopicId(topicId);
+    if (!normalizedTopicId) {
+      return;
+    }
+
+    setWritingSelectedTopicId(normalizedTopicId);
+    setWritingTopicIdDraft(normalizedTopicId);
+    const target = writingTopics.find((item) => item.topicId === normalizedTopicId);
+    if (target) {
+      setWritingTopicTitleDraft(target.title);
+    }
+    setWritingManualContent("");
+    void loadWritingTopicDetail(normalizedTopicId);
+  }
+
+  async function handleAppendWritingTopic(): Promise<void> {
+    const topicId = normalizeWritingTopicId(writingTopicIdDraft);
+    if (!topicId) {
+      setNotice({ type: "error", title: "请先输入合法 topicId" });
+      return;
+    }
+
+    const content = writingAppendDraft.trim();
+    if (!content) {
+      setNotice({ type: "error", title: "append content 不能为空" });
+      return;
+    }
+
+    const title = writingTopicTitleDraft.trim();
+    setWritingActionState("append");
+    try {
+      const payload = await request<{ ok: boolean; result?: { topicId?: string } }>(`/admin/api/writing/topics/${encodeURIComponent(topicId)}/append`, {
+        method: "POST",
+        body: JSON.stringify({
+          content,
+          ...(title ? { title } : {})
+        })
+      });
+      const nextTopicId = normalizeWritingTopicId(payload.result?.topicId ?? topicId) || topicId;
+      setWritingAppendDraft("");
+      setWritingSelectedTopicId(nextTopicId);
+      setWritingTopicIdDraft(nextTopicId);
+      await loadWritingTopics({ preferredTopicId: nextTopicId });
+      setNotice({ type: "success", title: `已追加内容到 topic: ${nextTopicId}` });
+    } catch (error) {
+      notifyError("追加 writing 内容失败", error);
+    } finally {
+      setWritingActionState(null);
+    }
+  }
+
+  async function handleSummarizeWritingTopic(): Promise<void> {
+    const topicId = normalizeWritingTopicId(writingSelectedTopicId || writingTopicIdDraft);
+    if (!topicId) {
+      setNotice({ type: "error", title: "请先选择或输入 topicId" });
+      return;
+    }
+
+    setWritingActionState("summarize");
+    try {
+      await request<{ ok: boolean }>(`/admin/api/writing/topics/${encodeURIComponent(topicId)}/summarize`, {
+        method: "POST",
+        body: "{}"
+      });
+      await loadWritingTopics({ preferredTopicId: topicId });
+      setNotice({ type: "success", title: `topic ${topicId} summarize 完成` });
+    } catch (error) {
+      notifyError("执行 writing summarize 失败", error);
+    } finally {
+      setWritingActionState(null);
+    }
+  }
+
+  async function handleRestoreWritingTopic(): Promise<void> {
+    const topicId = normalizeWritingTopicId(writingSelectedTopicId || writingTopicIdDraft);
+    if (!topicId) {
+      setNotice({ type: "error", title: "请先选择或输入 topicId" });
+      return;
+    }
+
+    setWritingActionState("restore");
+    try {
+      await request<{ ok: boolean }>(`/admin/api/writing/topics/${encodeURIComponent(topicId)}/restore`, {
+        method: "POST",
+        body: "{}"
+      });
+      await loadWritingTopics({ preferredTopicId: topicId });
+      setNotice({ type: "success", title: `topic ${topicId} 已恢复上一版` });
+    } catch (error) {
+      notifyError("执行 writing restore 失败", error);
+    } finally {
+      setWritingActionState(null);
+    }
+  }
+
+  async function handleSetWritingTopicState(): Promise<void> {
+    const topicId = normalizeWritingTopicId(writingSelectedTopicId || writingTopicIdDraft);
+    if (!topicId) {
+      setNotice({ type: "error", title: "请先选择或输入 topicId" });
+      return;
+    }
+
+    const content = writingManualContent.trim();
+    if (!content) {
+      setNotice({ type: "error", title: "手动 state 内容不能为空" });
+      return;
+    }
+
+    setWritingActionState("set");
+    try {
+      await request<{ ok: boolean }>(`/admin/api/writing/topics/${encodeURIComponent(topicId)}/state`, {
+        method: "POST",
+        body: JSON.stringify({
+          section: writingManualSection,
+          content
+        })
+      });
+      await loadWritingTopics({ preferredTopicId: topicId });
+      setNotice({ type: "success", title: `topic ${topicId} 的 ${writingManualSection} 已更新` });
+    } catch (error) {
+      notifyError("手动更新 writing state 失败", error);
+    } finally {
+      setWritingActionState(null);
+    }
+  }
+
   async function handleSubmitEvolutionGoal(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const goal = evolutionGoalDraft.trim();
@@ -1519,7 +1725,7 @@ export default function App() {
     <main className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-6 md:px-6">
       <header className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Paimon Admin</h1>
-        <p className="text-sm text-muted-foreground">在一个页面中管理模型、消息任务、Market 分析与 Evolution 引擎</p>
+        <p className="text-sm text-muted-foreground">在一个页面中管理模型、消息任务、Market/Topic/Writing 模块与 Evolution 引擎</p>
       </header>
 
       {notice ? (
@@ -1647,6 +1853,33 @@ export default function App() {
               onSaveConfig={() => void handleSaveTopicSummaryConfig()}
               onRefresh={() => void loadTopicSummaryConfig()}
               onClearSentLog={() => void handleClearTopicSummaryState()}
+            />
+          ) : null}
+
+          {activeMenu === "writing" ? (
+            <WritingOrganizerSection
+              topics={writingTopics}
+              selectedTopicId={writingSelectedTopicId}
+              topicIdDraft={writingTopicIdDraft}
+              topicTitleDraft={writingTopicTitleDraft}
+              appendDraft={writingAppendDraft}
+              detail={writingTopicDetail}
+              loadingTopics={loadingWritingTopics}
+              loadingDetail={loadingWritingDetail}
+              actionState={writingActionState}
+              manualSection={writingManualSection}
+              manualContent={writingManualContent}
+              onSelectTopic={handleWritingTopicSelect}
+              onTopicIdDraftChange={setWritingTopicIdDraft}
+              onTopicTitleDraftChange={setWritingTopicTitleDraft}
+              onAppendDraftChange={setWritingAppendDraft}
+              onManualSectionChange={setWritingManualSection}
+              onManualContentChange={setWritingManualContent}
+              onRefresh={() => void loadWritingTopics()}
+              onAppend={() => void handleAppendWritingTopic()}
+              onSummarize={() => void handleSummarizeWritingTopic()}
+              onRestore={() => void handleRestoreWritingTopic()}
+              onSetState={() => void handleSetWritingTopicState()}
             />
           ) : null}
 
@@ -1951,6 +2184,78 @@ function normalizeTopicProfileId(raw: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeWritingTopicId(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, "-")
+    .replace(/[^a-z0-9\u4e00-\u9fff-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function normalizeWritingTopicMetaList(input: unknown): WritingTopicMeta[] {
+  const list = Array.isArray(input) ? input : [];
+  const normalized: WritingTopicMeta[] = [];
+  const idSet = new Set<string>();
+
+  for (const item of list) {
+    const topicId = normalizeWritingTopicId(String((item as { topicId?: unknown } | null)?.topicId ?? ""));
+    if (!topicId || idSet.has(topicId)) {
+      continue;
+    }
+    idSet.add(topicId);
+    normalized.push(normalizeWritingTopicMeta(item as Partial<WritingTopicMeta>, topicId));
+  }
+
+  return normalized.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+}
+
+function normalizeWritingTopicMeta(input: Partial<WritingTopicMeta> | null | undefined, fallbackTopicId: string): WritingTopicMeta {
+  const topicId = normalizeWritingTopicId(String(input?.topicId ?? fallbackTopicId)) || fallbackTopicId || "untitled-topic";
+  const rawFileCount = Number(input?.rawFileCount);
+  const rawLineCount = Number(input?.rawLineCount);
+  return {
+    topicId,
+    title: String(input?.title ?? topicId).trim() || topicId,
+    status: input?.status === "archived" ? "archived" : "active",
+    rawFileCount: Number.isFinite(rawFileCount) && rawFileCount >= 0 ? Math.floor(rawFileCount) : 0,
+    rawLineCount: Number.isFinite(rawLineCount) && rawLineCount >= 0 ? Math.floor(rawLineCount) : 0,
+    lastSummarizedAt: String(input?.lastSummarizedAt ?? "").trim() || undefined,
+    createdAt: String(input?.createdAt ?? "").trim(),
+    updatedAt: String(input?.updatedAt ?? "").trim()
+  };
+}
+
+function normalizeWritingTopicState(state: WritingTopicState | null | undefined): WritingTopicState {
+  return {
+    summary: String(state?.summary ?? "").trim(),
+    outline: String(state?.outline ?? "").trim(),
+    draft: String(state?.draft ?? "").trim()
+  };
+}
+
+function normalizeWritingTopicDetail(detail: WritingTopicDetail | null | undefined, fallbackTopicId: string): WritingTopicDetail {
+  const topicId = normalizeWritingTopicId(detail?.meta?.topicId ?? fallbackTopicId) || fallbackTopicId || "untitled-topic";
+  const meta = normalizeWritingTopicMeta(detail?.meta, topicId);
+  const rawFiles = Array.isArray(detail?.rawFiles)
+    ? detail.rawFiles
+        .map((file) => ({
+          name: String(file?.name ?? "").trim(),
+          lineCount: Number.isFinite(Number(file?.lineCount)) ? Math.max(0, Math.floor(Number(file?.lineCount))) : 0,
+          content: String(file?.content ?? "").trim()
+        }))
+        .filter((file) => Boolean(file.name))
+    : [];
+  return {
+    meta,
+    state: normalizeWritingTopicState(detail?.state ?? DEFAULT_WRITING_TOPIC_STATE),
+    backup: normalizeWritingTopicState(detail?.backup ?? DEFAULT_WRITING_TOPIC_STATE),
+    rawFiles
+  };
 }
 
 function clampNumberValue(raw: unknown, fallback: number, min: number, max: number): number {

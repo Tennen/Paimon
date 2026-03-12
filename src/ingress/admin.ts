@@ -37,6 +37,14 @@ import {
   useTopicSummaryProfile
 } from "../integrations/topic-summary/service";
 import {
+  appendWritingTopic,
+  listWritingTopics,
+  restoreWritingTopic,
+  setWritingTopicState,
+  showWritingTopic,
+  summarizeWritingTopic
+} from "../integrations/writing-organizer/service";
+import {
   OpenAIQuotaManager,
   readOpenAIQuotaPolicyFromEnv
 } from "../integrations/openai/quotaManager";
@@ -133,11 +141,22 @@ type TopicSummaryProfileUpdatePayload = {
   name: string;
 };
 
+type WritingTopicAppendPayload = {
+  content: string;
+  title?: string;
+};
+
+type WritingTopicSetStatePayload = {
+  section: "summary" | "outline" | "draft";
+  content: string;
+};
+
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
 const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
 const TOPIC_SUMMARY_CONFIG_STORE = DATA_STORE.TOPIC_SUMMARY_CONFIG;
 const TOPIC_SUMMARY_STATE_STORE = DATA_STORE.TOPIC_SUMMARY_STATE;
+const WRITING_ORGANIZER_INDEX_STORE = DATA_STORE.WRITING_ORGANIZER_INDEX;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 
@@ -1239,6 +1258,125 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
+    app.get("/admin/api/writing/topics", (_req: Request, res: ExResponse) => {
+      try {
+        const topics = listWritingTopics();
+        res.json({
+          topics,
+          indexStore: describeStore(WRITING_ORGANIZER_INDEX_STORE)
+        });
+      } catch (error) {
+        res.status(500).json({
+          error: (error as Error).message ?? "failed to list writing topics"
+        });
+      }
+    });
+
+    app.get("/admin/api/writing/topics/:topicId", (req: Request, res: ExResponse) => {
+      const topicId = String(req.params.topicId ?? "").trim();
+      if (!topicId) {
+        res.status(400).json({ error: "topicId is required" });
+        return;
+      }
+
+      try {
+        const detail = showWritingTopic(topicId);
+        res.json(detail);
+      } catch (error) {
+        res.status(400).json({
+          error: (error as Error).message ?? "failed to get writing topic detail"
+        });
+      }
+    });
+
+    app.post("/admin/api/writing/topics/:topicId/append", (req: Request, res: ExResponse) => {
+      const topicId = String(req.params.topicId ?? "").trim();
+      const payload = parseWritingTopicAppendPayload(req.body);
+      if (!topicId || !payload) {
+        res.status(400).json({ error: "invalid writing append payload" });
+        return;
+      }
+
+      try {
+        const result = appendWritingTopic(topicId, payload.content, payload.title);
+        res.json({
+          ok: true,
+          result
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to append writing topic content"
+        });
+      }
+    });
+
+    app.post("/admin/api/writing/topics/:topicId/summarize", (req: Request, res: ExResponse) => {
+      const topicId = String(req.params.topicId ?? "").trim();
+      if (!topicId) {
+        res.status(400).json({ error: "topicId is required" });
+        return;
+      }
+
+      try {
+        const result = summarizeWritingTopic(topicId);
+        res.json({
+          ok: true,
+          result
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to summarize writing topic"
+        });
+      }
+    });
+
+    app.post("/admin/api/writing/topics/:topicId/restore", (req: Request, res: ExResponse) => {
+      const topicId = String(req.params.topicId ?? "").trim();
+      if (!topicId) {
+        res.status(400).json({ error: "topicId is required" });
+        return;
+      }
+
+      try {
+        const result = restoreWritingTopic(topicId);
+        res.json({
+          ok: true,
+          result
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to restore writing topic"
+        });
+      }
+    });
+
+    app.post("/admin/api/writing/topics/:topicId/state", (req: Request, res: ExResponse) => {
+      const topicId = String(req.params.topicId ?? "").trim();
+      const payload = parseWritingTopicSetStatePayload(req.body);
+      if (!topicId || !payload) {
+        res.status(400).json({ error: "invalid writing state payload" });
+        return;
+      }
+
+      try {
+        const state = setWritingTopicState(topicId, payload.section, payload.content);
+        res.json({
+          ok: true,
+          topicId,
+          section: payload.section,
+          state
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to update writing topic state"
+        });
+      }
+    });
+
   }
 
   private registerAdminWebRoutes(app: Express): void {
@@ -1498,6 +1636,41 @@ function parseTopicSummaryProfileUpdatePayload(rawBody: unknown): TopicSummaryPr
     return null;
   }
   return { name };
+}
+
+function parseWritingTopicAppendPayload(rawBody: unknown): WritingTopicAppendPayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+  const body = rawBody as Record<string, unknown>;
+  const content = typeof body.content === "string" ? body.content.trim() : "";
+  if (!content) {
+    return null;
+  }
+  const title = typeof body.title === "string" ? body.title.trim() : "";
+  return {
+    content,
+    ...(title ? { title } : {})
+  };
+}
+
+function parseWritingTopicSetStatePayload(rawBody: unknown): WritingTopicSetStatePayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+  const body = rawBody as Record<string, unknown>;
+  const sectionRaw = typeof body.section === "string" ? body.section.trim().toLowerCase() : "";
+  const content = typeof body.content === "string" ? body.content.trim() : "";
+  if (!content) {
+    return null;
+  }
+  if (sectionRaw !== "summary" && sectionRaw !== "outline" && sectionRaw !== "draft") {
+    return null;
+  }
+  return {
+    section: sectionRaw,
+    content
+  };
 }
 
 function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarketTasksPayload): ScheduledTask[] {

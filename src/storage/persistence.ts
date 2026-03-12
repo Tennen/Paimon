@@ -23,6 +23,7 @@ export const DATA_STORE = {
   AUDIT_LOG: "audit.log",
   TOPIC_SUMMARY_CONFIG: "topic-summary.config",
   TOPIC_SUMMARY_STATE: "topic-summary.state",
+  WRITING_ORGANIZER_INDEX: "writing-organizer.index",
   LLM_OPENAI_QUOTA: "llm.openai_quota"
 } as const;
 
@@ -46,6 +47,7 @@ const STORE_FILE_MAP: Record<DataStoreName, string> = {
   [DATA_STORE.AUDIT_LOG]: "audit.jsonl",
   [DATA_STORE.TOPIC_SUMMARY_CONFIG]: "topic-summary/config.json",
   [DATA_STORE.TOPIC_SUMMARY_STATE]: "topic-summary/state.json",
+  [DATA_STORE.WRITING_ORGANIZER_INDEX]: "writing/index.json",
   [DATA_STORE.LLM_OPENAI_QUOTA]: "llm/openai-quota.json"
 };
 

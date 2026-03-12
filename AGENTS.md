@@ -42,6 +42,7 @@ This file defines hard constraints for coding agents working in this repository.
     - `src/integrations/evolution-operator/`
     - `src/integrations/topic-summary/`
     - `src/integrations/market-analysis/`
+    - `src/integrations/writing-organizer/`
   - Keep integrations flat by domain (`src/integrations/<domain>/`), no `integrations/tools` layer.
 
 - `src/tools/`

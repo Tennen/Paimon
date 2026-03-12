@@ -33,6 +33,7 @@ src/
     system-maintenance/
     terminal/
     topic-summary/
+    writing-organizer/
     wecom/
   memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
   scheduler/       # Scheduler and push-user domain
@@ -61,6 +62,7 @@ data/              # Runtime data files
   - `evolution-operator`
   - `topic-summary`
   - `market-analysis`
+  - `writing-organizer`
 - LLM-callable tools (schema + execute handler) -> `src/tools/`.
 - Persistent state access -> `src/storage/persistence.ts` API only.
 - Runtime config services -> `src/config/`.

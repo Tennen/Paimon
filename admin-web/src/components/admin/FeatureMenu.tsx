@@ -19,6 +19,7 @@ export function FeatureMenu(props: FeatureMenuProps) {
     { key: "messages", label: "消息任务" },
     { key: "market", label: "Market Analysis" },
     { key: "topic", label: "Topic Summary" },
+    { key: "writing", label: "Writing Organizer" },
     { key: "evolution", label: "Evolution Engine" }
   ];
 
