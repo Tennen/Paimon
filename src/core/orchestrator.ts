@@ -12,6 +12,7 @@ import { sttRuntime } from "../engines/stt";
 import { isReAgentCommandInput, parseReAgentCommand } from "./re-agent";
 import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor } from "../memory/memoryCompactor";
+import { HybridMemoryService } from "../memory/hybridMemoryService";
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -20,6 +21,7 @@ export class Orchestrator {
   private readonly memoryStore: MemoryStore;
   private readonly rawMemoryStore: RawMemoryStore;
   private readonly memoryCompactor: MemoryCompactor;
+  private readonly hybridMemoryService: HybridMemoryService;
   private readonly skillManager: SkillManager;
   private readonly maxIterations: number;
   private readonly toolRegistry: ToolRegistry;
@@ -34,13 +36,15 @@ export class Orchestrator {
     toolRegistry: ToolRegistry,
     callbackDispatcher: CallbackDispatcher,
     rawMemoryStore: RawMemoryStore = new RawMemoryStore(),
-    memoryCompactor?: MemoryCompactor
+    memoryCompactor?: MemoryCompactor,
+    hybridMemoryService?: HybridMemoryService
   ) {
     this.toolRouter = toolRouter;
     this.llmEngine = llmEngine;
     this.memoryStore = memoryStore;
     this.rawMemoryStore = rawMemoryStore;
     this.memoryCompactor = memoryCompactor ?? new MemoryCompactor({ rawStore: rawMemoryStore });
+    this.hybridMemoryService = hybridMemoryService ?? new HybridMemoryService({ rawStore: rawMemoryStore });
     this.skillManager = skillManager;
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
@@ -613,11 +617,19 @@ export class Orchestrator {
 
   private loadMemoryForNextStep(
     sessionId: string,
-    _query: string,
+    query: string,
     readSessionMemory: () => string
   ): string {
     if (!sessionId) {
       return "";
+    }
+    try {
+      const hybrid = this.hybridMemoryService.build(sessionId, query);
+      if (hybrid?.memory) {
+        return hybrid.memory;
+      }
+    } catch (error) {
+      console.error("hybrid memory load failed:", error);
     }
     return readSessionMemory();
   }

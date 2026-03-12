@@ -1,163 +1,219 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OllamaReAgentLlmClient } from "../core/re-agent/llmClient";
-import { ReAgentRuntime } from "../core/re-agent/runtime";
-import { MemoryCompactor } from "./memoryCompactor";
+import { HybridMemoryService } from "./hybridMemoryService";
 import { RawMemoryStore } from "./rawMemoryStore";
-import { SummaryMemoryStore } from "./summaryMemoryStore";
 import { SummaryVectorIndex } from "./summaryVectorIndex";
 
 function token(): string {
-  return `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-test("hybrid memory e2e: raw -> compact -> summary search -> raw replay -> prompt injection", { concurrency: false }, async () => {
+test("hybridMemoryService.build returns summary hits with raw replay", { concurrency: false }, () => {
   const rawStore = new RawMemoryStore();
-  const summaryStore = new SummaryMemoryStore();
-  const vectorIndex = new SummaryVectorIndex({ dimension: 256 });
+  const summaryVectorIndex = new SummaryVectorIndex();
+  const service = new HybridMemoryService({ rawStore, summaryVectorIndex });
   const t = token();
-  const sessionId = `re/hybrid:${t}`;
+  const sessionId = `hybrid-hit-${t}`;
+  const summaryId = `summary-${t}`;
   const rawId1 = `raw-${t}-1`;
   const rawId2 = `raw-${t}-2`;
-  const sentRequests: Array<Record<string, unknown>> = [];
-
-  const compactor = new MemoryCompactor({
-    rawStore,
-    summaryStore,
-    summaryVectorIndex: vectorIndex,
-    compactEveryRounds: 2,
-    maxBatchSize: 4,
-    llm: async () =>
-      JSON.stringify({
-        user_facts: ["用户常喝绿茶"],
-        environment: ["source=http"],
-        long_term_preferences: ["偏好中文回答"],
-        task_results: ["任务A已完成并归档"],
-        rawRefs: []
-      })
-  });
 
   try {
     rawStore.clear(sessionId);
-    summaryStore.clear(sessionId);
-    vectorIndex.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
 
     rawStore.append({
       id: rawId1,
       sessionId,
       requestId: `req-${t}-1`,
       source: "http",
-      user: "/re 帮我记住我常喝绿茶",
-      assistant: "/re 已记录你的饮品偏好",
-      meta: {}
+      user: "上周项目周报需要发给团队",
+      assistant: "周报已发送给团队"
     });
-    const firstTry = await compactor.maybeCompact({
-      sessionId,
-      requestId: `req-${t}-1`,
-      source: "http"
-    });
-    assert.equal(firstTry.compacted, false);
-    assert.equal(firstTry.reason, "threshold_not_met");
-
     rawStore.append({
       id: rawId2,
       sessionId,
       requestId: `req-${t}-2`,
       source: "http",
-      user: "/re 任务A做好了吗",
-      assistant: "/re 任务A已完成并归档",
-      meta: {}
+      user: "我更喜欢中文总结",
+      assistant: "已记住你偏好中文总结"
     });
-    const compacted = await compactor.maybeCompact({
+    summaryVectorIndex.upsert({
+      id: summaryId,
       sessionId,
-      requestId: `req-${t}-2`,
-      source: "http"
+      text: "上周项目周报已发送给团队 偏好中文总结",
+      rawRefs: [rawId1, rawId2]
     });
 
-    assert.equal(compacted.compacted, true);
-    assert.equal(compacted.usedFallback, false);
-    assert.deepEqual(compacted.rawIds, [rawId1, rawId2]);
-
-    const summaries = summaryStore.listBySession(sessionId);
-    assert.equal(summaries.length, 1);
-    assert.deepEqual(summaries[0].rawRefs, [rawId1, rawId2]);
-
-    const hits = vectorIndex.search(sessionId, "任务A 完成", 3);
-    assert.equal(hits.length, 1);
-    assert.equal(hits[0].id, summaries[0].id);
-
-    const replayRaw = rawStore.getByIds(hits[0].rawRefs, sessionId);
-    assert.deepEqual(replayRaw.map((item) => item.id), [rawId1, rawId2]);
-    assert.equal(replayRaw[0].user, "/re 帮我记住我常喝绿茶");
-    assert.equal(replayRaw[1].assistant, "/re 任务A已完成并归档");
-
-    const llmClient = new OllamaReAgentLlmClient({
-      baseUrl: "http://unit.test",
-      model: "qwen3:4b",
-      fetchImpl: async (_url, init) => {
-        const bodyText = typeof init?.body === "string" ? init.body : "{}";
-        sentRequests.push(JSON.parse(bodyText) as Record<string, unknown>);
-        return new Response(
-          JSON.stringify({
-            message: {
-              content: JSON.stringify({
-                kind: "respond",
-                response: "已注入记忆上下文"
-              })
-            }
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          }
-        );
-      }
-    });
-
-    const runtime = new ReAgentRuntime({
-      llmClient,
-      modules: [],
-      rawMemoryStore: rawStore,
-      summaryMemoryStore: summaryStore,
-      summaryVectorIndex: vectorIndex,
-      summaryTopK: 2,
-      rawRefLimit: 4,
-      rawRecordLimit: 2
-    });
-
-    const runResult = await runtime.run({
-      sessionId,
-      input: "/re 帮我回忆任务A结果"
-    });
-
-    assert.equal(runResult.reason, "responded");
-    assert.equal(runResult.response, "/re 已注入记忆上下文");
-    assert.equal(sentRequests.length, 1);
-
-    const request = sentRequests[0] as {
-      messages?: Array<{ role?: string; content?: string }>;
-    };
-    const userMessage = request.messages?.find((item) => item.role === "user");
-    assert.equal(typeof userMessage?.content, "string");
-
-    const promptPayload = JSON.parse(String(userMessage?.content ?? "{}")) as {
-      memoryContext?: {
-        summaries?: Array<{ id: string; rawRefs: string[] }>;
-        rawRecords?: Array<{ id: string; user: string; assistant: string }>;
-      };
-    };
-
-    assert.equal(promptPayload.memoryContext?.summaries?.length, 1);
-    assert.equal(promptPayload.memoryContext?.summaries?.[0].id, summaries[0].id);
-    assert.deepEqual(promptPayload.memoryContext?.summaries?.[0].rawRefs, [rawId1, rawId2]);
-    assert.deepEqual(
-      promptPayload.memoryContext?.rawRecords?.map((item) => item.id),
-      [rawId1, rawId2]
-    );
-    assert.equal(promptPayload.memoryContext?.rawRecords?.[1].assistant, "/re 任务A已完成并归档");
+    const result = service.build(sessionId, "上周周报发给谁了");
+    assert.ok(result);
+    assert.equal(result.summaries.length, 1);
+    assert.equal(result.summaries[0].id, summaryId);
+    assert.deepEqual(result.rawRecords.map((item) => item.id), [rawId1, rawId2]);
+    assert.match(result.memory, /\[hybrid_memory\]/);
+    assert.match(result.memory, /summary_hits:/);
+    assert.match(result.memory, /raw_replay:/);
+    assert.match(result.memory, /上周项目周报已发送给团队/);
+    assert.match(result.memory, /周报已发送给团队/);
   } finally {
     rawStore.clear(sessionId);
-    summaryStore.clear(sessionId);
-    vectorIndex.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+  }
+});
+
+test("hybridMemoryService.build returns null when no summary hit exists in session", { concurrency: false }, () => {
+  const rawStore = new RawMemoryStore();
+  const summaryVectorIndex = new SummaryVectorIndex();
+  const service = new HybridMemoryService({ rawStore, summaryVectorIndex });
+  const t = token();
+  const sessionId = `hybrid-miss-${t}`;
+
+  try {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+    summaryVectorIndex.upsert({
+      id: `summary-other-${t}`,
+      sessionId: `other-${sessionId}`,
+      text: "其他会话的记忆",
+      rawRefs: []
+    });
+
+    const result = service.build(sessionId, "任何查询");
+    assert.equal(result, null);
+  } finally {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+    summaryVectorIndex.clear(`other-${sessionId}`);
+  }
+});
+
+test("hybridMemoryService.build applies dedupe and limits for summaries/raw refs/raw records", { concurrency: false }, () => {
+  const rawStore = new RawMemoryStore();
+  const summaryVectorIndex = new SummaryVectorIndex();
+  const service = new HybridMemoryService({
+    rawStore,
+    summaryVectorIndex,
+    summaryTopK: 2,
+    rawRefLimit: 3,
+    rawRecordLimit: 2
+  });
+  const t = token();
+  const sessionId = `hybrid-limit-${t}`;
+  const rawId1 = `raw-${t}-1`;
+  const rawId2 = `raw-${t}-2`;
+  const rawId3 = `raw-${t}-3`;
+  const rawId4 = `raw-${t}-4`;
+  const summaryId1 = `summary-${t}-1`;
+  const summaryId2 = `summary-${t}-2`;
+  const summaryId3 = `summary-${t}-3`;
+
+  try {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+
+    const rawIds = [rawId1, rawId2, rawId3, rawId4];
+    for (let i = 0; i < rawIds.length; i += 1) {
+      rawStore.append({
+        id: rawIds[i],
+        sessionId,
+        requestId: `req-${t}-${i + 1}`,
+        source: "http",
+        user: `user-${i + 1}`,
+        assistant: `assistant-${i + 1}`
+      });
+    }
+
+    summaryVectorIndex.upsert({
+      id: summaryId1,
+      sessionId,
+      text: "alpha",
+      rawRefs: [rawId1, rawId2, rawId1, rawId3],
+      updatedAt: "2026-01-01T00:00:00.000Z"
+    });
+    summaryVectorIndex.upsert({
+      id: summaryId2,
+      sessionId,
+      text: "alpha secondary",
+      rawRefs: [rawId3, rawId4],
+      updatedAt: "2025-01-01T00:00:00.000Z"
+    });
+    summaryVectorIndex.upsert({
+      id: summaryId3,
+      sessionId,
+      text: "beta only",
+      rawRefs: [rawId4],
+      updatedAt: "2024-01-01T00:00:00.000Z"
+    });
+
+    const result = service.build(sessionId, "alpha");
+    assert.ok(result);
+    assert.equal(result.summaries.length, 2);
+    assert.equal(result.summaries[0].id, summaryId1);
+    assert.deepEqual(
+      result.summaries.map((item) => item.id),
+      [summaryId1, summaryId2]
+    );
+    assert.deepEqual(result.rawRecords.map((item) => item.id), [rawId1, rawId2]);
+  } finally {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+  }
+});
+
+test("hybridMemoryService.build formats output with one-line normalization and clipping", { concurrency: false }, () => {
+  const rawStore = new RawMemoryStore();
+  const summaryVectorIndex = new SummaryVectorIndex();
+  const service = new HybridMemoryService({
+    rawStore,
+    summaryVectorIndex,
+    summaryTopK: 1,
+    rawRefLimit: 2,
+    rawRecordLimit: 1,
+    summaryTextLimit: 18,
+    rawTextLimit: 10
+  });
+  const t = token();
+  const sessionId = `hybrid-format-${t}`;
+  const summaryId = `summary-${t}`;
+  const rawId = `raw-${t}`;
+
+  try {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
+
+    rawStore.append({
+      id: rawId,
+      sessionId,
+      requestId: `req-${t}`,
+      source: "http",
+      user: "第一行\n第二行\n第三行非常非常长",
+      assistant: "回复第一行\n回复第二行\n回复第三行很长"
+    });
+    summaryVectorIndex.upsert({
+      id: summaryId,
+      sessionId,
+      text: "总结第一行\n总结第二行并且描述非常非常长",
+      rawRefs: [rawId]
+    });
+
+    const result = service.build(sessionId, "  我想\n回顾    上周   事项 ");
+    assert.ok(result);
+    const lines = result.memory.split("\n");
+    assert.equal(lines[0], "[hybrid_memory]");
+    assert.match(result.memory, /query: 我想 回顾 上周 事项/);
+    const summaryLine = lines.find((line) => line.startsWith("  summary: "));
+    const userLine = lines.find((line) => line.startsWith("  user: "));
+    const assistantLine = lines.find((line) => line.startsWith("  assistant: "));
+    assert.ok(summaryLine);
+    assert.ok(userLine);
+    assert.ok(assistantLine);
+    assert.match(summaryLine, /\.\.\.$/);
+    assert.match(userLine, /\.\.\.$/);
+    assert.match(assistantLine, /\.\.\.$/);
+    assert.equal(result.memory.includes("第一行\n第二行"), false);
+    assert.equal(result.memory.includes("回复第一行\n回复第二行"), false);
+  } finally {
+    rawStore.clear(sessionId);
+    summaryVectorIndex.clear(sessionId);
   }
 });

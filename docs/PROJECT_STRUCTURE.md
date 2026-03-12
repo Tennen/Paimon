@@ -34,7 +34,7 @@ src/
     terminal/
     topic-summary/
     wecom/
-  memory/          # Memory domain (session/raw/summary/index/compaction)
+  memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
   scheduler/       # Scheduler and push-user domain
   skills/          # Skill metadata manager only
   storage/         # Persistence abstraction (register/get/set)
@@ -70,6 +70,8 @@ data/              # Runtime data files
 - `/re` runtime loop stays in `src/core/re-agent/`.
 - All dialogue traffic appends to unified session memory and raw memory.
 - Raw memory keeps original records; summary memory is derived and references raw ids/refs.
+- Main orchestrator (`src/core/orchestrator.ts`) uses `HybridMemoryService` for planning context: summary vector retrieval first, raw replay by `rawRefs` second.
+- If no summary hit is found, orchestrator falls back to session memory (`MemoryStore.read(sessionId)`).
 - Retrieval is summary-first, with optional raw backfill by references.
 - Keep `/re` command contract stable:
   - `/re <question>`

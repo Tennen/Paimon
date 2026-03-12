@@ -10,6 +10,8 @@ import { Envelope, Response, SkillPlanningResult, SkillSelectionResult } from ".
 import { MemoryStore } from "../memory/memoryStore";
 import { RawMemoryAppendInput, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor, MemoryCompactorInput } from "../memory/memoryCompactor";
+import { SummaryMemoryStore } from "../memory/summaryMemoryStore";
+import { SummaryVectorIndex } from "../memory/summaryVectorIndex";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 
 class StubSessionMemoryStore {
@@ -100,21 +102,25 @@ class StubLLMEngine implements LLMEngine {
   }
 }
 
-function createEnvelope(requestId: string, text: string): Envelope {
+function createEnvelope(requestId: string, text: string, sessionId: string = "session-1"): Envelope {
   return {
     requestId,
     source: "http",
-    sessionId: "session-1",
+    sessionId,
     kind: "text",
     text,
     receivedAt: new Date().toISOString()
   };
 }
 
+function createToken(): string {
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function createOrchestrator(
   registry: ToolRegistry,
   memoryStore: StubSessionMemoryStore,
-  rawMemoryStore: StubRawMemoryStore = new StubRawMemoryStore(),
+  rawMemoryStore: StubRawMemoryStore | RawMemoryStore = new StubRawMemoryStore(),
   memoryCompactor: StubMemoryCompactor = new StubMemoryCompactor(),
   llmEngine: LLMEngine = new StubLLMEngine()
 ): Orchestrator {
@@ -295,46 +301,153 @@ test("routing memory_mode=off skips session memory loading for planning", async 
   assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
 });
 
-test("routing memory_mode=on loads session memory before planning", async () => {
-  const memoryStore = new StubSessionMemoryStore("main-memory");
-  const rawMemoryStore = new StubRawMemoryStore();
+test("routing memory_mode=on + memory_query injects summary hit and raw replay into planning memory", { concurrency: false }, async () => {
+  const token = createToken();
+  const sessionId = `session-hybrid-hit-${token}`;
+  const memoryStore = new StubSessionMemoryStore("main-memory-fallback");
+  const rawMemoryStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const summaryIndex = new SummaryVectorIndex();
+  const memoryCompactor = new StubMemoryCompactor();
+  const registry = new ToolRegistry();
+  const summaryId = `summary-${token}`;
+  const rawId1 = `raw-${token}-1`;
+  const rawId2 = `raw-${token}-2`;
+
+  try {
+    rawMemoryStore.clear(sessionId);
+    summaryStore.clear(sessionId);
+    summaryIndex.clear(sessionId);
+
+    rawMemoryStore.append({
+      id: rawId1,
+      sessionId,
+      requestId: `req-${token}-1`,
+      source: "http",
+      user: "上周项目周报需要发给团队",
+      assistant: "周报已发送给团队",
+      meta: {}
+    });
+    rawMemoryStore.append({
+      id: rawId2,
+      sessionId,
+      requestId: `req-${token}-2`,
+      source: "http",
+      user: "我更喜欢中文总结",
+      assistant: "已记住你偏好中文总结",
+      meta: {}
+    });
+    summaryStore.upsert({
+      id: summaryId,
+      sessionId,
+      task_results: ["上周项目周报已发送给团队"],
+      long_term_preferences: ["偏好中文总结"],
+      rawRefs: [rawId1, rawId2]
+    });
+    summaryIndex.upsert({
+      id: summaryId,
+      sessionId,
+      text: "上周项目周报已发送给团队 偏好中文总结",
+      rawRefs: [rawId1, rawId2]
+    });
+
+    const llmEngine: LLMEngine = {
+      async chat(_request: LLMChatRequest): Promise<string> {
+        return "stub-chat-response";
+      },
+      async route(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
+        return {
+          decision: "use_planning",
+          memory_mode: "on",
+          memory_query: "上周周报发给谁了"
+        };
+      },
+      async plan(
+        _text: string,
+        runtimeContext: Record<string, unknown>
+      ): Promise<SkillPlanningResult> {
+        const memory = String(runtimeContext.memory ?? "");
+        assert.notEqual(memory, "main-memory-fallback");
+        assert.match(memory, /上周项目周报已发送给团队/);
+        assert.match(memory, /偏好中文总结/);
+        assert.match(memory, /上周项目周报需要发给团队/);
+        assert.match(memory, /周报已发送给团队/);
+        return { decision: "respond", response_text: "已使用检索记忆" };
+      },
+      getModelForStep(): string {
+        return "stub-model";
+      },
+      getProviderName(): "ollama" {
+        return "ollama";
+      }
+    };
+
+    const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
+    const response = await orchestrator.handle(createEnvelope("req-4c", "继续上个任务", sessionId));
+
+    assert.equal(response.text, "已使用检索记忆");
+    assert.equal(memoryStore.appendCalls.length, 1);
+    assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+  } finally {
+    rawMemoryStore.clear(sessionId);
+    summaryStore.clear(sessionId);
+    summaryIndex.clear(sessionId);
+  }
+});
+
+test("routing memory_mode=on falls back to session memory when summary query misses", { concurrency: false }, async () => {
+  const token = createToken();
+  const sessionId = `session-hybrid-miss-${token}`;
+  const memoryStore = new StubSessionMemoryStore("main-memory-fallback");
+  const rawMemoryStore = new RawMemoryStore();
+  const summaryStore = new SummaryMemoryStore();
+  const summaryIndex = new SummaryVectorIndex();
   const memoryCompactor = new StubMemoryCompactor();
   const registry = new ToolRegistry();
 
-  const llmEngine: LLMEngine = {
-    async chat(_request: LLMChatRequest): Promise<string> {
-      return "stub-chat-response";
-    },
-    async route(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
-      return {
-        decision: "use_planning",
-        memory_mode: "on",
-        memory_query: "上次的偏好设置"
-      };
-    },
-    async plan(
-      _text: string,
-      runtimeContext: Record<string, unknown>
-    ): Promise<SkillPlanningResult> {
-      assert.equal(runtimeContext.memory, "main-memory");
-      return { decision: "respond", response_text: "已使用会话记忆" };
-    },
-    getModelForStep(): string {
-      return "stub-model";
-    },
-    getProviderName(): "ollama" {
-      return "ollama";
-    }
-  };
+  try {
+    rawMemoryStore.clear(sessionId);
+    summaryStore.clear(sessionId);
+    summaryIndex.clear(sessionId);
 
-  const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
-  const response = await orchestrator.handle(createEnvelope("req-4c", "继续上个任务"));
+    const llmEngine: LLMEngine = {
+      async chat(_request: LLMChatRequest): Promise<string> {
+        return "stub-chat-response";
+      },
+      async route(_text: string, _runtimeContext: Record<string, unknown>): Promise<SkillSelectionResult> {
+        return {
+          decision: "use_planning",
+          memory_mode: "on",
+          memory_query: "不存在的历史偏好"
+        };
+      },
+      async plan(
+        _text: string,
+        runtimeContext: Record<string, unknown>
+      ): Promise<SkillPlanningResult> {
+        assert.equal(runtimeContext.memory, "main-memory-fallback");
+        return { decision: "respond", response_text: "已回退到会话记忆" };
+      },
+      getModelForStep(): string {
+        return "stub-model";
+      },
+      getProviderName(): "ollama" {
+        return "ollama";
+      }
+    };
 
-  assert.equal(response.text, "已使用会话记忆");
-  assert.equal(memoryStore.readCalls.length, 1);
-  assert.equal(memoryStore.appendCalls.length, 1);
-  assert.equal(rawMemoryStore.appendCalls.length, 1);
-  assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+    const orchestrator = createOrchestrator(registry, memoryStore, rawMemoryStore, memoryCompactor, llmEngine);
+    const response = await orchestrator.handle(createEnvelope("req-4d", "继续上个任务", sessionId));
+
+    assert.equal(response.text, "已回退到会话记忆");
+    assert.equal(memoryStore.readCalls.length, 1);
+    assert.equal(memoryStore.appendCalls.length, 1);
+    assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+  } finally {
+    rawMemoryStore.clear(sessionId);
+    summaryStore.clear(sessionId);
+    summaryIndex.clear(sessionId);
+  }
 });
 
 test("skips shared/global memory append for /re reset command", async () => {

@@ -34,7 +34,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
 - `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
 - `src/scheduler/`: 定时任务和推送用户管理
-- `src/memory/`: 会话记忆存储（主对话记忆与 `/re` 子 agent 记忆分流）
+- `src/memory/`: 记忆域服务（session/raw/summary/index、compaction、hybrid 检索）
 - `src/skills/`: 技能元数据加载与管理
 - `admin-web/`: 后台前端
 - `tools/`: 独立脚本和桥接程序
@@ -203,6 +203,26 @@ STT_FAST_WHISPER_MODEL=small
 - 若要启用 Home Assistant，再补 `HA_BASE_URL` 和 `HA_TOKEN`
 - 若要启用企业微信，再补 `WECOM_*` 配置
 
+#### Memory 检索与压缩（可选）
+
+```env
+MEMORY_COMPACT_EVERY_ROUNDS=4
+MEMORY_COMPACT_MAX_BATCH_SIZE=8
+MEMORY_SUMMARY_TOP_K=4
+MEMORY_RAW_REF_LIMIT=8
+MEMORY_RAW_RECORD_LIMIT=3
+MEMORY_RAG_SUMMARY_TOP_K=4
+```
+
+说明：
+
+- `MEMORY_COMPACT_EVERY_ROUNDS`：触发一次 summary compact 的最小 raw 轮次阈值
+- `MEMORY_COMPACT_MAX_BATCH_SIZE`：单次 compact 最大处理 raw 条数
+- `MEMORY_SUMMARY_TOP_K`：主 orchestrator / `/re` runtime 的 summary 命中条数上限
+- `MEMORY_RAW_REF_LIMIT`：summary 命中后允许回补的 rawRefs 数量上限
+- `MEMORY_RAW_RECORD_LIMIT`：最终注入上下文的 raw 回放条数上限
+- `MEMORY_RAG_SUMMARY_TOP_K`：`/re` 的 `rag` 模块检索 summary 数量上限
+
 ### 3. 本地开发启动
 
 ```bash
@@ -259,7 +279,8 @@ Memory 规则（global hybrid memory）：
 - 所有会话消息都会完整写入 `raw memory`（不改写原文）
 - 系统在低频触发 `compaction`（例如每 N 轮或任务结束）把未摘要批次提炼为结构化 `summary memory`
 - `summary memory` 结构包含 `user_facts`、`environment`、`long_term_preferences`、`task_results` 与 `rawRefs`
-- 运行时先做 `RAG` summary 混合检索（词法精确匹配 + 向量相似度融合排序），再按 `rawRefs` 按 ID 回补少量原文上下文
+- 主 `Orchestrator` 已接入 `HybridMemoryService`：先做 `SummaryVectorIndex.search`（词法精确匹配 + 向量相似度融合排序），再按 `rawRefs` 通过 `RawMemoryStore.getByIds` 回补少量原文上下文
+- 当 summary 检索无命中时，主 `Orchestrator` 会回退到 `MemoryStore.read(sessionId)` 的会话记忆
 - `/re` 会在该全局记忆上执行子 agent 循环
 
 ## 数据与持久化
