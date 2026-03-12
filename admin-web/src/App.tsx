@@ -603,13 +603,28 @@ export default function App() {
   async function handleRestartPm2(): Promise<void> {
     updateSystemOperationState("restarting", true);
     try {
-      const payload = await request<{ output?: string }>("/admin/api/restart", {
+      const payload = await request<{ output?: string; accepted?: boolean; delayMs?: number }>("/admin/api/restart", {
         method: "POST",
         body: "{}"
       });
-      setNotice({ type: "success", title: "应用进程重启完成", text: payload.output });
+      const delayText = payload.delayMs && payload.delayMs > 0 ? `，预计 ${payload.delayMs}ms 后执行` : "";
+      setNotice({
+        type: "info",
+        title: payload.accepted ? "重启指令已受理" : "应用进程重启完成",
+        text: payload.output
+          ? `${payload.output}${delayText}`
+          : `服务可能会短暂断连，属于正常现象${delayText}`
+      });
     } catch (error) {
-      notifyError("pm2 重启失败", error);
+      if (isLikelyRestartConnectionDrop(error)) {
+        setNotice({
+          type: "info",
+          title: "重启过程中连接中断",
+          text: "已触发 pm2 restart，请稍等 3-10 秒后刷新页面。"
+        });
+      } else {
+        notifyError("pm2 重启失败", error);
+      }
     } finally {
       updateSystemOperationState("restarting", false);
     }
@@ -2184,6 +2199,15 @@ function normalizeTopicProfileId(raw: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function isLikelyRestartConnectionDrop(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  return lower.includes("failed to fetch")
+    || lower.includes("networkerror")
+    || lower.includes("network request failed")
+    || lower.includes("load failed");
 }
 
 function normalizeWritingTopicId(raw: string): string {

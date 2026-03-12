@@ -740,10 +740,17 @@ export class AdminIngressAdapter implements IngressAdapter {
       });
     });
 
-    app.post("/admin/api/restart", async (_req: Request, res: ExResponse) => {
+    app.post("/admin/api/restart", (_req: Request, res: ExResponse) => {
       try {
-        const output = await restartPm2();
-        res.json({ ok: true, output });
+        const scheduled = schedulePm2Restart();
+        res.json({
+          ok: true,
+          accepted: true,
+          restartScheduled: true,
+          delayMs: scheduled.delayMs,
+          scheduledAt: scheduled.scheduledAt,
+          output: `pm2 restart scheduled in ${scheduled.delayMs}ms`
+        });
       } catch (error) {
         res.status(500).json({
           ok: false,
@@ -2612,6 +2619,24 @@ async function fetchOllamaModels(): Promise<{ baseUrl: string; models: string[] 
 async function restartPm2(): Promise<string> {
   const { stdout, stderr } = await execAsync("pm2 restart 0");
   return `${stdout ?? ""}${stderr ?? ""}`.trim();
+}
+
+function schedulePm2Restart(delayMs = 700): { delayMs: number; scheduledAt: string } {
+  const normalizedDelayMs = Number.isFinite(delayMs)
+    ? Math.max(100, Math.min(10_000, Math.floor(delayMs)))
+    : 700;
+  const scheduledAt = new Date().toISOString();
+
+  setTimeout(() => {
+    void restartPm2().catch((error) => {
+      console.error(`[admin] pm2 restart failed: ${(error as Error).message ?? "unknown error"}`);
+    });
+  }, normalizedDelayMs);
+
+  return {
+    delayMs: normalizedDelayMs,
+    scheduledAt
+  };
 }
 
 async function pullRepoWithRebase(): Promise<{
