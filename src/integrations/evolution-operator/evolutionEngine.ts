@@ -3,6 +3,7 @@ import path from "path";
 import { spawn } from "child_process";
 import { jsonrepair } from "jsonrepair";
 import { CodexAdapter, CodexPendingApproval, CodexRunEvent, CodexRunResult } from "./codexAdapter";
+import { cleanNotifyText, EvolutionNotifier, formatGitLogSummary } from "./evolutionNotifier";
 import { EvolutionStateStore } from "./stateStore";
 import { TestRunner } from "./testRunner";
 import {
@@ -28,6 +29,12 @@ type EvolutionEngineOptions = {
   rollbackOnFailure: boolean;
 };
 
+type TickTriggerSource = "auto" | "manual" | "enqueue";
+
+type EvolutionEngineConstructorOptions = Partial<EvolutionEngineOptions> & {
+  notifier?: Pick<EvolutionNotifier, "sendText">;
+};
+
 type CommandResult = {
   ok: boolean;
   stdout: string;
@@ -47,15 +54,17 @@ export class EvolutionEngine {
   private readonly store: EvolutionStateStore;
   private readonly codex: CodexAdapter;
   private readonly testRunner: TestRunner;
+  private readonly notifier: Pick<EvolutionNotifier, "sendText">;
   private readonly options: EvolutionEngineOptions;
   private timer: NodeJS.Timeout | null = null;
   private queue: Promise<void> = Promise.resolve();
   private readonly codexTaskGoalMap = new Map<string, string>();
 
-  constructor(store?: EvolutionStateStore, codex?: CodexAdapter, testRunner?: TestRunner, options?: Partial<EvolutionEngineOptions>) {
+  constructor(store?: EvolutionStateStore, codex?: CodexAdapter, testRunner?: TestRunner, options?: EvolutionEngineConstructorOptions) {
     this.store = store ?? new EvolutionStateStore();
     this.codex = codex ?? new CodexAdapter({ outputDir: this.store.getBindings().artifacts.codexOutputDir });
     this.testRunner = testRunner ?? new TestRunner();
+    this.notifier = options?.notifier ?? new EvolutionNotifier();
     this.options = {
       tickMs: options?.tickMs ?? parseInt(process.env.EVOLUTION_TICK_MS ?? "30000", 10),
       maxFixAttempts: options?.maxFixAttempts ?? parseInt(process.env.EVOLUTION_MAX_FIX_ATTEMPTS ?? "2", 10),
@@ -71,9 +80,9 @@ export class EvolutionEngine {
       return;
     }
     this.timer = setInterval(() => {
-      void this.triggerNow();
+      void this.triggerNow("auto");
     }, this.options.tickMs);
-    void this.triggerNow();
+    void this.triggerNow("auto");
   }
 
   stop(): void {
@@ -114,17 +123,17 @@ export class EvolutionEngine {
       });
       this.store.bumpMetricsForNewGoal();
       return created;
-    }, true);
+    }, "enqueue");
   }
 
-  async triggerNow(): Promise<void> {
+  async triggerNow(source: TickTriggerSource = "manual"): Promise<void> {
     return this.enqueueWork(async () => {
-      await this.processTick();
+      await this.processTick(source);
     });
   }
 
-  triggerNowAsync(): void {
-    void this.triggerNow().catch((error) => {
+  triggerNowAsync(source: TickTriggerSource = "manual"): void {
+    void this.triggerNow(source).catch((error) => {
       console.error(`[evolution] async tick failed: ${(error as Error).message}`);
     });
   }
@@ -206,7 +215,7 @@ export class EvolutionEngine {
     };
   }
 
-  private async enqueueWork<T>(job: () => Promise<T>, triggerAfter = false): Promise<T> {
+  private async enqueueWork<T>(job: () => Promise<T>, triggerAfterSource?: TickTriggerSource): Promise<T> {
     let resolveValue!: (value: T | PromiseLike<T>) => void;
     let rejectValue!: (reason?: unknown) => void;
 
@@ -226,18 +235,18 @@ export class EvolutionEngine {
         }
       });
 
-    if (triggerAfter) {
+    if (triggerAfterSource) {
       this.queue = this.queue
         .catch(() => undefined)
         .then(async () => {
-          await this.processTick();
+          await this.processTick(triggerAfterSource);
         });
     }
 
     return result;
   }
 
-  private async processTick(): Promise<void> {
+  private async processTick(triggerSource: TickTriggerSource): Promise<void> {
     const state = this.store.readEvolutionState();
     const retryQueue = this.store.readRetryQueue();
     const nowMs = Date.now();
@@ -246,6 +255,7 @@ export class EvolutionEngine {
       ? state.goals.find((goal) => goal.id === state.currentGoalId)
       : undefined;
     if (currentGoal && (currentGoal.status === "running" || currentGoal.status === "waiting_retry" || currentGoal.status === "pending")) {
+      await this.notifyAutoTickTriggered(triggerSource, currentGoal.id, "goal");
       await this.processGoal(currentGoal.id);
       return;
     }
@@ -255,12 +265,14 @@ export class EvolutionEngine {
       .sort((a, b) => Date.parse(a.retryAt) - Date.parse(b.retryAt))
       .find((item) => Date.parse(item.retryAt) <= nowMs);
     if (dueRetry) {
+      await this.notifyAutoTickTriggered(triggerSource, dueRetry.goalId, "retry");
       await this.processGoal(dueRetry.goalId, dueRetry);
       return;
     }
 
     const nextGoal = state.goals.find((goal) => goal.status === "pending");
     if (nextGoal) {
+      await this.notifyAutoTickTriggered(triggerSource, nextGoal.id, "goal");
       await this.processGoal(nextGoal.id);
       return;
     }
@@ -269,6 +281,23 @@ export class EvolutionEngine {
     state.currentGoalId = null;
     state.updatedAt = new Date().toISOString();
     this.store.saveEvolutionState(state);
+  }
+
+  private async notifyAutoTickTriggered(
+    triggerSource: TickTriggerSource,
+    goalId: string,
+    taskType: "goal" | "retry"
+  ): Promise<void> {
+    if (triggerSource !== "auto") {
+      return;
+    }
+
+    try {
+      const taskLabel = taskType === "retry" ? "Retry" : "Goal";
+      await this.notifier.sendText(`evolution 自动 tick 已触发: ${taskLabel} ${goalId}`);
+    } catch (error) {
+      console.error(`[evolution] auto tick notify failed: ${(error as Error).message}`);
+    }
   }
 
   private async processGoal(goalId: string, retryItem?: RetryQueueItem): Promise<void> {
@@ -959,6 +988,7 @@ export class EvolutionEngine {
     this.store.saveMetrics(metrics);
 
     this.clearRetryItemsForGoal(goal.id);
+    await this.notifyGoalCompleted(goal, "succeeded");
   }
 
   private async failGoal(goalId: string, errorMessage: string): Promise<void> {
@@ -1008,6 +1038,67 @@ export class EvolutionEngine {
     if (this.options.rollbackOnFailure) {
       await this.runCommand("git", ["reset", "--hard", "stable"], 120000, goal.id);
       this.pushGoalEvent(goal.id, "rollback", "执行失败后已回滚到 stable", true);
+    }
+
+    await this.notifyGoalCompleted(goal, "failed");
+  }
+
+  private async notifyGoalCompleted(goal: EvolutionGoal, status: "succeeded" | "failed"): Promise<void> {
+    const commit = String(goal.git.push?.commit ?? "").trim();
+    const failureReason = trimForState(cleanNotifyText(goal.lastError || ""), 180);
+    const completionText = status === "succeeded"
+      ? cleanNotifyText(`evolution 任务完成: Goal ${goal.id} 成功${commit ? ` ${commit.slice(0, 12)}` : ""}`)
+      : cleanNotifyText(`evolution 任务完成: Goal ${goal.id} 失败${failureReason ? ` ${failureReason}` : ""}`);
+
+    if (completionText) {
+      try {
+        await this.notifier.sendText(completionText);
+      } catch (error) {
+        console.error(`[evolution] completion notify failed: ${(error as Error).message}`);
+      }
+    }
+
+    if (status !== "succeeded") {
+      return;
+    }
+
+    await this.notifyGoalGitLogSummary(goal);
+  }
+
+  private async notifyGoalGitLogSummary(goal: EvolutionGoal): Promise<void> {
+    const startedFromRef = String(goal.git.startedFromRef ?? "").trim();
+    const pushedCommit = String(goal.git.push?.commit ?? "").trim();
+    if (!startedFromRef || !pushedCommit || startedFromRef === pushedCommit) {
+      return;
+    }
+
+    const gitLogResult = await this.runCommand(
+      "git",
+      ["log", "--no-merges", "--pretty=format:%h|%s", `${startedFromRef}..${pushedCommit}`],
+      120000,
+      goal.id
+    );
+
+    if (!gitLogResult.ok) {
+      const error = gitLogResult.error || gitLogResult.stderr || gitLogResult.stdout || "git log failed";
+      console.error(`[evolution] git log summary notify skipped: ${trimForState(error, 220)}`);
+      return;
+    }
+
+    const logSummary = formatGitLogSummary(gitLogResult.stdout, {
+      maxLines: 6,
+      maxLineLength: 88
+    });
+    if (!logSummary) {
+      return;
+    }
+
+    const title = cleanNotifyText(`evolution 新增提交摘要: Goal ${goal.id}`);
+    const summaryText = [title, logSummary].filter(Boolean).join("\n");
+    try {
+      await this.notifier.sendText(summaryText);
+    } catch (error) {
+      console.error(`[evolution] git log summary notify failed: ${(error as Error).message}`);
     }
   }
 
