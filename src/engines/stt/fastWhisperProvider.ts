@@ -27,6 +27,11 @@ type FastWhisperProviderConfig = {
   autoInstall: boolean;
 };
 
+type PythonDependencyCheck = {
+  module: string;
+  pipPackage: string;
+};
+
 export class FastWhisperSTTProvider implements STTProvider {
   readonly name = "fast-whisper";
   private readonly config: FastWhisperProviderConfig;
@@ -56,20 +61,21 @@ export class FastWhisperSTTProvider implements STTProvider {
       return;
     }
 
-    const importCheck = await this.runPython(["-c", "import faster_whisper"], 10000);
-    if (importCheck.code === 0) {
+    const dependencyChecks = getPythonDependencyChecks(process.env);
+    const missingPackages = await this.getMissingPythonPackages(dependencyChecks);
+    if (missingPackages.length === 0) {
       return;
     }
 
-    console.log("[stt] faster-whisper missing, installing with pip...");
+    console.log(`[stt] installing missing python deps: ${missingPackages.join(", ")}`);
     const install = await this.runPython(
-      ["-m", "pip", "install", "--disable-pip-version-check", "faster-whisper"],
+      ["-m", "pip", "install", "--disable-pip-version-check", ...missingPackages],
       300000
     );
 
     if (install.code !== 0) {
       const detail = (install.stderr || install.stdout).trim();
-      throw new Error(`failed to install faster-whisper: ${detail || "unknown error"}`);
+      throw new Error(`failed to install python deps: ${detail || "unknown error"}`);
     }
   }
 
@@ -124,6 +130,19 @@ export class FastWhisperSTTProvider implements STTProvider {
     }
 
     return (parsed.text ?? "").trim();
+  }
+
+  private async getMissingPythonPackages(checks: PythonDependencyCheck[]): Promise<string[]> {
+    const packages = new Set<string>();
+
+    for (const check of checks) {
+      const importCheck = await this.runPython(["-c", `import ${check.module}`], 10000);
+      if (importCheck.code !== 0) {
+        packages.add(check.pipPackage);
+      }
+    }
+
+    return Array.from(packages);
   }
 
   private runPython(args: string[], timeoutMs: number): Promise<ProcessResult> {
@@ -196,4 +215,40 @@ function parseInteger(input: string | undefined, fallback: number): number {
     return fallback;
   }
   return value;
+}
+
+function getPythonDependencyChecks(env: Record<string, string | undefined>): PythonDependencyCheck[] {
+  const checks: PythonDependencyCheck[] = [
+    { module: "faster_whisper", pipPackage: "faster-whisper" }
+  ];
+
+  if (hasSocksProxy(env)) {
+    checks.push({ module: "socksio", pipPackage: "httpx[socks]" });
+  }
+
+  return checks;
+}
+
+function hasSocksProxy(env: Record<string, string | undefined>): boolean {
+  const proxyKeys = [
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy"
+  ];
+  const socksProtocols = ["socks://", "socks4://", "socks4a://", "socks5://", "socks5h://"];
+
+  for (const key of proxyKeys) {
+    const value = env[key]?.trim().toLowerCase();
+    if (!value) {
+      continue;
+    }
+    if (socksProtocols.some((protocol) => value.startsWith(protocol))) {
+      return true;
+    }
+  }
+
+  return false;
 }

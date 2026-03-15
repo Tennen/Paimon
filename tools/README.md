@@ -20,6 +20,12 @@ Fast whisper helper:
 python3 tools/fast-whisper-transcribe.py --audio /path/to/audio.wav
 ```
 
+If you run the helper script directly, install Python deps first:
+
+```bash
+python3 -m pip install faster-whisper httpx[socks]
+```
+
 Market smoke script:
 
 ```bash

@@ -238,6 +238,12 @@ STT_FAST_WHISPER_PYTHON=python3
 STT_FAST_WHISPER_MODEL=small
 ```
 
+说明：
+
+- 启动时会自动检查并安装 `fast-whisper` 依赖。
+- 当代理变量（`ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY`）使用 `socks*://` 时，会额外检查并安装 `httpx[socks]`（提供 `socksio`）。
+- 若关闭 `STT_FAST_WHISPER_AUTO_INSTALL`，请手动安装上述 Python 依赖。
+
 #### Market Analysis（基金主流程）
 
 `/market` 已支持双路径：
