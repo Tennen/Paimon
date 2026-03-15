@@ -71,10 +71,48 @@ export function formatStatus(state) {
 
 export function buildRunResponseText(result) {
   const signalResult = result.signalResult;
+  const assetType = signalResult && signalResult.assetType ? signalResult.assetType : "equity";
   const lines = [
     `Market Analysis ${phaseLabel(signalResult.phase)} 完成`,
+    `资产类型: ${assetType}`,
     `市场状态: ${signalResult.marketState}${signalResult.benchmark ? ` (${signalResult.benchmark})` : ""}`
   ];
+
+  if (assetType === "fund" && Array.isArray(signalResult.fund_dashboards)) {
+    if (signalResult.fund_dashboards.length === 0) {
+      lines.push("基金决策: 无可用标的");
+    } else {
+      lines.push("基金决策:");
+      for (const dashboard of signalResult.fund_dashboards.slice(0, 24)) {
+        const code = String(dashboard.fund_code || "").trim();
+        const name = String(dashboard.fund_name || "").trim();
+        const label = name && code ? `${name}(${code})` : (name || code || "-");
+        const decision = String(dashboard.decision_type || "watch").trim();
+        const confidence = Number.isFinite(Number(dashboard.confidence))
+          ? Number(dashboard.confidence).toFixed(2)
+          : "0.00";
+        const conclusion = dashboard.core_conclusion && dashboard.core_conclusion.one_sentence
+          ? String(dashboard.core_conclusion.one_sentence).trim()
+          : "未提供";
+        lines.push(`- ${label}: ${decision} (confidence=${confidence})`);
+        lines.push(`  结论: ${conclusion}`);
+        const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
+        if (risks.length > 0) {
+          lines.push(`  风险: ${risks.join(" | ")}`);
+        }
+      }
+    }
+
+    if (signalResult.portfolio_report && signalResult.portfolio_report.brief) {
+      lines.push(`组合摘要: ${signalResult.portfolio_report.brief}`);
+    }
+
+    if (result.explanation && result.explanation.error) {
+      lines.push(`解释生成失败: ${result.explanation.error}`);
+    }
+
+    return lines.join("\n");
+  }
 
   if (Array.isArray(signalResult.assetSignals) && signalResult.assetSignals.length > 0) {
     lines.push("资产信号:");
@@ -122,6 +160,8 @@ export function buildRunResponseText(result) {
 export function buildHelpText() {
   return [
     "Market Analysis 命令:",
+    "/market fund <midday|close>    运行基金分析主流程（标准化->特征->规则->LLM->JSON）",
+    "/market equity <midday|close>  运行原股票信号流程",
     "/market midday         运行 13:30 盘中分析",
     "/market close          运行 15:15 收盘分析",
     "/market status         查看最近一次运行结果",

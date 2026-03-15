@@ -217,6 +217,33 @@ STT_FAST_WHISPER_PYTHON=python3
 STT_FAST_WHISPER_MODEL=small
 ```
 
+#### Market Analysis（基金主流程）
+
+`/market` 已支持双路径：
+
+- `/market equity <midday|close>`：原股票信号路径
+- `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM -> JSON）
+
+基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
+
+可选环境变量（示例）：
+
+```env
+ENABLE_FUND_ANALYSIS=true
+
+# 新闻检索（基金事件/公告/经理变更）优先走 SERPAPI
+SERPAPI_KEY=
+SERPAPI_ENDPOINT=https://serpapi.com/search.json
+
+# 基金分析 LLM 可选 local 或 gemini（通过 admin 的 Market Analysis 配置切换）
+MARKET_ANALYSIS_FUND_LOCAL_MODEL=
+GEMINI_API_KEY=
+MARKET_ANALYSIS_GEMINI_MODEL=gemini-2.0-flash
+MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
+```
+
+`SERPAPI_KEY` 和 `GEMINI_API_KEY` 也可在 Admin 页面直接配置：`系统设置 -> OpenAI` 模块。
+
 如果只是先把服务跑起来，核心是先保证：
 
 - 至少配置一个可用的 LLM Provider

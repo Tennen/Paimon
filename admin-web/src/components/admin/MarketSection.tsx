@@ -29,7 +29,9 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
+  MarketAnalysisAssetType,
   MarketAnalysisEngine,
+  MarketFundRiskLevel,
   MarketSectionProps
 } from "@/types/admin";
 
@@ -93,7 +95,20 @@ export function MarketSection(props: MarketSectionProps) {
       <CardContent className="space-y-4">
         <div className="space-y-3 rounded-md border border-border p-3">
           <h3 className="text-sm font-medium">分析引擎配置</h3>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>Asset Type</Label>
+              <Select value={props.marketAnalysisConfig.assetType} onValueChange={(value) => props.onMarketAssetTypeChange(value as MarketAnalysisAssetType)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择资产类型" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="equity">equity（原股票路径）</SelectItem>
+                  <SelectItem value="fund">fund（基金主流程）</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="space-y-1.5">
               <Label>Analysis Engine</Label>
               <Select value={props.marketAnalysisConfig.analysisEngine} onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}>
@@ -102,6 +117,7 @@ export function MarketSection(props: MarketSectionProps) {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="local">local（本地规则 + 本地LLM解释）</SelectItem>
+                  <SelectItem value="gemini">gemini（Google Gemini API）</SelectItem>
                   <SelectItem value="gpt_plugin">gpt_plugin（调用远端GPT插件）</SelectItem>
                 </SelectContent>
               </Select>
@@ -128,6 +144,71 @@ export function MarketSection(props: MarketSectionProps) {
                   onCheckedChange={props.onMarketGptPluginFallbackToLocalChange}
                 />
               </div>
+            </div>
+
+            <div className="flex items-end">
+              <div className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2">
+                <Label htmlFor="market-fund-enabled" className="text-xs">启用基金主流程</Label>
+                <Switch
+                  id="market-fund-enabled"
+                  checked={props.marketAnalysisConfig.fund.enabled}
+                  onCheckedChange={props.onMarketFundEnabledChange}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="market-fund-max-age">基金数据最大时效（天）</Label>
+              <Input
+                id="market-fund-max-age"
+                type="number"
+                min={1}
+                step="1"
+                value={props.marketAnalysisConfig.fund.maxAgeDays}
+                onChange={(event) => props.onMarketFundMaxAgeDaysChange(Number(event.target.value))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="market-fund-lookback">特征回看天数</Label>
+              <Input
+                id="market-fund-lookback"
+                type="number"
+                min={20}
+                step="1"
+                value={props.marketAnalysisConfig.fund.featureLookbackDays}
+                onChange={(event) => props.onMarketFundFeatureLookbackDaysChange(Number(event.target.value))}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="market-fund-llm-retry">LLM 重试次数</Label>
+              <Input
+                id="market-fund-llm-retry"
+                type="number"
+                min={1}
+                step="1"
+                value={props.marketAnalysisConfig.fund.llmRetryMax}
+                onChange={(event) => props.onMarketFundLlmRetryMaxChange(Number(event.target.value))}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>基金风险等级</Label>
+              <Select value={props.marketAnalysisConfig.fund.ruleRiskLevel} onValueChange={(value) => props.onMarketFundRiskLevelChange(value as MarketFundRiskLevel)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="选择风险等级" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">low（低风险）</SelectItem>
+                  <SelectItem value="medium">medium（中风险）</SelectItem>
+                  <SelectItem value="high">high（高风险）</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="flex gap-2">

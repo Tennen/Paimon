@@ -26,7 +26,9 @@ import {
   EvolutionStateSnapshot,
   MarketConfig,
   MarketAnalysisConfig,
+  MarketAnalysisAssetType,
   MarketAnalysisEngine,
+  MarketFundRiskLevel,
   MarketFundHolding,
   MarketPhase,
   MarketPortfolio,
@@ -75,7 +77,9 @@ const EMPTY_OPENAI_DRAFT: SystemOpenAIDraft = {
   monthlyTokenLimit: "",
   monthlyBudgetUsd: "",
   costInputPer1M: "",
-  costOutputPer1M: ""
+  costOutputPer1M: "",
+  geminiApiKey: "",
+  serpApiKey: ""
 };
 
 type CodexDraft = {
@@ -313,7 +317,9 @@ export default function App() {
       monthlyTokenLimit: payload.openaiMonthlyTokenLimit || "",
       monthlyBudgetUsd: payload.openaiMonthlyBudgetUsd || "",
       costInputPer1M: payload.openaiCostInputPer1M || "",
-      costOutputPer1M: payload.openaiCostOutputPer1M || ""
+      costOutputPer1M: payload.openaiCostOutputPer1M || "",
+      geminiApiKey: payload.geminiApiKey || "",
+      serpApiKey: payload.serpApiKey || ""
     });
     setCodexDraft({
       model: payload.codexModel || "",
@@ -584,6 +590,8 @@ export default function App() {
           openaiMonthlyBudgetUsd,
           openaiCostInputPer1M,
           openaiCostOutputPer1M,
+          geminiApiKey: openaiDraft.geminiApiKey.trim(),
+          serpApiKey: openaiDraft.serpApiKey.trim(),
           restart: restartAfterSave
         })
       });
@@ -993,6 +1001,13 @@ export default function App() {
     }));
   }
 
+  function handleMarketAssetTypeChange(value: MarketAnalysisAssetType): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      assetType: value
+    }));
+  }
+
   function handleMarketAnalysisEngineChange(value: MarketAnalysisEngine): void {
     setMarketAnalysisConfig((prev) => ({
       ...prev,
@@ -1016,6 +1031,56 @@ export default function App() {
       gptPlugin: {
         ...prev.gptPlugin,
         fallbackToLocal: value
+      }
+    }));
+  }
+
+  function handleMarketFundEnabledChange(value: boolean): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        enabled: value
+      }
+    }));
+  }
+
+  function handleMarketFundMaxAgeDaysChange(value: number): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        maxAgeDays: Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1
+      }
+    }));
+  }
+
+  function handleMarketFundFeatureLookbackDaysChange(value: number): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        featureLookbackDays: Number.isFinite(value) ? Math.max(20, Math.floor(value)) : 20
+      }
+    }));
+  }
+
+  function handleMarketFundRiskLevelChange(value: MarketFundRiskLevel): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        ruleRiskLevel: value
+      }
+    }));
+  }
+
+  function handleMarketFundLlmRetryMaxChange(value: number): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        llmRetryMax: Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1
       }
     }));
   }
@@ -1221,6 +1286,18 @@ export default function App() {
     const timeoutMs = Number(marketAnalysisConfig.gptPlugin.timeoutMs);
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       setNotice({ type: "error", title: "GPT Plugin 超时必须为正整数毫秒" });
+      return;
+    }
+    if (!Number.isFinite(Number(marketAnalysisConfig.fund.maxAgeDays)) || Number(marketAnalysisConfig.fund.maxAgeDays) <= 0) {
+      setNotice({ type: "error", title: "基金数据最大时效必须为正整数" });
+      return;
+    }
+    if (!Number.isFinite(Number(marketAnalysisConfig.fund.featureLookbackDays)) || Number(marketAnalysisConfig.fund.featureLookbackDays) < 20) {
+      setNotice({ type: "error", title: "基金特征回看天数至少 20 天" });
+      return;
+    }
+    if (!Number.isFinite(Number(marketAnalysisConfig.fund.llmRetryMax)) || Number(marketAnalysisConfig.fund.llmRetryMax) <= 0) {
+      setNotice({ type: "error", title: "基金 LLM 重试次数必须为正整数" });
       return;
     }
     const normalizedConfig = normalizeMarketAnalysisConfig(marketAnalysisConfig);
@@ -1823,9 +1900,15 @@ export default function App() {
               marketSearchResults={marketSearchResults}
               searchingMarketFundIndex={searchingMarketFundIndex}
               onCashChange={handleMarketCashChange}
+              onMarketAssetTypeChange={handleMarketAssetTypeChange}
               onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
               onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
               onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
+              onMarketFundEnabledChange={handleMarketFundEnabledChange}
+              onMarketFundMaxAgeDaysChange={handleMarketFundMaxAgeDaysChange}
+              onMarketFundFeatureLookbackDaysChange={handleMarketFundFeatureLookbackDaysChange}
+              onMarketFundRiskLevelChange={handleMarketFundRiskLevelChange}
+              onMarketFundLlmRetryMaxChange={handleMarketFundLlmRetryMaxChange}
               onMarketTaskUserIdChange={setMarketTaskUserId}
               onMarketMiddayTimeChange={setMarketMiddayTime}
               onMarketCloseTimeChange={setMarketCloseTime}
@@ -1978,17 +2061,46 @@ function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
 }
 
 function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnalysisConfig {
-  const engine = config?.analysisEngine === "gpt_plugin" ? "gpt_plugin" : "local";
+  const assetType = config?.assetType === "fund" ? "fund" : "equity";
+  const engine = config?.analysisEngine === "gpt_plugin"
+    ? "gpt_plugin"
+    : config?.analysisEngine === "gemini"
+      ? "gemini"
+      : "local";
   const timeoutMs = Number(config?.gptPlugin?.timeoutMs);
   const fallbackToLocal = typeof config?.gptPlugin?.fallbackToLocal === "boolean"
     ? config.gptPlugin.fallbackToLocal
     : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.fallbackToLocal;
+  const maxAgeDays = Number(config?.fund?.maxAgeDays);
+  const featureLookbackDays = Number(config?.fund?.featureLookbackDays);
+  const llmRetryMax = Number(config?.fund?.llmRetryMax);
+  const riskLevel = config?.fund?.ruleRiskLevel === "low"
+    ? "low"
+    : config?.fund?.ruleRiskLevel === "high"
+      ? "high"
+      : "medium";
   return {
     version: 1,
+    assetType,
     analysisEngine: engine,
     gptPlugin: {
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.timeoutMs,
       fallbackToLocal
+    },
+    fund: {
+      enabled: typeof config?.fund?.enabled === "boolean"
+        ? config.fund.enabled
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.enabled,
+      maxAgeDays: Number.isFinite(maxAgeDays) && maxAgeDays > 0
+        ? Math.floor(maxAgeDays)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.maxAgeDays,
+      featureLookbackDays: Number.isFinite(featureLookbackDays) && featureLookbackDays > 0
+        ? Math.floor(featureLookbackDays)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.featureLookbackDays,
+      ruleRiskLevel: riskLevel,
+      llmRetryMax: Number.isFinite(llmRetryMax) && llmRetryMax > 0
+        ? Math.floor(llmRetryMax)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax
     }
   };
 }

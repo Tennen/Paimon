@@ -15,9 +15,17 @@ export const SZ_INDEX_CODES = new Set(["399001", "399005", "399006", "399102", "
 
 export const DEFAULT_ANALYSIS_CONFIG = {
   version: 1,
+  assetType: "equity",
   analysisEngine: "local",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true
+  },
+  fund: {
+    enabled: true,
+    maxAgeDays: 5,
+    featureLookbackDays: 120,
+    ruleRiskLevel: "medium",
+    llmRetryMax: 1
   }
 };

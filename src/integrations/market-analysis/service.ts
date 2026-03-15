@@ -37,13 +37,17 @@ export async function execute(input) {
 
   const phase = command.phase;
   const withExplanation = command.withExplanation;
+  const assetType = command.assetType;
 
-  const result = await runAnalysis(phase, withExplanation);
+  const result = await runAnalysis(phase, withExplanation, {
+    assetType
+  });
   return {
     text: buildRunResponseText(result),
     result: {
       runId: result.persisted.id,
       phase: result.signalResult.phase,
+      assetType: result.signalResult.assetType || assetType || "equity",
       marketState: result.signalResult.marketState,
       generatedAt: result.signalResult.generatedAt,
       signalResult: result.signalResult,

@@ -254,10 +254,19 @@ export function normalizePortfolio(input) {
 
 export function normalizeAnalysisConfig(input) {
   const source = (input && typeof input === "object") ? input : {};
+  const assetTypeRaw = typeof source.assetType === "string"
+    ? source.assetType.trim().toLowerCase()
+    : "";
+  const assetType = assetTypeRaw === "fund" ? "fund" : "equity";
+
   const engineRaw = typeof source.analysisEngine === "string"
     ? source.analysisEngine.trim().toLowerCase()
     : "";
-  const analysisEngine = engineRaw === "gpt_plugin" ? "gpt_plugin" : "local";
+  const analysisEngine = engineRaw === "gpt_plugin"
+    ? "gpt_plugin"
+    : engineRaw === "gemini"
+      ? "gemini"
+      : "local";
 
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin
@@ -268,12 +277,40 @@ export function normalizeAnalysisConfig(input) {
     .toLowerCase();
   const fallbackToLocal = !(fallbackFlag === "false" || fallbackFlag === "0" || fallbackFlag === "off");
 
+  const fund = source.fund && typeof source.fund === "object"
+    ? source.fund
+    : {};
+  const enabledFlag = String(fund.enabled ?? DEFAULT_ANALYSIS_CONFIG.fund.enabled)
+    .trim()
+    .toLowerCase();
+  const enabled = !(enabledFlag === "false" || enabledFlag === "0" || enabledFlag === "off");
+  const maxAgeDays = parsePositiveInteger(fund.maxAgeDays, DEFAULT_ANALYSIS_CONFIG.fund.maxAgeDays);
+  const featureLookbackDays = parsePositiveInteger(
+    fund.featureLookbackDays,
+    DEFAULT_ANALYSIS_CONFIG.fund.featureLookbackDays
+  );
+  const llmRetryMax = parsePositiveInteger(fund.llmRetryMax, DEFAULT_ANALYSIS_CONFIG.fund.llmRetryMax);
+  const riskRaw = typeof fund.ruleRiskLevel === "string"
+    ? fund.ruleRiskLevel.trim().toLowerCase()
+    : "";
+  const ruleRiskLevel = ["low", "medium", "high"].includes(riskRaw)
+    ? riskRaw
+    : DEFAULT_ANALYSIS_CONFIG.fund.ruleRiskLevel;
+
   return {
     version: 1,
+    assetType,
     analysisEngine,
     gptPlugin: {
       timeoutMs,
       fallbackToLocal
+    },
+    fund: {
+      enabled,
+      maxAgeDays,
+      featureLookbackDays,
+      ruleRiskLevel,
+      llmRetryMax
     }
   };
 }

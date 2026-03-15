@@ -32,13 +32,15 @@ export function parseCommand(input) {
   }
 
   const withExplanation = !/--no-llm\b/i.test(body);
+  const explicitAssetType = detectAssetTypeFromText(body);
 
   const explicitPhase = detectPhaseFromText(body);
   if (explicitPhase) {
     return {
       kind: "run",
       phase: explicitPhase,
-      withExplanation
+      withExplanation,
+      assetType: explicitAssetType || undefined
     };
   }
 
@@ -47,7 +49,8 @@ export function parseCommand(input) {
     return {
       kind: "run",
       phase: detectPhaseFromText(rest) || inferPhaseFromLocalTime(),
-      withExplanation
+      withExplanation,
+      assetType: explicitAssetType || undefined
     };
   }
 
@@ -55,14 +58,16 @@ export function parseCommand(input) {
     return {
       kind: "run",
       phase: inferPhaseFromLocalTime(),
-      withExplanation
+      withExplanation,
+      assetType: explicitAssetType || undefined
     };
   }
 
   return {
     kind: "run",
     phase: inferPhaseFromLocalTime(),
-    withExplanation
+    withExplanation,
+    assetType: explicitAssetType || undefined
   };
 }
 
@@ -131,6 +136,32 @@ function detectPhaseFromText(text) {
     source.includes("15:15")
   ) {
     return "close";
+  }
+
+  return null;
+}
+
+function detectAssetTypeFromText(text) {
+  const source = String(text || "").trim().toLowerCase();
+  if (!source) return null;
+
+  if (
+    /\bfund\b/.test(source) ||
+    /基金/.test(source) ||
+    /asset[_-]?type\s*[:=]\s*fund/.test(source) ||
+    /--asset[-_]type\s+fund/.test(source)
+  ) {
+    return "fund";
+  }
+
+  if (
+    /\bequity\b/.test(source) ||
+    /\bstock\b/.test(source) ||
+    /股票/.test(source) ||
+    /asset[_-]?type\s*[:=]\s*(equity|stock)/.test(source) ||
+    /--asset[-_]type\s+(equity|stock)/.test(source)
+  ) {
+    return "equity";
   }
 
   return null;

@@ -70,17 +70,29 @@ type MarketPortfolio = {
   cash: number;
 };
 
-type MarketAnalysisEngine = "local" | "gpt_plugin";
+type MarketAnalysisAssetType = "equity" | "fund";
+
+type MarketAnalysisEngine = "local" | "gpt_plugin" | "gemini";
 
 type MarketGptPluginConfig = {
   timeoutMs: number;
   fallbackToLocal: boolean;
 };
 
+type MarketFundAnalysisConfig = {
+  enabled: boolean;
+  maxAgeDays: number;
+  featureLookbackDays: number;
+  ruleRiskLevel: "low" | "medium" | "high";
+  llmRetryMax: number;
+};
+
 type MarketAnalysisConfig = {
   version: 1;
+  assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
   gptPlugin: MarketGptPluginConfig;
+  fund: MarketFundAnalysisConfig;
 };
 
 type MarketRunSummary = {
@@ -167,10 +179,18 @@ const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
 
 const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
+  assetType: "equity",
   analysisEngine: "local",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true
+  },
+  fund: {
+    enabled: true,
+    maxAgeDays: 5,
+    featureLookbackDays: 120,
+    ruleRiskLevel: "medium",
+    llmRetryMax: 1
   }
 };
 
@@ -231,6 +251,8 @@ export class AdminIngressAdapter implements IngressAdapter {
         openaiMonthlyBudgetUsd: getEnvValue(envPath, "OPENAI_MONTHLY_BUDGET_USD"),
         openaiCostInputPer1M: getEnvValue(envPath, "OPENAI_COST_INPUT_PER_1M"),
         openaiCostOutputPer1M: getEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M"),
+        geminiApiKey: getEnvValue(envPath, "GEMINI_API_KEY"),
+        serpApiKey: getEnvValue(envPath, "SERPAPI_KEY"),
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
         memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
@@ -390,6 +412,8 @@ export class AdminIngressAdapter implements IngressAdapter {
         openaiMonthlyBudgetUsd?: unknown;
         openaiCostInputPer1M?: unknown;
         openaiCostOutputPer1M?: unknown;
+        geminiApiKey?: unknown;
+        serpApiKey?: unknown;
         restart?: unknown;
       };
       const model = typeof body.model === "string" ? body.model.trim() : "";
@@ -472,6 +496,8 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({ error: "openaiCostOutputPer1M must be a positive number or empty" });
         return;
       }
+      const geminiApiKey = normalizeOptionalString(body.geminiApiKey);
+      const serpApiKey = normalizeOptionalString(body.serpApiKey);
       const effectiveOpenaiFallbackToChatgptBridge = openaiFallbackToChatgptBridge ?? true;
       const effectiveOpenaiForceBridge = openaiForceBridge ?? false;
 
@@ -559,6 +585,16 @@ export class AdminIngressAdapter implements IngressAdapter {
           setEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M", openaiCostOutputPer1MRaw);
         } else {
           unsetEnvValue(envPath, "OPENAI_COST_OUTPUT_PER_1M");
+        }
+        if (geminiApiKey) {
+          setEnvValue(envPath, "GEMINI_API_KEY", geminiApiKey);
+        } else {
+          unsetEnvValue(envPath, "GEMINI_API_KEY");
+        }
+        if (serpApiKey) {
+          setEnvValue(envPath, "SERPAPI_KEY", serpApiKey);
+        } else {
+          unsetEnvValue(envPath, "SERPAPI_KEY");
         }
       } catch (error) {
         res.status(500).json({ error: (error as Error).message ?? "failed to save model config" });
@@ -964,7 +1000,11 @@ export class AdminIngressAdapter implements IngressAdapter {
 
       const payload = req.body as Record<string, unknown>;
       const hasPortfolio = "portfolio" in payload || "funds" in payload || "cash" in payload;
-      const hasConfig = "config" in payload || "analysisEngine" in payload || "gptPlugin" in payload;
+      const hasConfig = "config" in payload
+        || "analysisEngine" in payload
+        || "assetType" in payload
+        || "gptPlugin" in payload
+        || "fund" in payload;
       if (!hasPortfolio && !hasConfig) {
         res.status(400).json({ error: "missing market portfolio/config payload" });
         return;
@@ -1974,29 +2014,65 @@ function normalizeMarketRunSummary(input: unknown): MarketRunSummary | null {
 function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
   const fallback = {
     ...DEFAULT_MARKET_ANALYSIS_CONFIG,
-    gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin }
+    gptPlugin: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin },
+    fund: { ...DEFAULT_MARKET_ANALYSIS_CONFIG.fund }
   };
   if (!input || typeof input !== "object") {
     return fallback;
   }
 
   const source = input as Record<string, unknown>;
+  const assetTypeRaw = typeof source.assetType === "string" ? source.assetType.trim().toLowerCase() : "";
+  const assetType: MarketAnalysisAssetType = assetTypeRaw === "fund" ? "fund" : "equity";
   const engineRaw = typeof source.analysisEngine === "string" ? source.analysisEngine.trim().toLowerCase() : "";
-  const analysisEngine: MarketAnalysisEngine = engineRaw === "gpt_plugin" ? "gpt_plugin" : "local";
+  const analysisEngine: MarketAnalysisEngine = engineRaw === "gpt_plugin"
+    ? "gpt_plugin"
+    : engineRaw === "gemini"
+      ? "gemini"
+      : "local";
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin as Record<string, unknown>
     : {};
   const timeoutMs = Number(gptPlugin.timeoutMs);
   const fallbackToLocal = parseOptionalBoolean(gptPlugin.fallbackToLocal);
+  const fund = source.fund && typeof source.fund === "object"
+    ? source.fund as Record<string, unknown>
+    : {};
+  const fundEnabled = parseOptionalBoolean(fund.enabled);
+  const maxAgeDays = Number(fund.maxAgeDays);
+  const featureLookbackDays = Number(fund.featureLookbackDays);
+  const llmRetryMax = Number(fund.llmRetryMax);
+  const ruleRiskLevelRaw = typeof fund.ruleRiskLevel === "string"
+    ? fund.ruleRiskLevel.trim().toLowerCase()
+    : "";
+  const ruleRiskLevel: "low" | "medium" | "high" = ruleRiskLevelRaw === "low"
+    ? "low"
+    : ruleRiskLevelRaw === "high"
+      ? "high"
+      : "medium";
 
   return {
     version: 1,
+    assetType,
     analysisEngine,
     gptPlugin: {
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
         ? Math.floor(timeoutMs)
         : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.timeoutMs,
       fallbackToLocal: fallbackToLocal ?? DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.fallbackToLocal
+    },
+    fund: {
+      enabled: fundEnabled ?? DEFAULT_MARKET_ANALYSIS_CONFIG.fund.enabled,
+      maxAgeDays: Number.isFinite(maxAgeDays) && maxAgeDays > 0
+        ? Math.floor(maxAgeDays)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.maxAgeDays,
+      featureLookbackDays: Number.isFinite(featureLookbackDays) && featureLookbackDays > 0
+        ? Math.floor(featureLookbackDays)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.featureLookbackDays,
+      ruleRiskLevel,
+      llmRetryMax: Number.isFinite(llmRetryMax) && llmRetryMax > 0
+        ? Math.floor(llmRetryMax)
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax
     }
   };
 }

@@ -24,6 +24,8 @@ export type AdminConfig = {
   openaiMonthlyBudgetUsd: string;
   openaiCostInputPer1M: string;
   openaiCostOutputPer1M: string;
+  geminiApiKey: string;
+  serpApiKey: string;
   codexModel: string;
   codexReasoningEffort: string;
   memoryCompactEveryRounds: string;
@@ -75,14 +77,26 @@ export type MarketPortfolio = {
   cash: number;
 };
 
-export type MarketAnalysisEngine = "local" | "gpt_plugin";
+export type MarketAnalysisAssetType = "equity" | "fund";
+
+export type MarketAnalysisEngine = "local" | "gpt_plugin" | "gemini";
+
+export type MarketFundRiskLevel = "low" | "medium" | "high";
 
 export type MarketAnalysisConfig = {
   version: 1;
+  assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
   gptPlugin: {
     timeoutMs: number;
     fallbackToLocal: boolean;
+  };
+  fund: {
+    enabled: boolean;
+    maxAgeDays: number;
+    featureLookbackDays: number;
+    ruleRiskLevel: MarketFundRiskLevel;
+    llmRetryMax: number;
   };
 };
 
@@ -137,9 +151,15 @@ export type MarketSectionProps = {
   marketSearchResults: MarketSecuritySearchItem[][];
   searchingMarketFundIndex: number | null;
   onCashChange: (value: number) => void;
+  onMarketAssetTypeChange: (value: MarketAnalysisAssetType) => void;
   onMarketAnalysisEngineChange: (value: MarketAnalysisEngine) => void;
   onMarketGptPluginTimeoutMsChange: (value: number) => void;
   onMarketGptPluginFallbackToLocalChange: (value: boolean) => void;
+  onMarketFundEnabledChange: (value: boolean) => void;
+  onMarketFundMaxAgeDaysChange: (value: number) => void;
+  onMarketFundFeatureLookbackDaysChange: (value: number) => void;
+  onMarketFundRiskLevelChange: (value: MarketFundRiskLevel) => void;
+  onMarketFundLlmRetryMaxChange: (value: number) => void;
   onMarketTaskUserIdChange: (value: string) => void;
   onMarketMiddayTimeChange: (value: string) => void;
   onMarketCloseTimeChange: (value: string) => void;
@@ -462,10 +482,18 @@ export const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
 
 export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
+  assetType: "equity",
   analysisEngine: "local",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true
+  },
+  fund: {
+    enabled: true,
+    maxAgeDays: 5,
+    featureLookbackDays: 120,
+    ruleRiskLevel: "medium",
+    llmRetryMax: 1
   }
 };
 

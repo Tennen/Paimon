@@ -44,6 +44,8 @@ export type SystemOpenAIDraft = {
   monthlyBudgetUsd: string;
   costInputPer1M: string;
   costOutputPer1M: string;
+  geminiApiKey: string;
+  serpApiKey: string;
 };
 
 export type SystemMemoryDraft = {
@@ -366,6 +368,24 @@ export function SystemSection(props: SystemSectionProps) {
                   value={props.openaiDraft.costOutputPer1M}
                   onChange={(event) => props.onOpenAIDraftChange("costOutputPer1M", event.target.value)}
                   placeholder="每百万输出 tokens 成本（USD）"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>GEMINI_API_KEY</Label>
+                <Input
+                  type="password"
+                  value={props.openaiDraft.geminiApiKey}
+                  onChange={(event) => props.onOpenAIDraftChange("geminiApiKey", event.target.value)}
+                  placeholder="Google Gemini API Key"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>SERPAPI_KEY</Label>
+                <Input
+                  type="password"
+                  value={props.openaiDraft.serpApiKey}
+                  onChange={(event) => props.onOpenAIDraftChange("serpApiKey", event.target.value)}
+                  placeholder="SerpApi API Key"
                 />
               </div>
               <div className="space-y-2">
