@@ -862,7 +862,7 @@ export default function App() {
     setTaskForm({
       name: task.name,
       time: task.time,
-      userId: task.userId ?? "",
+      userIds: [...task.userIds],
       message: task.message,
       enabled: task.enabled
     });
@@ -874,12 +874,12 @@ export default function App() {
     const payload: TaskFormState = {
       name: taskForm.name.trim(),
       time: taskForm.time.trim(),
-      userId: taskForm.userId,
+      userIds: taskForm.userIds,
       message: taskForm.message.trim(),
       enabled: taskForm.enabled
     };
 
-    if (!payload.name || !payload.time || !payload.userId || !payload.message) {
+    if (!payload.name || !payload.time || payload.userIds.length === 0 || !payload.message) {
       setNotice({ type: "error", title: "请填写完整任务信息" });
       return;
     }

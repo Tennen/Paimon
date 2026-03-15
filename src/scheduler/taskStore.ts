@@ -12,7 +12,7 @@ export type ScheduledTask = {
   enabled: boolean;
   type: "daily";
   time: string;
-  userId?: string;
+  userIds: string[];
   toUser: string;
   message: string;
   createdAt: string;
@@ -72,10 +72,14 @@ function isScheduledTask(value: unknown): value is ScheduledTask {
     typeof task.enabled === "boolean" &&
     task.type === "daily" &&
     typeof task.time === "string" &&
-    (task.userId === undefined || typeof task.userId === "string") &&
+    isNonEmptyStringList(task.userIds) &&
     typeof task.toUser === "string" &&
     typeof task.message === "string" &&
     typeof task.createdAt === "string" &&
     typeof task.updatedAt === "string"
   );
+}
+
+function isNonEmptyStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string");
 }

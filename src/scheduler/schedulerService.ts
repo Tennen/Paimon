@@ -22,7 +22,7 @@ export type CreateScheduledTaskInput = {
   name?: string;
   enabled?: boolean;
   time: string;
-  userId: string;
+  userIds: string[];
   message: string;
 };
 
@@ -30,7 +30,7 @@ export type UpdateScheduledTaskInput = {
   name?: string;
   enabled?: boolean;
   time?: string;
-  userId?: string;
+  userIds?: string[];
   message?: string;
 };
 
@@ -169,7 +169,9 @@ export class SchedulerService {
 
   createTask(input: CreateScheduledTaskInput): ScheduledTask {
     const payload = normalizeCreateTaskInput(input);
-    const user = this.getRequiredUser(payload.userId);
+    const users = this.getRequiredUsers(payload.userIds);
+    const targetUserIds = users.map((user) => user.id);
+    const toUser = formatToUserTargets(users.map((user) => user.wecomUserId));
 
     const now = new Date().toISOString();
     const task: ScheduledTask = {
@@ -178,8 +180,8 @@ export class SchedulerService {
       enabled: payload.enabled,
       type: "daily",
       time: payload.time,
-      userId: user.id,
-      toUser: user.wecomUserId,
+      userIds: targetUserIds,
+      toUser,
       message: payload.message,
       createdAt: now,
       updatedAt: now
@@ -204,13 +206,15 @@ export class SchedulerService {
     }
 
     const next = normalizeUpdateTaskInput(input, tasks[index]);
-    const user = this.getRequiredUser(next.userId);
+    const users = this.getRequiredUsers(next.userIds);
+    const targetUserIds = users.map((user) => user.id);
+    const toUser = formatToUserTargets(users.map((user) => user.wecomUserId));
 
     const updated: ScheduledTask = {
       ...tasks[index],
       ...next,
-      userId: user.id,
-      toUser: user.wecomUserId,
+      userIds: targetUserIds,
+      toUser,
       updatedAt: new Date().toISOString()
     };
 
@@ -258,7 +262,7 @@ export class SchedulerService {
       enabled: true,
       type: "daily",
       time: "00:00",
-      userId: user.id,
+      userIds: [user.id],
       toUser: user.wecomUserId,
       message: normalizeRequiredText(message, "message"),
       createdAt: now,
@@ -328,7 +332,8 @@ export class SchedulerService {
 
   private async executeTask(task: ScheduledTask, runKey: string): Promise<TriggerTaskResult> {
     const now = new Date().toISOString();
-    const toUser = this.resolveTaskToUser(task);
+    const targets = this.resolveTaskTargets(task);
+    const toUser = formatToUserTargets(targets);
 
     const envelope: Envelope = {
       requestId: `schedule-${task.id}-${Date.now()}`,
@@ -367,16 +372,51 @@ export class SchedulerService {
     return user;
   }
 
-  private resolveTaskToUser(task: ScheduledTask): string {
-    if (task.userId) {
-      const user = this.userStore.list().find((item) => item.id === task.userId);
-      if (user && user.enabled) {
-        return user.wecomUserId;
+  private getRequiredUsers(userIds: string[]): PushUser[] {
+    const users = this.userStore.list();
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    return userIds.map((userId) => {
+      const user = userMap.get(userId);
+      if (!user) {
+        throw new Error(`Selected user does not exist: ${userId}`);
+      }
+      return user;
+    });
+  }
+
+  private resolveTaskTargets(task: ScheduledTask): string[] {
+    const users = this.userStore.list();
+    const userMap = new Map(users.map((user) => [user.id, user]));
+    const userIds = getTaskUserIds(task);
+
+    if (userIds.length > 0) {
+      let hasMappedUser = false;
+      const activeTargets: string[] = [];
+      for (const userId of userIds) {
+        const user = userMap.get(userId);
+        if (!user) {
+          continue;
+        }
+        hasMappedUser = true;
+        if (!user.enabled) {
+          continue;
+        }
+        activeTargets.push(user.wecomUserId);
+      }
+
+      const deduped = dedupeTextList(activeTargets);
+      if (deduped.length > 0) {
+        return deduped;
+      }
+
+      if (hasMappedUser) {
+        throw new Error(`Task ${task.id} has no enabled push target`);
       }
     }
 
-    if (task.toUser) {
-      return task.toUser;
+    const fallback = parseToUserTargets(task.toUser);
+    if (fallback.length > 0) {
+      return fallback;
     }
 
     throw new Error(`Task ${task.id} has no valid push target`);
@@ -384,20 +424,25 @@ export class SchedulerService {
 
   private syncTaskTargetsForUser(user: PushUser): void {
     const tasks = this.store.list();
+    const users = this.userStore.list();
+    const userMap = new Map(users.map((item) => [item.id, item]));
     let changed = false;
     const now = new Date().toISOString();
 
     const next = tasks.map((task) => {
-      if (task.userId !== user.id) {
+      const taskUserIds = getTaskUserIds(task);
+      if (!taskUserIds.includes(user.id)) {
         return task;
       }
-      if (task.toUser === user.wecomUserId) {
+
+      const nextToUser = formatToUserTargets(resolveTaskToUsersForStorage(task, userMap));
+      if (task.toUser === nextToUser) {
         return task;
       }
       changed = true;
       return {
         ...task,
-        toUser: user.wecomUserId,
+        toUser: nextToUser,
         updatedAt: now
       };
     });
@@ -444,14 +489,14 @@ function normalizeCreateTaskInput(input: CreateScheduledTaskInput): {
   name: string;
   enabled: boolean;
   time: string;
-  userId: string;
+  userIds: string[];
   message: string;
 } {
   return {
     name: normalizeName(input.name),
     enabled: input.enabled ?? true,
     time: normalizeTime(input.time),
-    userId: normalizeRequiredText(input.userId, "userId"),
+    userIds: normalizeCreateTaskUserIds(input),
     message: normalizeRequiredText(input.message, "message")
   };
 }
@@ -460,14 +505,14 @@ function normalizeUpdateTaskInput(input: UpdateScheduledTaskInput, current: Sche
   name: string;
   enabled: boolean;
   time: string;
-  userId: string;
+  userIds: string[];
   message: string;
 } {
   return {
     name: normalizeName(input.name ?? current.name),
     enabled: input.enabled ?? current.enabled,
     time: normalizeTime(input.time ?? current.time),
-    userId: normalizeRequiredText(input.userId ?? current.userId ?? "", "userId"),
+    userIds: normalizeUpdateTaskUserIds(input, current),
     message: normalizeRequiredText(input.message ?? current.message, "message")
   };
 }
@@ -480,16 +525,120 @@ function ensureUniqueWecomUserId(users: PushUser[], wecomUserId: string, exclude
 }
 
 function canTaskRun(task: ScheduledTask, userMap: Map<string, PushUser>): boolean {
-  if (!task.userId) {
-    return Boolean(task.toUser);
+  const userIds = getTaskUserIds(task);
+  if (userIds.length === 0) {
+    return parseToUserTargets(task.toUser).length > 0;
   }
 
-  const user = userMap.get(task.userId);
-  if (!user) {
-    return Boolean(task.toUser);
+  let hasMappedUser = false;
+  for (const userId of userIds) {
+    const user = userMap.get(userId);
+    if (!user) {
+      continue;
+    }
+    hasMappedUser = true;
+    if (user.enabled && normalizeId(user.wecomUserId).length > 0) {
+      return true;
+    }
   }
 
-  return user.enabled;
+  if (hasMappedUser) {
+    return false;
+  }
+
+  return parseToUserTargets(task.toUser).length > 0;
+}
+
+function normalizeCreateTaskUserIds(input: CreateScheduledTaskInput): string[] {
+  const userIds = normalizeUserIdArray(input.userIds);
+  if (userIds.length === 0) {
+    throw new Error("userIds is required");
+  }
+  return userIds;
+}
+
+function normalizeUpdateTaskUserIds(input: UpdateScheduledTaskInput, current: ScheduledTask): string[] {
+  const hasUserIds = Object.prototype.hasOwnProperty.call(input, "userIds");
+
+  if (!hasUserIds) {
+    const existing = getTaskUserIds(current);
+    if (existing.length > 0) {
+      return existing;
+    }
+    throw new Error("userIds is required");
+  }
+
+  const userIds = normalizeUserIdArray(input.userIds);
+  if (userIds.length === 0) {
+    throw new Error("userIds is required");
+  }
+  return userIds;
+}
+
+function getTaskUserIds(task: ScheduledTask): string[] {
+  return normalizeUserIdArray(task.userIds);
+}
+
+function resolveTaskToUsersForStorage(task: ScheduledTask, userMap: Map<string, PushUser>): string[] {
+  const userIds = getTaskUserIds(task);
+  if (userIds.length === 0) {
+    return parseToUserTargets(task.toUser);
+  }
+
+  const mapped = userIds
+    .map((userId) => userMap.get(userId)?.wecomUserId ?? "")
+    .filter((value) => value.trim().length > 0);
+  if (mapped.length > 0) {
+    return dedupeTextList(mapped);
+  }
+  return parseToUserTargets(task.toUser);
+}
+
+function normalizeUserIdArray(userIds: string[] | undefined): string[] {
+  if (!Array.isArray(userIds)) {
+    return [];
+  }
+  return dedupeTextList(
+    userIds
+      .map((value) => normalizeId(value))
+      .filter((value) => value.length > 0)
+  );
+}
+
+function splitDelimitedValues(raw: string | undefined): string[] {
+  if (typeof raw !== "string") {
+    return [];
+  }
+  const text = raw.trim();
+  if (!text) {
+    return [];
+  }
+  return text
+    .split(/[|,]/g)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function parseToUserTargets(raw: string): string[] {
+  return dedupeTextList(splitDelimitedValues(raw));
+}
+
+function formatToUserTargets(users: string[]): string {
+  return dedupeTextList(users).join("|");
+}
+
+function dedupeTextList(values: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const value = raw.trim();
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
 }
 
 function normalizeName(raw: string | undefined): string {

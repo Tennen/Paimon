@@ -10,13 +10,6 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -195,27 +188,35 @@ export function MessagesSection(props: MessagesSectionProps) {
 
             <div className="space-y-1.5">
               <Label>推送用户</Label>
-              <Select
-                value={props.taskForm.userId || undefined}
-                onValueChange={(value) => props.onTaskFormChange({ userId: value })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={props.enabledUsers.length > 0 ? "选择推送用户" : "请先创建并启用推送用户"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {props.users.length === 0 ? (
-                    <SelectItem value="__empty__" disabled>
-                      暂无推送用户
-                    </SelectItem>
-                  ) : (
-                    props.users.map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
-                        {user.name} ({user.wecomUserId}){user.enabled ? "" : " [停用]"}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              {props.users.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border px-3 py-2 text-sm text-muted-foreground">
+                  暂无推送用户
+                </div>
+              ) : (
+                <div className="space-y-2 rounded-md border border-border p-3">
+                  {props.users.map((user) => {
+                    const checked = props.taskForm.userIds.includes(user.id);
+                    return (
+                      <label key={user.id} className="flex cursor-pointer items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div>{user.name}</div>
+                          <div className="mono text-xs text-muted-foreground">{user.wecomUserId}</div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? props.taskForm.userIds.concat(user.id)
+                              : props.taskForm.userIds.filter((id) => id !== user.id);
+                            props.onTaskFormChange({ userIds: next });
+                          }}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -271,7 +272,9 @@ export function MessagesSection(props: MessagesSectionProps) {
                 </TableRow>
               ) : (
                 props.tasks.map((task) => {
-                  const user = task.userId ? props.userMap.get(task.userId) : undefined;
+                  const taskUsers = task.userIds
+                    .map((userId) => props.userMap.get(userId))
+                    .filter((user): user is PushUser => Boolean(user));
                   return (
                     <TableRow key={task.id}>
                       <TableCell>
@@ -280,10 +283,14 @@ export function MessagesSection(props: MessagesSectionProps) {
                       </TableCell>
                       <TableCell className="mono text-xs">{task.time}</TableCell>
                       <TableCell>
-                        {user ? (
-                          <div>
-                            <div>{user.name}</div>
-                            <div className="mono text-xs text-muted-foreground">{user.wecomUserId}</div>
+                        {taskUsers.length > 0 ? (
+                          <div className="space-y-1">
+                            {taskUsers.map((user) => (
+                              <div key={user.id}>
+                                <div>{user.name}</div>
+                                <div className="mono text-xs text-muted-foreground">{user.wecomUserId}</div>
+                              </div>
+                            ))}
                           </div>
                         ) : (
                           <div className="mono text-xs text-muted-foreground">{task.toUser || "-"}</div>

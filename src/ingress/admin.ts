@@ -1477,11 +1477,14 @@ function parseCreateTaskInput(rawBody: unknown): CreateScheduledTaskInput | null
     return null;
   }
   const body = rawBody as Record<string, unknown>;
+  if (!Array.isArray(body.userIds) || body.userIds.some((item) => typeof item !== "string")) {
+    return null;
+  }
   return {
     name: typeof body.name === "string" ? body.name : undefined,
     enabled: parseOptionalBoolean(body.enabled),
     time: typeof body.time === "string" ? body.time : "",
-    userId: typeof body.userId === "string" ? body.userId : "",
+    userIds: body.userIds,
     message: typeof body.message === "string" ? body.message : ""
   };
 }
@@ -1506,8 +1509,11 @@ function parseUpdateTaskInput(rawBody: unknown): UpdateScheduledTaskInput | null
   if ("time" in body) {
     payload.time = typeof body.time === "string" ? body.time : "";
   }
-  if ("userId" in body) {
-    payload.userId = typeof body.userId === "string" ? body.userId : "";
+  if ("userIds" in body) {
+    if (!Array.isArray(body.userIds) || body.userIds.some((item) => typeof item !== "string")) {
+      return null;
+    }
+    payload.userIds = body.userIds;
   }
   if ("message" in body) {
     payload.message = typeof body.message === "string" ? body.message : "";
@@ -1701,7 +1707,8 @@ function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarket
 
   for (const spec of specs) {
     const match = existing.find((task) =>
-      task.userId === payload.userId &&
+      task.userIds.length === 1 &&
+      task.userIds[0] === payload.userId &&
       task.message.trim().toLowerCase() === spec.message
     );
 
@@ -1710,7 +1717,7 @@ function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarket
         name: spec.name,
         enabled: spec.enabled,
         time: spec.time,
-        userId: payload.userId,
+        userIds: [payload.userId],
         message: spec.message
       });
       if (!updated) {
@@ -1724,7 +1731,7 @@ function upsertMarketTasks(scheduler: SchedulerService, payload: BootstrapMarket
       name: spec.name,
       enabled: spec.enabled,
       time: spec.time,
-      userId: payload.userId,
+      userIds: [payload.userId],
       message: spec.message
     });
     upserted.push(created);

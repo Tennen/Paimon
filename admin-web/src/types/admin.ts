@@ -54,7 +54,7 @@ export type ScheduledTask = {
   enabled: boolean;
   type: "daily";
   time: string;
-  userId?: string;
+  userIds: string[];
   toUser: string;
   message: string;
   createdAt: string;
@@ -434,7 +434,7 @@ export type UserFormState = {
 export type TaskFormState = {
   name: string;
   time: string;
-  userId: string;
+  userIds: string[];
   message: string;
   enabled: boolean;
 };
@@ -450,7 +450,7 @@ export const EMPTY_USER_FORM: UserFormState = {
 export const EMPTY_TASK_FORM: TaskFormState = {
   name: "",
   time: "",
-  userId: "",
+  userIds: [],
   message: "",
   enabled: true
 };
