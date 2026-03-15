@@ -164,10 +164,36 @@ export default function App() {
   const [triggeringEvolutionTick, setTriggeringEvolutionTick] = useState(false);
 
   const enabledUsers = useMemo(() => users.filter((user) => user.enabled), [users]);
+  const llmProviders = useMemo(() => llmProviderStore?.providers ?? [], [llmProviderStore]);
+  const defaultLlmProviderId = useMemo(() => resolveDefaultLlmProviderId(llmProviderStore), [llmProviderStore]);
 
   const userMap = useMemo(() => {
     return new Map(users.map((user) => [user.id, user]));
   }, [users]);
+
+  useEffect(() => {
+    setMarketAnalysisConfig((prev) => {
+      const nextAnalysisEngine = resolveMarketAnalysisProviderId(prev.analysisEngine, llmProviderStore);
+      if (nextAnalysisEngine === prev.analysisEngine) {
+        return prev;
+      }
+      return {
+        ...prev,
+        analysisEngine: nextAnalysisEngine
+      };
+    });
+
+    setTopicSummaryConfig((prev) => {
+      const nextSummaryEngine = resolveTopicSummaryProviderId(prev.summaryEngine, llmProviderStore);
+      if (nextSummaryEngine === prev.summaryEngine) {
+        return prev;
+      }
+      return {
+        ...prev,
+        summaryEngine: nextSummaryEngine
+      };
+    });
+  }, [llmProviderStore]);
 
   function updateCodexDraft<K extends keyof CodexDraft>(key: K, value: CodexDraft[K]): void {
     setCodexDraft((prev) => ({ ...prev, [key]: value }));
@@ -320,7 +346,11 @@ export default function App() {
     const payload = await request<MarketConfig>("/admin/api/market/config");
     setMarketConfig(payload);
     const portfolio = normalizeMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
-    const analysisConfig = normalizeMarketAnalysisConfig(payload.config ?? DEFAULT_MARKET_ANALYSIS_CONFIG);
+    const analysisConfigRaw = normalizeMarketAnalysisConfig(payload.config ?? DEFAULT_MARKET_ANALYSIS_CONFIG);
+    const analysisConfig = {
+      ...analysisConfigRaw,
+      analysisEngine: resolveMarketAnalysisProviderId(analysisConfigRaw.analysisEngine, llmProviderStore)
+    };
     setMarketPortfolio(portfolio);
     setMarketAnalysisConfig(analysisConfig);
     setMarketSavedFundsByRow(portfolio.funds.map((fund) => ({ ...fund })));
@@ -346,7 +376,11 @@ export default function App() {
     const selectedProfile = normalized.profiles.find((item) => item.id === selectedId)
       ?? normalized.profiles[0]
       ?? null;
-    setTopicSummaryConfig(normalizeTopicSummaryConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG));
+    const topicConfigRaw = normalizeTopicSummaryConfig(selectedProfile?.config ?? payload.config ?? DEFAULT_TOPIC_SUMMARY_CONFIG);
+    setTopicSummaryConfig({
+      ...topicConfigRaw,
+      summaryEngine: resolveTopicSummaryProviderId(topicConfigRaw.summaryEngine, llmProviderStore)
+    });
     setTopicSummaryState(normalizeTopicSummaryState(selectedProfile?.state ?? payload.state ?? DEFAULT_TOPIC_SUMMARY_STATE));
   }
 
@@ -1207,7 +1241,11 @@ export default function App() {
       setNotice({ type: "error", title: "基金 LLM 重试次数必须为正整数" });
       return;
     }
-    const normalizedConfig = normalizeMarketAnalysisConfig(marketAnalysisConfig);
+    const normalizedConfigRaw = normalizeMarketAnalysisConfig(marketAnalysisConfig);
+    const normalizedConfig = {
+      ...normalizedConfigRaw,
+      analysisEngine: resolveMarketAnalysisProviderId(normalizedConfigRaw.analysisEngine, llmProviderStore)
+    };
 
     setSavingMarketAnalysisConfig(true);
     try {
@@ -1217,7 +1255,11 @@ export default function App() {
           config: normalizedConfig
         })
       });
-      const nextConfig = normalizeMarketAnalysisConfig(response.config);
+      const nextConfigRaw = normalizeMarketAnalysisConfig(response.config);
+      const nextConfig = {
+        ...nextConfigRaw,
+        analysisEngine: resolveMarketAnalysisProviderId(nextConfigRaw.analysisEngine, llmProviderStore)
+      };
       setMarketAnalysisConfig(nextConfig);
       setNotice({ type: "success", title: "Market 分析引擎配置已保存" });
     } catch (error) {
@@ -1304,7 +1346,11 @@ export default function App() {
       return;
     }
     setTopicSummarySelectedProfileId(target.id);
-    setTopicSummaryConfig(normalizeTopicSummaryConfig(target.config));
+    const config = normalizeTopicSummaryConfig(target.config);
+    setTopicSummaryConfig({
+      ...config,
+      summaryEngine: resolveTopicSummaryProviderId(config.summaryEngine, llmProviderStore)
+    });
     setTopicSummaryState(normalizeTopicSummaryState(target.state));
   }
 
@@ -1481,7 +1527,11 @@ export default function App() {
       return;
     }
 
-    const normalizedConfig = normalizeTopicSummaryConfig(topicSummaryConfig);
+    const normalizedConfigRaw = normalizeTopicSummaryConfig(topicSummaryConfig);
+    const normalizedConfig = {
+      ...normalizedConfigRaw,
+      summaryEngine: resolveTopicSummaryProviderId(normalizedConfigRaw.summaryEngine, llmProviderStore)
+    };
     const invalid = normalizedConfig.sources.find((item) => !item.id || !item.name || !item.feedUrl);
     if (invalid) {
       setNotice({ type: "error", title: `RSS 源字段不完整: ${invalid.id || "(id为空)"}` });
@@ -1506,7 +1556,11 @@ export default function App() {
           config: normalizedConfig
         })
       });
-      setTopicSummaryConfig(normalizeTopicSummaryConfig(payload.config ?? normalizedConfig));
+      const nextConfigRaw = normalizeTopicSummaryConfig(payload.config ?? normalizedConfig);
+      setTopicSummaryConfig({
+        ...nextConfigRaw,
+        summaryEngine: resolveTopicSummaryProviderId(nextConfigRaw.summaryEngine, llmProviderStore)
+      });
       await loadTopicSummaryConfig();
       setNotice({ type: "success", title: "Topic Summary 配置已保存" });
     } catch (error) {
@@ -1793,6 +1847,8 @@ export default function App() {
               marketConfig={marketConfig}
               marketPortfolio={marketPortfolio}
               marketAnalysisConfig={marketAnalysisConfig}
+              llmProviders={llmProviders}
+              defaultLlmProviderId={defaultLlmProviderId}
               marketRuns={marketRuns}
               savingMarketPortfolio={savingMarketPortfolio}
               savingMarketAnalysisConfig={savingMarketAnalysisConfig}
@@ -1842,6 +1898,8 @@ export default function App() {
               topicSummaryActiveProfileId={topicSummaryActiveProfileId}
               topicSummarySelectedProfileId={topicSummarySelectedProfileId}
               topicSummaryConfig={topicSummaryConfig}
+              llmProviders={llmProviders}
+              defaultLlmProviderId={defaultLlmProviderId}
               topicSummaryState={topicSummaryState}
               savingTopicSummaryProfileAction={savingTopicSummaryProfileAction}
               savingTopicSummaryConfig={savingTopicSummaryConfig}
@@ -2096,6 +2154,53 @@ function normalizeTopicSummaryEngine(raw: unknown): string {
     return "gpt_plugin";
   }
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
+}
+
+function resolveDefaultLlmProviderId(store: LLMProviderStore | null | undefined): string {
+  if (!store || !Array.isArray(store.providers) || store.providers.length === 0) {
+    return "";
+  }
+  if (store.providers.some((item) => item.id === store.defaultProviderId)) {
+    return store.defaultProviderId;
+  }
+  return store.providers[0].id;
+}
+
+function resolveMarketAnalysisProviderId(raw: unknown, store: LLMProviderStore | null | undefined): string {
+  const normalized = normalizeMarketAnalysisEngine(raw);
+  return resolveModuleProviderId(normalized, store, { allowGeminiLegacy: true });
+}
+
+function resolveTopicSummaryProviderId(raw: unknown, store: LLMProviderStore | null | undefined): string {
+  const normalized = normalizeTopicSummaryEngine(raw);
+  return resolveModuleProviderId(normalized, store);
+}
+
+function resolveModuleProviderId(
+  normalizedEngine: string,
+  store: LLMProviderStore | null | undefined,
+  options: { allowGeminiLegacy?: boolean } = {}
+): string {
+  if (!store || !Array.isArray(store.providers) || store.providers.length === 0) {
+    return normalizedEngine;
+  }
+
+  if (store.providers.some((item) => item.id === normalizedEngine)) {
+    return normalizedEngine;
+  }
+
+  const defaultProviderId = resolveDefaultLlmProviderId(store);
+  if (normalizedEngine === "local") {
+    return defaultProviderId || normalizedEngine;
+  }
+  if (normalizedEngine === "gpt_plugin") {
+    const gptPluginProviderId = store.providers.find((item) => item.type === "gpt-plugin")?.id;
+    return gptPluginProviderId || defaultProviderId || normalizedEngine;
+  }
+  if (options.allowGeminiLegacy && normalizedEngine === "gemini") {
+    return normalizedEngine;
+  }
+  return defaultProviderId || normalizedEngine;
 }
 
 function normalizeTopicSummaryDefaultLanguage(raw: unknown): TopicSummaryDigestLanguage {

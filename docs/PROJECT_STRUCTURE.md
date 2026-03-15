@@ -87,6 +87,7 @@ data/              # Runtime data files
 - `src/core/orchestrator.ts` resolves LLM engine by step:
   - `routing` step can use a dedicated provider
   - `planning` step can use a dedicated provider
+- Runtime domains `topic-summary` / `market-analysis` also persist provider selector fields (`summaryEngine` / `analysisEngine`) and should prefer explicit `provider-id` selections from the shared provider store.
 - Admin API management entry points are in `src/ingress/admin.ts`:
   - `GET /admin/api/llm/providers`
   - `PUT /admin/api/llm/providers`

@@ -39,8 +39,11 @@ export function MarketSection(props: MarketSectionProps) {
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
   const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const searchSelectorButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
-  const analysisEngineValue = props.marketAnalysisConfig.analysisEngine || "local";
-  const isBuiltinAnalysisEngine = ["local", "gemini", "gpt_plugin"].includes(analysisEngineValue);
+  const fallbackProviderId = props.defaultLlmProviderId || props.llmProviders[0]?.id || "";
+  const analysisEngineValue = props.marketAnalysisConfig.analysisEngine || fallbackProviderId;
+  const analysisEngineSelectValue = analysisEngineValue || "__none__";
+  const hasProviderOptions = props.llmProviders.length > 0;
+  const isKnownAnalysisProvider = props.llmProviders.some((item) => item.id === analysisEngineValue);
 
   const updateSelectorPosition = useCallback(() => {
     if (openSearchSelectorIndex === null) {
@@ -112,30 +115,33 @@ export function MarketSection(props: MarketSectionProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Analysis Engine</Label>
-              <Select value={analysisEngineValue} onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}>
+              <Label>Analysis Provider</Label>
+              <Select
+                value={analysisEngineSelectValue}
+                onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}
+                disabled={!hasProviderOptions}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择分析引擎" />
+                  <SelectValue placeholder="选择 LLM provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="local">local（本地规则 + 本地LLM解释）</SelectItem>
-                  <SelectItem value="gemini">gemini（Google Gemini API）</SelectItem>
-                  <SelectItem value="gpt_plugin">gpt_plugin（调用远端GPT插件）</SelectItem>
-                  {!isBuiltinAnalysisEngine ? (
-                    <SelectItem value={analysisEngineValue}>{analysisEngineValue}（custom provider）</SelectItem>
+                  {props.llmProviders.length === 0 ? (
+                    <SelectItem value="__none__" disabled>暂无 provider，请先到 System 页面新增</SelectItem>
+                  ) : (
+                    props.llmProviders.map((provider) => (
+                      <SelectItem key={provider.id} value={provider.id}>
+                        {provider.name}（{provider.id} / {provider.type}）
+                      </SelectItem>
+                    ))
+                  )}
+                  {!isKnownAnalysisProvider && analysisEngineValue ? (
+                    <SelectItem value={analysisEngineValue}>{analysisEngineValue}（legacy engine）</SelectItem>
                   ) : null}
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="market-analysis-engine-id">Provider ID（可选）</Label>
-              <Input
-                id="market-analysis-engine-id"
-                value={analysisEngineValue}
-                placeholder="local / gpt_plugin / gemini / your-provider-id"
-                onChange={(event) => props.onMarketAnalysisEngineChange(event.target.value as MarketAnalysisEngine)}
-              />
+              <p className="text-xs text-muted-foreground">
+                直接选择 LLM provider；旧配置值会显示为 legacy，可切换到 provider id 完成迁移。
+              </p>
             </div>
 
             <div className="space-y-1.5">

@@ -198,8 +198,8 @@ HA_TOKEN=your_home_assistant_token
 场景选择规则：
 
 - 主编排（Orchestrator）支持独立配置 `routing` 与 `planning` provider（未单独设置时回退到 default）
-- `topic-summary` 的 `summaryEngine` 支持 `local` / `gpt_plugin` / `provider-id`
-- `market-analysis` 的 `analysisEngine` 支持 `local` / `gpt_plugin` / `gemini` / `provider-id`
+- `topic-summary` 的 `summaryEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin` 仍兼容旧配置）
+- `market-analysis` 的 `analysisEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin/gemini` 仍兼容旧配置）
 - `/re` 子 agent 可通过 `RE_AGENT_LLM_PROVIDER` 独立指定 provider
 
 #### 启用企业微信

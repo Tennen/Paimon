@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
+  LLMProviderProfile,
   TopicSummaryCategory,
   TopicSummaryConfig,
   TopicSummaryDigestLanguage,
@@ -42,6 +43,8 @@ type TopicSummarySectionProps = {
   topicSummaryActiveProfileId: string;
   topicSummarySelectedProfileId: string;
   topicSummaryConfig: TopicSummaryConfig;
+  llmProviders: LLMProviderProfile[];
+  defaultLlmProviderId: string;
   topicSummaryState: TopicSummaryState;
   savingTopicSummaryProfileAction: boolean;
   savingTopicSummaryConfig: boolean;
@@ -75,11 +78,6 @@ const CATEGORY_OPTIONS: Array<{ value: TopicSummaryCategory; label: string }> = 
   { value: "ecosystem", label: "ecosystem" }
 ];
 
-const SUMMARY_ENGINE_OPTIONS: Array<{ value: TopicSummaryEngine; label: string }> = [
-  { value: "local", label: "local（本地模型）" },
-  { value: "gpt_plugin", label: "gpt_plugin（GPT Bridge）" }
-];
-
 const DEFAULT_LANGUAGE_OPTIONS: Array<{ value: TopicSummaryDigestLanguage; label: string }> = [
   { value: "auto", label: "auto（自动判断）" },
   { value: "zh-CN", label: "zh-CN（简体中文）" },
@@ -90,8 +88,11 @@ export function TopicSummarySection(props: TopicSummarySectionProps) {
   const [activeModule, setActiveModule] = useState<TopicSummaryModule>("config");
   const enabledCount = props.topicSummaryConfig.sources.filter((item) => item.enabled).length;
   const selectedProfile = props.topicSummaryProfiles.find((item) => item.id === props.topicSummarySelectedProfileId) ?? null;
-  const summaryEngineValue = props.topicSummaryConfig.summaryEngine || "local";
-  const isBuiltinSummaryEngine = SUMMARY_ENGINE_OPTIONS.some((item) => item.value === summaryEngineValue);
+  const fallbackProviderId = props.defaultLlmProviderId || props.llmProviders[0]?.id || "";
+  const summaryEngineValue = props.topicSummaryConfig.summaryEngine || fallbackProviderId;
+  const summaryEngineSelectValue = summaryEngineValue || "__none__";
+  const hasProviderOptions = props.llmProviders.length > 0;
+  const isKnownSummaryProvider = props.llmProviders.some((item) => item.id === summaryEngineValue);
 
   return (
     <Card>
@@ -166,30 +167,33 @@ export function TopicSummarySection(props: TopicSummarySectionProps) {
 
             <div className="grid gap-3 md:grid-cols-4">
               <div className="space-y-1.5">
-                <Label>摘要引擎</Label>
+                <Label>摘要 Provider</Label>
                 <Select
-                  value={summaryEngineValue}
+                  value={summaryEngineSelectValue}
                   onValueChange={(value) => props.onSummaryEngineChange(value as TopicSummaryEngine)}
+                  disabled={!hasProviderOptions}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="选择摘要引擎" />
+                    <SelectValue placeholder="选择 LLM provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {SUMMARY_ENGINE_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                    {!isBuiltinSummaryEngine ? (
-                      <SelectItem value={summaryEngineValue}>{summaryEngineValue}（custom provider）</SelectItem>
+                    {props.llmProviders.length === 0 ? (
+                      <SelectItem value="__none__" disabled>暂无 provider，请先到 System 页面新增</SelectItem>
+                    ) : (
+                      props.llmProviders.map((provider) => (
+                        <SelectItem key={provider.id} value={provider.id}>
+                          {provider.name}（{provider.id} / {provider.type}）
+                        </SelectItem>
+                      ))
+                    )}
+                    {!isKnownSummaryProvider && summaryEngineValue ? (
+                      <SelectItem value={summaryEngineValue}>{summaryEngineValue}（legacy engine）</SelectItem>
                     ) : null}
                   </SelectContent>
                 </Select>
-                <Input
-                  value={summaryEngineValue}
-                  placeholder="local / gpt_plugin / your-provider-id"
-                  onChange={(event) => props.onSummaryEngineChange(event.target.value as TopicSummaryEngine)}
-                />
+                <div className="text-xs text-muted-foreground">
+                  直接选择 LLM provider；旧配置值会显示为 legacy，可切换到 provider id 完成迁移。
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>默认语言</Label>

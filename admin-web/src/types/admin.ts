@@ -250,6 +250,8 @@ export type MarketSectionProps = {
   marketConfig: MarketConfig | null;
   marketPortfolio: MarketPortfolio;
   marketAnalysisConfig: MarketAnalysisConfig;
+  llmProviders: LLMProviderProfile[];
+  defaultLlmProviderId: string;
   marketRuns: MarketRunSummary[];
   savingMarketPortfolio: boolean;
   savingMarketAnalysisConfig: boolean;
