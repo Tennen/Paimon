@@ -185,19 +185,19 @@ HA_TOKEN=your_home_assistant_token
 #### 多 Provider Profile（推荐）
 
 - Provider Profile 持久化存储在 `data/llm/providers.json`（storage key: `llm.providers`）
-- 支持创建多条 `openai-like` / `ollama` profile；`gpt-plugin` 仅允许一条
+- 支持创建多条 `openai-like` / `ollama` / `llama-server` profile；`gpt-plugin` 仅允许一条
 - 每条 profile 可配置对应 engine 的常用参数（baseUrl/model/planningModel/timeout/options 等）
 
 可用 Admin API：
 
 - `GET /admin/api/llm/providers`
 - `PUT /admin/api/llm/providers`（创建/更新，body 可传 `provider`）
-- `POST /admin/api/llm/providers/default`（设置默认 provider）
+- `POST /admin/api/llm/providers/default`（可设置 `defaultProviderId` / `routingProviderId` / `planningProviderId`）
 - `DELETE /admin/api/llm/providers/:id`
 
 场景选择规则：
 
-- 主编排（Orchestrator）使用默认 provider（不再只依赖全局 local LLM）
+- 主编排（Orchestrator）支持独立配置 `routing` 与 `planning` provider（未单独设置时回退到 default）
 - `topic-summary` 的 `summaryEngine` 支持 `local` / `gpt_plugin` / `provider-id`
 - `market-analysis` 的 `analysisEngine` 支持 `local` / `gpt_plugin` / `gemini` / `provider-id`
 - `/re` 子 agent 可通过 `RE_AGENT_LLM_PROVIDER` 独立指定 provider
@@ -263,7 +263,7 @@ MARKET_ANALYSIS_GEMINI_MODEL=gemini-2.0-flash
 MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 ```
 
-`SERPAPI_KEY` 和 `GEMINI_API_KEY` 也可在 Admin 页面直接配置：`系统设置 -> OpenAI` 模块。
+`SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置。
 
 如果只是先把服务跑起来，核心是先保证：
 

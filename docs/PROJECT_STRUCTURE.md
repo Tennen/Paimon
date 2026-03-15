@@ -18,7 +18,7 @@ src/
   core/            # Orchestrator and runtime flow
     re-agent/      # /re sub-agent runtime (ReAct loop + module contracts)
   engines/         # Provider runtimes
-    llm/           # LLM provider adapters (ollama/llama-server/openai)
+    llm/           # LLM provider adapters (ollama/llama-server/openai/gpt-plugin) + provider store/factory
     stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # Outbound adapters and domain runtimes (flat by domain)
@@ -79,6 +79,19 @@ data/              # Runtime data files
   - `/re <question>`
   - `/re help`
   - `/re reset`
+
+## LLM Provider Selection
+
+- Main flow provider selection is persisted in `src/storage/persistence.ts` store key `llm.providers`.
+- `src/engines/llm/provider_store.ts` owns provider profiles and `default/routing/planning` selector ids.
+- `src/core/orchestrator.ts` resolves LLM engine by step:
+  - `routing` step can use a dedicated provider
+  - `planning` step can use a dedicated provider
+- Admin API management entry points are in `src/ingress/admin.ts`:
+  - `GET /admin/api/llm/providers`
+  - `PUT /admin/api/llm/providers`
+  - `POST /admin/api/llm/providers/default`
+  - `DELETE /admin/api/llm/providers/:id`
 
 ## Structural Change Checklist
 

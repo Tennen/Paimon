@@ -52,6 +52,7 @@ import {
   deleteLLMProviderProfile,
   getDefaultLLMProviderProfile,
   readLLMProviderStore,
+  setLLMProviderSelections,
   setDefaultLLMProvider,
   upsertLLMProviderProfile
 } from "../engines/llm/provider_store";
@@ -237,8 +238,14 @@ export class AdminIngressAdapter implements IngressAdapter {
       const envPath = this.envStore.getPath();
       const evolutionSnapshot = this.evolutionService?.getSnapshot();
       const codexConfig = this.codexConfigService.getConfig();
+      const llmProviderStore = readLLMProviderStore();
+      const defaultLLMProvider = getDefaultLLMProviderProfile();
       const thinkingBudgetDefault = getEnvValue(envPath, "LLM_THINKING_BUDGET");
       res.json({
+        llmProviders: {
+          store: llmProviderStore,
+          defaultProvider: defaultLLMProvider
+        },
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
         planningTimeoutMs: getEnvValue(envPath, "LLM_PLANNING_TIMEOUT_MS"),
@@ -422,11 +429,21 @@ export class AdminIngressAdapter implements IngressAdapter {
       const defaultProviderId = typeof body.defaultProviderId === "string"
         ? body.defaultProviderId.trim()
         : "";
+      const routingProviderId = typeof body.routingProviderId === "string"
+        ? body.routingProviderId.trim()
+        : "";
+      const planningProviderId = typeof body.planningProviderId === "string"
+        ? body.planningProviderId.trim()
+        : "";
 
       try {
         upsertLLMProviderProfile(providerPayload);
-        if (defaultProviderId) {
-          setDefaultLLMProvider(defaultProviderId);
+        if (defaultProviderId || routingProviderId || planningProviderId) {
+          setLLMProviderSelections({
+            ...(defaultProviderId ? { defaultProviderId } : {}),
+            ...(routingProviderId ? { routingProviderId } : {}),
+            ...(planningProviderId ? { planningProviderId } : {})
+          });
         }
         res.json({
           ok: true,
@@ -445,17 +462,33 @@ export class AdminIngressAdapter implements IngressAdapter {
       const body = req.body && typeof req.body === "object"
         ? req.body as Record<string, unknown>
         : {};
-      const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
-      if (!providerId) {
+      const defaultProviderId = typeof body.defaultProviderId === "string"
+        ? body.defaultProviderId.trim()
+        : (typeof body.providerId === "string" ? body.providerId.trim() : "");
+      const routingProviderId = typeof body.routingProviderId === "string"
+        ? body.routingProviderId.trim()
+        : "";
+      const planningProviderId = typeof body.planningProviderId === "string"
+        ? body.planningProviderId.trim()
+        : "";
+      if (!defaultProviderId && !routingProviderId && !planningProviderId) {
         res.status(400).json({
           ok: false,
-          error: "providerId is required"
+          error: "at least one of defaultProviderId/routingProviderId/planningProviderId is required"
         });
         return;
       }
 
       try {
-        setDefaultLLMProvider(providerId);
+        if (defaultProviderId && !routingProviderId && !planningProviderId) {
+          setDefaultLLMProvider(defaultProviderId);
+        } else {
+          setLLMProviderSelections({
+            ...(defaultProviderId ? { defaultProviderId } : {}),
+            ...(routingProviderId ? { routingProviderId } : {}),
+            ...(planningProviderId ? { planningProviderId } : {})
+          });
+        }
         res.json({
           ok: true,
           store: readLLMProviderStore(),

@@ -4,7 +4,121 @@ export type DataStoreDescriptor = {
   codec?: "json" | "text";
 };
 
+export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gpt-plugin";
+
+export type LLMProviderOpenAIQuotaPolicy = {
+  resetDay: number;
+  monthlyTokenLimit: number | null;
+  monthlyBudgetUsdLimit: number | null;
+};
+
+export type OllamaProviderConfig = {
+  baseUrl?: string;
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+  thinkingBudgetEnabled?: boolean;
+  thinkingBudget?: number;
+  thinkingMaxNewTokens?: number;
+};
+
+export type LlamaServerProviderConfig = {
+  baseUrl?: string;
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+  apiKey?: string;
+  selectionOptions?: Record<string, unknown>;
+  planningOptions?: Record<string, unknown>;
+  chatTemplateKwargs?: Record<string, unknown>;
+  planningChatTemplateKwargs?: Record<string, unknown>;
+  extraBody?: Record<string, unknown>;
+  planningExtraBody?: Record<string, unknown>;
+};
+
+export type OpenAILikeProviderConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+  chatCompletionsPath?: string;
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+  selectionOptions?: Record<string, unknown>;
+  planningOptions?: Record<string, unknown>;
+  fallbackToChatgptBridge?: boolean;
+  forceBridge?: boolean;
+  costInputPer1M?: number | null;
+  costOutputPer1M?: number | null;
+  quotaPolicy?: LLMProviderOpenAIQuotaPolicy;
+};
+
+export type GptPluginProviderConfig = {
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+};
+
+export type OllamaProviderProfile = {
+  id: string;
+  name: string;
+  type: "ollama";
+  config: OllamaProviderConfig;
+};
+
+export type LlamaServerProviderProfile = {
+  id: string;
+  name: string;
+  type: "llama-server";
+  config: LlamaServerProviderConfig;
+};
+
+export type OpenAIProviderProfile = {
+  id: string;
+  name: string;
+  type: "openai";
+  config: OpenAILikeProviderConfig;
+};
+
+export type GptPluginProviderProfile = {
+  id: string;
+  name: string;
+  type: "gpt-plugin";
+  config: GptPluginProviderConfig;
+};
+
+export type LLMProviderProfile =
+  | OllamaProviderProfile
+  | LlamaServerProviderProfile
+  | OpenAIProviderProfile
+  | GptPluginProviderProfile;
+
+export type LLMProviderStore = {
+  version: number;
+  defaultProviderId: string;
+  routingProviderId: string;
+  planningProviderId: string;
+  providers: LLMProviderProfile[];
+};
+
+export type LLMProvidersPayload = {
+  store: LLMProviderStore;
+  defaultProvider: LLMProviderProfile;
+};
+
 export type AdminConfig = {
+  llmProviders?: LLMProvidersPayload;
   model: string;
   planningModel: string;
   planningTimeoutMs: string;

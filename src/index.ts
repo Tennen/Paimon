@@ -3,7 +3,8 @@ import express from "express";
 import { SessionManager } from "./core/sessionManager";
 import { Orchestrator } from "./core/orchestrator";
 import { ToolRouter } from "./tools/toolRouter";
-import { createLLMEngine } from "./engines/llm";
+import { createLLMEngine, readLLMProviderStore } from "./engines/llm";
+import type { LLMExecutionStep } from "./engines/llm/llm";
 import { HttpIngressAdapter } from "./ingress/http";
 import { HANotifyIngressAdapter } from "./ingress/haNotify";
 import { WeComIngressAdapter } from "./ingress/wecom";
@@ -39,6 +40,13 @@ loadTools(registry, { skillManager, evolutionService, reAgentRuntime });
 registerSystemShortcuts(registry);
 const toolRouter = new ToolRouter(registry);
 const llmEngine = createLLMEngine();
+const mainFlowLLMResolver = (step: LLMExecutionStep) => {
+  const store = readLLMProviderStore();
+  const providerId = step === "routing"
+    ? store.routingProviderId || store.defaultProviderId
+    : store.planningProviderId || store.defaultProviderId;
+  return createLLMEngine(providerId);
+};
 const callbackDispatcher = new CallbackDispatcher();
 const orchestrator = new Orchestrator(
   toolRouter,
@@ -46,7 +54,11 @@ const orchestrator = new Orchestrator(
   memoryStore,
   skillManager,
   registry,
-  callbackDispatcher
+  callbackDispatcher,
+  undefined,
+  undefined,
+  undefined,
+  mainFlowLLMResolver
 );
 const sessionManager = new SessionManager(orchestrator);
 const scheduler = new SchedulerService(sessionManager);

@@ -9,9 +9,15 @@ export {
   getDefaultLLMProviderProfile,
   upsertLLMProviderProfile,
   deleteLLMProviderProfile,
-  setDefaultLLMProvider
+  setDefaultLLMProvider,
+  setLLMProviderSelections
 } from "./provider_store";
-export type { LLMProviderStore, LLMProviderProfile, LLMProviderType } from "./provider_store";
+export type {
+  LLMProviderStore,
+  LLMProviderProfile,
+  LLMProviderType,
+  LLMProviderSelectionPatch
+} from "./provider_store";
 
 export { OllamaLLMEngine } from "./ollama";
 export { LlamaServerLLMEngine } from "./llama-server";

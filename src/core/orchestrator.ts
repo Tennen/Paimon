@@ -2,11 +2,10 @@ import { Envelope, Image, Response, ToolExecution } from "../types";
 import { policyCheck } from "../policy";
 import { ToolRouter } from "../tools/toolRouter";
 import { writeAudit } from "../auditLogger";
-import { LLMRuntimeContext, LLMPlanMeta } from "../engines/llm/llm";
+import { LLMEngine, LLMExecutionStep, LLMPlanMeta, LLMRuntimeContext } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
 import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
-import { LLMEngine } from "../engines/llm/llm";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { sttRuntime } from "../engines/stt";
 import { isReAgentCommandInput, parseReAgentCommand } from "./re-agent";
@@ -14,10 +13,13 @@ import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor } from "../memory/memoryCompactor";
 import { HybridMemoryService } from "../memory/hybridMemoryService";
 
+export type OrchestratorLLMResolver = (step: LLMExecutionStep) => LLMEngine;
+
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
   private readonly toolRouter: ToolRouter;
-  private readonly llmEngine: LLMEngine;
+  private readonly defaultLLMEngine: LLMEngine;
+  private readonly llmEngineResolver?: OrchestratorLLMResolver;
   private readonly memoryStore: MemoryStore;
   private readonly rawMemoryStore: RawMemoryStore;
   private readonly memoryCompactor: MemoryCompactor;
@@ -37,10 +39,12 @@ export class Orchestrator {
     callbackDispatcher: CallbackDispatcher,
     rawMemoryStore: RawMemoryStore = new RawMemoryStore(),
     memoryCompactor?: MemoryCompactor,
-    hybridMemoryService?: HybridMemoryService
+    hybridMemoryService?: HybridMemoryService,
+    llmEngineResolver?: OrchestratorLLMResolver
   ) {
     this.toolRouter = toolRouter;
-    this.llmEngine = llmEngine;
+    this.defaultLLMEngine = llmEngine;
+    this.llmEngineResolver = llmEngineResolver;
     this.memoryStore = memoryStore;
     this.rawMemoryStore = rawMemoryStore;
     this.memoryCompactor = memoryCompactor ?? new MemoryCompactor({ rawStore: rawMemoryStore });
@@ -49,6 +53,18 @@ export class Orchestrator {
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
     this.callbackDispatcher = callbackDispatcher;
+  }
+
+  private resolveLLMEngine(step: LLMExecutionStep): LLMEngine {
+    if (!this.llmEngineResolver) {
+      return this.defaultLLMEngine;
+    }
+    try {
+      return this.llmEngineResolver(step);
+    } catch (error) {
+      console.error(`[Orchestrator] resolveLLMEngine failed for step=${step}, fallback to default`, error);
+      return this.defaultLLMEngine;
+    }
   }
 
   async handle(envelope: Envelope): Promise<Response> {
@@ -354,6 +370,7 @@ export class Orchestrator {
     start: number,
     readSessionMemory: () => string
   ): Promise<{ response?: Response; skillName?: string; planningThinkingBudget?: number; memory: string }> {
+    const llmEngine = this.resolveLLMEngine("routing");
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
     const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
 
@@ -366,7 +383,7 @@ export class Orchestrator {
       // tools_context: buildToolsSchemaContext(this.toolRegistry),
     };
 
-    const result = await this.llmEngine.route(text, runtimeContext);
+    const result = await llmEngine.route(text, runtimeContext);
     const memoryDecision = resolveMemoryDecision(result, text);
     const memory = memoryDecision.enabled
       ? this.loadMemoryForNextStep(envelope.sessionId, memoryDecision.query, readSessionMemory)
@@ -374,8 +391,8 @@ export class Orchestrator {
 
     // Write audit log
     const llmMeta: LLMPlanMeta = {
-      llm_provider: this.llmEngine.getProviderName(),
-      model: this.llmEngine.getModelForStep("routing"),
+      llm_provider: llmEngine.getProviderName(),
+      model: llmEngine.getModelForStep("routing"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,
@@ -423,6 +440,7 @@ export class Orchestrator {
     failureResponse?: string;
     preferToolResult?: boolean;
   }> {
+    const llmEngine = this.resolveLLMEngine("planning");
     const selectedSkill = skillName ? this.skillManager.get(skillName) : undefined;
     const toolName = selectedSkill?.tool;
 
@@ -466,7 +484,7 @@ export class Orchestrator {
         : null
     };
 
-    const plan = await this.llmEngine.plan(
+    const plan = await llmEngine.plan(
       text,
       runtimeContext,
       planningThinkingBudget === undefined
@@ -476,8 +494,8 @@ export class Orchestrator {
 
     // Write audit log
     const llmMeta: LLMPlanMeta = {
-      llm_provider: this.llmEngine.getProviderName(),
-      model: this.llmEngine.getModelForStep("planning"),
+      llm_provider: llmEngine.getProviderName(),
+      model: llmEngine.getModelForStep("planning"),
       retries: 0,
       parse_ok: true,
       raw_output_length: 0,

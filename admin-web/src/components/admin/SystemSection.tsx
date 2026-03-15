@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,33 +21,12 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { MemorySection } from "@/components/admin/MemorySection";
-import { AdminConfig } from "@/types/admin";
-
-export type SystemOllamaDraft = {
-  model: string;
-  planningModel: string;
-  planningTimeoutMs: string;
-  thinkingBudgetEnabled: boolean;
-  thinkingBudgetDefault: string;
-};
-
-export type SystemOpenAIDraft = {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  planningModel: string;
-  chatOptions: string;
-  planningChatOptions: string;
-  fallbackToChatgptBridge: boolean;
-  forceBridge: boolean;
-  quotaResetDay: string;
-  monthlyTokenLimit: string;
-  monthlyBudgetUsd: string;
-  costInputPer1M: string;
-  costOutputPer1M: string;
-  geminiApiKey: string;
-  serpApiKey: string;
-};
+import {
+  AdminConfig,
+  LLMProviderProfile,
+  LLMProviderStore,
+  LLMProviderType
+} from "@/types/admin";
 
 export type SystemMemoryDraft = {
   memoryCompactEveryRounds: string;
@@ -58,29 +38,66 @@ export type SystemMemoryDraft = {
 };
 
 export type SystemOperationState = {
-  savingModel: boolean;
   restarting: boolean;
   pullingRepo: boolean;
   buildingRepo: boolean;
   deployingRepo: boolean;
 };
 
+export type MainFlowProviderSelectionDraft = {
+  defaultProviderId: string;
+  routingProviderId: string;
+  planningProviderId: string;
+};
+
+type SystemProviderDraft = {
+  id: string;
+  name: string;
+  type: LLMProviderType;
+  baseUrl: string;
+  apiKey: string;
+  chatCompletionsPath: string;
+  model: string;
+  planningModel: string;
+  timeoutMs: string;
+  planningTimeoutMs: string;
+  maxRetries: string;
+  strictJson: boolean;
+  thinkingBudgetEnabled: boolean;
+  thinkingBudget: string;
+  thinkingMaxNewTokens: string;
+  selectionOptions: string;
+  planningOptions: string;
+  chatTemplateKwargs: string;
+  planningChatTemplateKwargs: string;
+  extraBody: string;
+  planningExtraBody: string;
+  fallbackToChatgptBridge: boolean;
+  forceBridge: boolean;
+  costInputPer1M: string;
+  costOutputPer1M: string;
+  quotaResetDay: string;
+  quotaMonthlyTokenLimit: string;
+  quotaMonthlyBudgetUsdLimit: string;
+};
+
 type SystemSectionProps = {
   config: AdminConfig | null;
   models: string[];
-  modelFromList?: string;
-  planningModelFromList?: string;
-  ollamaDraft: SystemOllamaDraft;
-  openaiDraft: SystemOpenAIDraft;
+  llmProviderStore: LLMProviderStore | null;
+  savingLLMProvider: boolean;
+  deletingLLMProviderId: string;
+  updatingMainFlowProviders: boolean;
   memoryDraft: SystemMemoryDraft;
   operationState: SystemOperationState;
   savingMemoryConfig: boolean;
-  onOllamaDraftChange: <K extends keyof SystemOllamaDraft>(key: K, value: SystemOllamaDraft[K]) => void;
-  onOpenAIDraftChange: <K extends keyof SystemOpenAIDraft>(key: K, value: SystemOpenAIDraft[K]) => void;
   onMemoryDraftChange: <K extends keyof SystemMemoryDraft>(key: K, value: SystemMemoryDraft[K]) => void;
   onRefreshModels: () => void;
   onRefreshConfig: () => void;
-  onSaveModel: (restartAfterSave: boolean) => void;
+  onRefreshLLMProviders: () => void;
+  onUpsertLLMProvider: (provider: LLMProviderProfile) => void;
+  onDeleteLLMProvider: (providerId: string) => void;
+  onSetMainFlowProviders: (selection: MainFlowProviderSelectionDraft) => void;
   onSaveMemoryConfig: () => void;
   onRestartPm2: () => void;
   onPullRepo: () => void;
@@ -88,18 +105,147 @@ type SystemSectionProps = {
   onDeployRepo: () => void;
 };
 
-type SystemModule = "operations" | "ollama" | "openai" | "memory" | "runtime";
+type SystemModule = "operations" | "llm" | "memory" | "runtime";
 
 const MODULE_ITEMS: Array<{ key: SystemModule; label: string }> = [
   { key: "operations", label: "运维操作" },
-  { key: "ollama", label: "Ollama / Planning" },
-  { key: "openai", label: "OpenAI" },
+  { key: "llm", label: "LLM Providers" },
   { key: "memory", label: "Memory" },
   { key: "runtime", label: "运行时" }
 ];
 
+const EMPTY_PROVIDER_DRAFT: SystemProviderDraft = {
+  id: "",
+  name: "",
+  type: "ollama",
+  baseUrl: "",
+  apiKey: "",
+  chatCompletionsPath: "",
+  model: "",
+  planningModel: "",
+  timeoutMs: "",
+  planningTimeoutMs: "",
+  maxRetries: "",
+  strictJson: false,
+  thinkingBudgetEnabled: false,
+  thinkingBudget: "",
+  thinkingMaxNewTokens: "",
+  selectionOptions: "",
+  planningOptions: "",
+  chatTemplateKwargs: "",
+  planningChatTemplateKwargs: "",
+  extraBody: "",
+  planningExtraBody: "",
+  fallbackToChatgptBridge: true,
+  forceBridge: false,
+  costInputPer1M: "",
+  costOutputPer1M: "",
+  quotaResetDay: "",
+  quotaMonthlyTokenLimit: "",
+  quotaMonthlyBudgetUsdLimit: ""
+};
+
 export function SystemSection(props: SystemSectionProps) {
   const [activeModule, setActiveModule] = useState<SystemModule>("operations");
+  const [editingProviderId, setEditingProviderId] = useState("");
+  const [providerDraft, setProviderDraft] = useState<SystemProviderDraft>(EMPTY_PROVIDER_DRAFT);
+  const [providerDraftError, setProviderDraftError] = useState("");
+  const [mainFlowDraft, setMainFlowDraft] = useState<MainFlowProviderSelectionDraft>({
+    defaultProviderId: "",
+    routingProviderId: "",
+    planningProviderId: ""
+  });
+
+  const providerStore = props.llmProviderStore;
+  const providerItems = providerStore?.providers ?? [];
+
+  useEffect(() => {
+    if (!providerStore) {
+      return;
+    }
+    setMainFlowDraft({
+      defaultProviderId: providerStore.defaultProviderId,
+      routingProviderId: providerStore.routingProviderId,
+      planningProviderId: providerStore.planningProviderId
+    });
+  }, [
+    providerStore?.defaultProviderId,
+    providerStore?.routingProviderId,
+    providerStore?.planningProviderId
+  ]);
+
+  const providerMap = useMemo(() => {
+    return new Map(providerItems.map((item) => [item.id, item]));
+  }, [providerItems]);
+
+  function updateProviderDraft<K extends keyof SystemProviderDraft>(key: K, value: SystemProviderDraft[K]): void {
+    setProviderDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function startCreateProvider(type: LLMProviderType = "ollama"): void {
+    setEditingProviderId("");
+    setProviderDraft({ ...EMPTY_PROVIDER_DRAFT, type });
+    setProviderDraftError("");
+  }
+
+  function startEditProvider(profile: LLMProviderProfile): void {
+    setEditingProviderId(profile.id);
+    setProviderDraft(convertProviderToDraft(profile));
+    setProviderDraftError("");
+  }
+
+  function handleSaveProvider(): void {
+    const built = buildProviderProfileFromDraft(providerDraft, editingProviderId);
+    if (!built.provider) {
+      setProviderDraftError(built.error ?? "provider 配置无效");
+      return;
+    }
+    setProviderDraftError("");
+    props.onUpsertLLMProvider(built.provider);
+  }
+
+  function handleApplyMainFlowProviders(): void {
+    if (!mainFlowDraft.defaultProviderId || !mainFlowDraft.routingProviderId || !mainFlowDraft.planningProviderId) {
+      setProviderDraftError("default/routing/planning provider 都必须选择");
+      return;
+    }
+    if (!providerMap.has(mainFlowDraft.defaultProviderId)) {
+      setProviderDraftError("default provider 不存在");
+      return;
+    }
+    if (!providerMap.has(mainFlowDraft.routingProviderId)) {
+      setProviderDraftError("routing provider 不存在");
+      return;
+    }
+    if (!providerMap.has(mainFlowDraft.planningProviderId)) {
+      setProviderDraftError("planning provider 不存在");
+      return;
+    }
+    setProviderDraftError("");
+    props.onSetMainFlowProviders(mainFlowDraft);
+  }
+
+  function handleQuickSetDefault(providerId: string): void {
+    const next: MainFlowProviderSelectionDraft = {
+      ...mainFlowDraft,
+      defaultProviderId: providerId
+    };
+    setMainFlowDraft(next);
+    props.onSetMainFlowProviders(next);
+  }
+
+  function handleTypeChange(nextType: string): void {
+    const providerType = normalizeProviderType(nextType);
+    setProviderDraft((prev) => ({
+      ...EMPTY_PROVIDER_DRAFT,
+      id: prev.id,
+      name: prev.name,
+      type: providerType
+    }));
+  }
+
+  const selectedRoutingLabel = providerMap.get(mainFlowDraft.routingProviderId)?.name ?? "-";
+  const selectedPlanningLabel = providerMap.get(mainFlowDraft.planningProviderId)?.name ?? "-";
 
   return (
     <div className="space-y-4">
@@ -147,304 +293,464 @@ export function SystemSection(props: SystemSectionProps) {
         </Card>
       ) : null}
 
-      {activeModule === "ollama" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Ollama 与 Planning</CardTitle>
-            <CardDescription>本地模型与规划调用参数</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>主模型列表（Ollama）</Label>
-                <Select value={props.modelFromList} onValueChange={(value) => props.onOllamaDraftChange("model", value)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="从本地模型中选择" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {props.models.length === 0 ? (
-                      <SelectItem value="__empty__" disabled>
-                        未读取到模型
-                      </SelectItem>
-                    ) : (
-                      props.models.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
+      {activeModule === "llm" ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Main Flow Provider 选择</CardTitle>
+              <CardDescription>主流程路由与规划可独立绑定 provider</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Default Provider</Label>
+                  <Select
+                    value={mainFlowDraft.defaultProviderId}
+                    onValueChange={(value) => setMainFlowDraft((prev) => ({ ...prev, defaultProviderId: value }))}
+                    disabled={providerItems.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择默认 provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providerItems.map((item) => (
+                        <SelectItem key={`default-${item.id}`} value={item.id}>
+                          {item.name} ({item.id})
                         </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label>主模型</Label>
-                <Input
-                  value={props.ollamaDraft.model}
-                  onChange={(event) => props.onOllamaDraftChange("model", event.target.value)}
-                  placeholder="例如：qwen3:8b"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Planning 模型列表（可选）</Label>
-                <Select
-                  value={props.planningModelFromList}
-                  onValueChange={(value) => props.onOllamaDraftChange("planningModel", value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="可选：单独选择 Planning 模型" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {props.models.length === 0 ? (
-                      <SelectItem value="__empty__" disabled>
-                        未读取到模型
-                      </SelectItem>
-                    ) : (
-                      props.models.map((model) => (
-                        <SelectItem key={`planning-${model}`} value={model}>
-                          {model}
+                <div className="space-y-2">
+                  <Label>Routing Provider</Label>
+                  <Select
+                    value={mainFlowDraft.routingProviderId}
+                    onValueChange={(value) => setMainFlowDraft((prev) => ({ ...prev, routingProviderId: value }))}
+                    disabled={providerItems.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择 routing provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providerItems.map((item) => (
+                        <SelectItem key={`routing-${item.id}`} value={item.id}>
+                          {item.name} ({item.id})
                         </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div className="space-y-2">
-                <Label>Planning 模型（可选）</Label>
-                <Input
-                  value={props.ollamaDraft.planningModel}
-                  onChange={(event) => props.onOllamaDraftChange("planningModel", event.target.value)}
-                  placeholder="留空则跟随主模型"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Planning 超时（毫秒，可选）</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={props.ollamaDraft.planningTimeoutMs}
-                  onChange={(event) => props.onOllamaDraftChange("planningTimeoutMs", event.target.value)}
-                  placeholder="留空则沿用 LLM_TIMEOUT_MS"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Planning Thinking Budget 默认值</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={props.ollamaDraft.thinkingBudgetDefault}
-                  onChange={(event) => props.onOllamaDraftChange("thinkingBudgetDefault", event.target.value)}
-                  placeholder="tokens，建议 >= 1024"
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label>Qwen Thinking Budget 开关</Label>
-                <div className="flex min-h-10 items-center gap-3 rounded-md border px-3">
-                  <Switch
-                    checked={props.ollamaDraft.thinkingBudgetEnabled}
-                    onCheckedChange={(value) => props.onOllamaDraftChange("thinkingBudgetEnabled", value)}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {props.ollamaDraft.thinkingBudgetEnabled ? "已开启：按预算截断思考后续写" : "已关闭：按常规方式调用 LLM"}
-                  </span>
+                <div className="space-y-2">
+                  <Label>Planning Provider</Label>
+                  <Select
+                    value={mainFlowDraft.planningProviderId}
+                    onValueChange={(value) => setMainFlowDraft((prev) => ({ ...prev, planningProviderId: value }))}
+                    disabled={providerItems.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择 planning provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providerItems.map((item) => (
+                        <SelectItem key={`planning-${item.id}`} value={item.id}>
+                          {item.name} ({item.id})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={props.onRefreshModels}>
-                刷新模型列表
-              </Button>
-              <Button type="button" disabled={props.operationState.savingModel} onClick={() => props.onSaveModel(false)}>
-                {props.operationState.savingModel ? "保存中..." : "保存模型配置"}
-              </Button>
-              <Button
-                type="button"
-                disabled={props.operationState.savingModel}
-                variant="secondary"
-                onClick={() => props.onSaveModel(true)}
-              >
-                {props.operationState.savingModel ? "处理中..." : "保存并重启"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={handleApplyMainFlowProviders} disabled={props.updatingMainFlowProviders}>
+                  {props.updatingMainFlowProviders ? "保存中..." : "保存主流程 provider 选择"}
+                </Button>
+                <Button type="button" variant="outline" onClick={props.onRefreshLLMProviders}>
+                  刷新 provider 列表
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
-      {activeModule === "openai" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>OpenAI 与 Bridge 回退</CardTitle>
-            <CardDescription>可配置 API 调用、配额阈值和 bridge 回退策略</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>OPENAI_BASE_URL</Label>
-                <Input
-                  value={props.openaiDraft.baseUrl}
-                  onChange={(event) => props.onOpenAIDraftChange("baseUrl", event.target.value)}
-                  placeholder="留空使用默认 https://api.openai.com/v1"
-                />
+          <Card>
+            <CardHeader>
+              <CardTitle>Provider 列表</CardTitle>
+              <CardDescription>支持多条 OpenAI-like / Ollama / llama-server，gpt-plugin 仅允许一条</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {providerItems.length === 0 ? (
+                <div className="text-sm text-muted-foreground">当前无 provider，请先新增。</div>
+              ) : (
+                providerItems.map((item) => {
+                  const isDefault = item.id === mainFlowDraft.defaultProviderId;
+                  const isRouting = item.id === mainFlowDraft.routingProviderId;
+                  const isPlanning = item.id === mainFlowDraft.planningProviderId;
+                  return (
+                    <div key={item.id} className="rounded-md border p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{item.name}</span>
+                            <Badge variant="outline">{item.type}</Badge>
+                            <Badge variant="secondary">{item.id}</Badge>
+                          </div>
+                          <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
+                            {isDefault ? <Badge variant="default">default</Badge> : null}
+                            {isRouting ? <Badge variant="secondary">routing</Badge> : null}
+                            {isPlanning ? <Badge variant="secondary">planning</Badge> : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" size="sm" variant="outline" onClick={() => startEditProvider(item)}>
+                            编辑
+                          </Button>
+                          <Button type="button" size="sm" variant="secondary" onClick={() => handleQuickSetDefault(item.id)}>
+                            设为默认
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            disabled={providerItems.length <= 1 || props.deletingLLMProviderId === item.id}
+                            onClick={() => props.onDeleteLLMProvider(item.id)}
+                          >
+                            {props.deletingLLMProviderId === item.id ? "删除中..." : "删除"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{editingProviderId ? `编辑 Provider: ${editingProviderId}` : "新增 Provider"}</CardTitle>
+              <CardDescription>
+                支持配置各引擎可用参数；JSON 字段请输入 JSON 对象。Ollama 可通过“刷新模型列表”查看本地模型。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => startCreateProvider()}>
+                  新建 Provider
+                </Button>
+                <Button type="button" variant="outline" onClick={props.onRefreshModels}>
+                  刷新 Ollama 模型列表
+                </Button>
+                <Button type="button" onClick={handleSaveProvider} disabled={props.savingLLMProvider}>
+                  {props.savingLLMProvider ? "保存中..." : "保存 Provider"}
+                </Button>
               </div>
-              <div className="space-y-2">
-                <Label>OPENAI_API_KEY</Label>
-                <Input
-                  type="password"
-                  value={props.openaiDraft.apiKey}
-                  onChange={(event) => props.onOpenAIDraftChange("apiKey", event.target.value)}
-                  placeholder="sk-..."
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_MODEL</Label>
-                <Input
-                  value={props.openaiDraft.model}
-                  onChange={(event) => props.onOpenAIDraftChange("model", event.target.value)}
-                  placeholder="例如：gpt-5"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_PLANNING_MODEL（可选）</Label>
-                <Input
-                  value={props.openaiDraft.planningModel}
-                  onChange={(event) => props.onOpenAIDraftChange("planningModel", event.target.value)}
-                  placeholder="留空则跟随 OPENAI_MODEL"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_QUOTA_RESET_DAY</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={props.openaiDraft.quotaResetDay}
-                  onChange={(event) => props.onOpenAIDraftChange("quotaResetDay", event.target.value)}
-                  placeholder="例如：1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_MONTHLY_TOKEN_LIMIT</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={props.openaiDraft.monthlyTokenLimit}
-                  onChange={(event) => props.onOpenAIDraftChange("monthlyTokenLimit", event.target.value)}
-                  placeholder="月度 token 上限"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_MONTHLY_BUDGET_USD</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={props.openaiDraft.monthlyBudgetUsd}
-                  onChange={(event) => props.onOpenAIDraftChange("monthlyBudgetUsd", event.target.value)}
-                  placeholder="月度预算（USD）"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_COST_INPUT_PER_1M</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.0001"
-                  value={props.openaiDraft.costInputPer1M}
-                  onChange={(event) => props.onOpenAIDraftChange("costInputPer1M", event.target.value)}
-                  placeholder="每百万输入 tokens 成本（USD）"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OPENAI_COST_OUTPUT_PER_1M</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step="0.0001"
-                  value={props.openaiDraft.costOutputPer1M}
-                  onChange={(event) => props.onOpenAIDraftChange("costOutputPer1M", event.target.value)}
-                  placeholder="每百万输出 tokens 成本（USD）"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>GEMINI_API_KEY</Label>
-                <Input
-                  type="password"
-                  value={props.openaiDraft.geminiApiKey}
-                  onChange={(event) => props.onOpenAIDraftChange("geminiApiKey", event.target.value)}
-                  placeholder="Google Gemini API Key"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>SERPAPI_KEY</Label>
-                <Input
-                  type="password"
-                  value={props.openaiDraft.serpApiKey}
-                  onChange={(event) => props.onOpenAIDraftChange("serpApiKey", event.target.value)}
-                  placeholder="SerpApi API Key"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>OpenAI 额度用尽回退 bridge</Label>
-                <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
-                  <span className="text-sm text-muted-foreground">OPENAI_FALLBACK_TO_CHATGPT_BRIDGE</span>
-                  <Switch
-                    checked={props.openaiDraft.fallbackToChatgptBridge}
-                    onCheckedChange={(value) => props.onOpenAIDraftChange("fallbackToChatgptBridge", value)}
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Provider ID</Label>
+                  <Input
+                    value={providerDraft.id}
+                    onChange={(event) => updateProviderDraft("id", event.target.value)}
+                    disabled={Boolean(editingProviderId)}
+                    placeholder="例如: local-ollama / openai-main"
                   />
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>强制走 bridge</Label>
-                <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
-                  <span className="text-sm text-muted-foreground">OPENAI_FORCE_BRIDGE</span>
-                  <Switch
-                    checked={props.openaiDraft.forceBridge}
-                    onCheckedChange={(value) => props.onOpenAIDraftChange("forceBridge", value)}
+                <div className="space-y-2">
+                  <Label>Provider 名称</Label>
+                  <Input
+                    value={providerDraft.name}
+                    onChange={(event) => updateProviderDraft("name", event.target.value)}
+                    placeholder="用于 UI 展示"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>Provider 类型</Label>
+                  <Select value={providerDraft.type} onValueChange={handleTypeChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ollama">ollama</SelectItem>
+                      <SelectItem value="openai">openai-like</SelectItem>
+                      <SelectItem value="llama-server">llama-server</SelectItem>
+                      <SelectItem value="gpt-plugin">gpt-plugin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>模型列表提示</Label>
+                  <div className="min-h-10 rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                    {props.models.length > 0
+                      ? props.models.join(", ")
+                      : "未读取到 Ollama 模型，可点击“刷新 Ollama 模型列表”"}
+                  </div>
+                </div>
               </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>OPENAI_CHAT_OPTIONS（JSON）</Label>
-                <Textarea
-                  value={props.openaiDraft.chatOptions}
-                  onChange={(event) => props.onOpenAIDraftChange("chatOptions", event.target.value)}
-                  placeholder='例如：{"temperature":0.2}'
-                />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>OPENAI_PLANNING_CHAT_OPTIONS（JSON）</Label>
-                <Textarea
-                  value={props.openaiDraft.planningChatOptions}
-                  onChange={(event) => props.onOpenAIDraftChange("planningChatOptions", event.target.value)}
-                  placeholder='例如：{"temperature":0.1}'
-                />
-              </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" disabled={props.operationState.savingModel} onClick={() => props.onSaveModel(false)}>
-                {props.operationState.savingModel ? "保存中..." : "保存模型配置"}
-              </Button>
-              <Button
-                type="button"
-                disabled={props.operationState.savingModel}
-                variant="secondary"
-                onClick={() => props.onSaveModel(true)}
-              >
-                {props.operationState.savingModel ? "处理中..." : "保存并重启"}
-              </Button>
-            </div>
+              <Separator />
 
-            <p className="text-xs text-muted-foreground">
-              OpenAI 字段与 Ollama 字段共用“保存模型配置”按钮，留空会清理对应环境变量。
-            </p>
-          </CardContent>
-        </Card>
+              <div className="grid gap-3 md:grid-cols-2">
+                {providerDraft.type !== "gpt-plugin" ? (
+                  <div className="space-y-2">
+                    <Label>baseUrl</Label>
+                    <Input
+                      value={providerDraft.baseUrl}
+                      onChange={(event) => updateProviderDraft("baseUrl", event.target.value)}
+                      placeholder="例如: http://127.0.0.1:11434 或 https://api.openai.com/v1"
+                    />
+                  </div>
+                ) : null}
+
+                {providerDraft.type === "openai" || providerDraft.type === "llama-server" ? (
+                  <div className="space-y-2">
+                    <Label>apiKey</Label>
+                    <Input
+                      type="password"
+                      value={providerDraft.apiKey}
+                      onChange={(event) => updateProviderDraft("apiKey", event.target.value)}
+                      placeholder="sk-..."
+                    />
+                  </div>
+                ) : null}
+
+                {providerDraft.type === "openai" ? (
+                  <div className="space-y-2">
+                    <Label>chatCompletionsPath（可选）</Label>
+                    <Input
+                      value={providerDraft.chatCompletionsPath}
+                      onChange={(event) => updateProviderDraft("chatCompletionsPath", event.target.value)}
+                      placeholder="/chat/completions"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="space-y-2">
+                  <Label>model</Label>
+                  <Input
+                    value={providerDraft.model}
+                    onChange={(event) => updateProviderDraft("model", event.target.value)}
+                    placeholder="主模型"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>planningModel（可选）</Label>
+                  <Input
+                    value={providerDraft.planningModel}
+                    onChange={(event) => updateProviderDraft("planningModel", event.target.value)}
+                    placeholder="留空则跟随 model"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>timeoutMs（可选）</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={providerDraft.timeoutMs}
+                    onChange={(event) => updateProviderDraft("timeoutMs", event.target.value)}
+                    placeholder="正整数"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>planningTimeoutMs（可选）</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={providerDraft.planningTimeoutMs}
+                    onChange={(event) => updateProviderDraft("planningTimeoutMs", event.target.value)}
+                    placeholder="正整数"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>maxRetries（可选）</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={providerDraft.maxRetries}
+                    onChange={(event) => updateProviderDraft("maxRetries", event.target.value)}
+                    placeholder="正整数"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>strictJson</Label>
+                  <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                    <span className="text-sm text-muted-foreground">启用严格 JSON 输出约束</span>
+                    <Switch
+                      checked={providerDraft.strictJson}
+                      onCheckedChange={(value) => updateProviderDraft("strictJson", value)}
+                    />
+                  </div>
+                </div>
+
+                {providerDraft.type === "ollama" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>thinkingBudgetEnabled</Label>
+                      <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                        <span className="text-sm text-muted-foreground">是否启用 thinking budget</span>
+                        <Switch
+                          checked={providerDraft.thinkingBudgetEnabled}
+                          onCheckedChange={(value) => updateProviderDraft("thinkingBudgetEnabled", value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>thinkingBudget（可选）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={providerDraft.thinkingBudget}
+                        onChange={(event) => updateProviderDraft("thinkingBudget", event.target.value)}
+                        placeholder="正整数"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>thinkingMaxNewTokens（可选）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={providerDraft.thinkingMaxNewTokens}
+                        onChange={(event) => updateProviderDraft("thinkingMaxNewTokens", event.target.value)}
+                        placeholder="正整数"
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {providerDraft.type === "openai" || providerDraft.type === "llama-server" ? (
+                  <>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>selectionOptions（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.selectionOptions}
+                        onChange={(event) => updateProviderDraft("selectionOptions", event.target.value)}
+                        placeholder='例如: {"temperature":0.2}'
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>planningOptions（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.planningOptions}
+                        onChange={(event) => updateProviderDraft("planningOptions", event.target.value)}
+                        placeholder='例如: {"temperature":0.1}'
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {providerDraft.type === "llama-server" ? (
+                  <>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>chatTemplateKwargs（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.chatTemplateKwargs}
+                        onChange={(event) => updateProviderDraft("chatTemplateKwargs", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>planningChatTemplateKwargs（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.planningChatTemplateKwargs}
+                        onChange={(event) => updateProviderDraft("planningChatTemplateKwargs", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>extraBody（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.extraBody}
+                        onChange={(event) => updateProviderDraft("extraBody", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>planningExtraBody（JSON，可选）</Label>
+                      <Textarea
+                        value={providerDraft.planningExtraBody}
+                        onChange={(event) => updateProviderDraft("planningExtraBody", event.target.value)}
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {providerDraft.type === "openai" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>fallbackToChatgptBridge</Label>
+                      <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                        <span className="text-sm text-muted-foreground">额度异常时回退 bridge</span>
+                        <Switch
+                          checked={providerDraft.fallbackToChatgptBridge}
+                          onCheckedChange={(value) => updateProviderDraft("fallbackToChatgptBridge", value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>forceBridge</Label>
+                      <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                        <span className="text-sm text-muted-foreground">强制走 bridge</span>
+                        <Switch
+                          checked={providerDraft.forceBridge}
+                          onCheckedChange={(value) => updateProviderDraft("forceBridge", value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>costInputPer1M（可选）</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        value={providerDraft.costInputPer1M}
+                        onChange={(event) => updateProviderDraft("costInputPer1M", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>costOutputPer1M（可选）</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.0001"
+                        value={providerDraft.costOutputPer1M}
+                        onChange={(event) => updateProviderDraft("costOutputPer1M", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>quota.resetDay（可选）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={providerDraft.quotaResetDay}
+                        onChange={(event) => updateProviderDraft("quotaResetDay", event.target.value)}
+                        placeholder="1-28"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>quota.monthlyTokenLimit（可选）</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={providerDraft.quotaMonthlyTokenLimit}
+                        onChange={(event) => updateProviderDraft("quotaMonthlyTokenLimit", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>quota.monthlyBudgetUsdLimit（可选）</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={providerDraft.quotaMonthlyBudgetUsdLimit}
+                        onChange={(event) => updateProviderDraft("quotaMonthlyBudgetUsdLimit", event.target.value)}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+
+              {providerDraftError ? <div className="text-sm text-red-500">{providerDraftError}</div> : null}
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
 
       {activeModule === "memory" ? (
@@ -479,17 +785,12 @@ export function SystemSection(props: SystemSectionProps) {
             <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
               <div className="mono">env: {props.config?.envPath ?? "-"}</div>
               <div className="mono">timezone: {props.config?.timezone ?? "-"}</div>
-              <div className="mono">ollamaModel: {props.config?.model || "-"}</div>
-              <div className="mono">planningModel: {props.config?.planningModel || "(follow OLLAMA_MODEL)"}</div>
-              <div className="mono">planningTimeoutMs: {props.config?.planningTimeoutMs || "(follow LLM_TIMEOUT_MS)"}</div>
-              <div className="mono">thinkingBudgetEnabled: {props.config?.thinkingBudgetEnabled ? "true" : "false"}</div>
-              <div className="mono">
-                planningThinkingBudgetDefault: {props.config?.thinkingBudgetDefault || props.config?.thinkingBudget || "(default 1024)"}
-              </div>
-              <div className="mono">openaiModel: {props.config?.openaiModel || "(disabled)"}</div>
-              <div className="mono">openaiPlanningModel: {props.config?.openaiPlanningModel || "(follow OPENAI_MODEL)"}</div>
-              <div className="mono">openaiFallbackToBridge: {props.config?.openaiFallbackToChatgptBridge ? "true" : "false"}</div>
-              <div className="mono">openaiForceBridge: {props.config?.openaiForceBridge ? "true" : "false"}</div>
+              <div className="mono">defaultProvider: {mainFlowDraft.defaultProviderId || "-"}</div>
+              <div className="mono">routingProvider: {mainFlowDraft.routingProviderId || "-"}</div>
+              <div className="mono">planningProvider: {mainFlowDraft.planningProviderId || "-"}</div>
+              <div className="mono">routingProviderName: {selectedRoutingLabel}</div>
+              <div className="mono">planningProviderName: {selectedPlanningLabel}</div>
+              <div className="mono">providerCount: {providerItems.length}</div>
               <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
               <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
               <div className="mono">taskStore: {props.config?.taskStore?.name ?? "-"}</div>
@@ -503,4 +804,312 @@ export function SystemSection(props: SystemSectionProps) {
       ) : null}
     </div>
   );
+}
+
+function normalizeProviderType(raw: string): LLMProviderType {
+  if (raw === "openai" || raw === "llama-server" || raw === "gpt-plugin") {
+    return raw;
+  }
+  return "ollama";
+}
+
+function convertProviderToDraft(profile: LLMProviderProfile): SystemProviderDraft {
+  const config = profile.config as Record<string, unknown>;
+  const quotaPolicy = asRecord(config.quotaPolicy);
+  return {
+    ...EMPTY_PROVIDER_DRAFT,
+    id: profile.id,
+    name: profile.name,
+    type: profile.type,
+    baseUrl: toText(config.baseUrl),
+    apiKey: toText(config.apiKey),
+    chatCompletionsPath: toText(config.chatCompletionsPath),
+    model: toText(config.model),
+    planningModel: toText(config.planningModel),
+    timeoutMs: toNumberText(config.timeoutMs),
+    planningTimeoutMs: toNumberText(config.planningTimeoutMs),
+    maxRetries: toNumberText(config.maxRetries),
+    strictJson: toBoolean(config.strictJson),
+    thinkingBudgetEnabled: toBoolean(config.thinkingBudgetEnabled),
+    thinkingBudget: toNumberText(config.thinkingBudget),
+    thinkingMaxNewTokens: toNumberText(config.thinkingMaxNewTokens),
+    selectionOptions: toJsonText(config.selectionOptions),
+    planningOptions: toJsonText(config.planningOptions),
+    chatTemplateKwargs: toJsonText(config.chatTemplateKwargs),
+    planningChatTemplateKwargs: toJsonText(config.planningChatTemplateKwargs),
+    extraBody: toJsonText(config.extraBody),
+    planningExtraBody: toJsonText(config.planningExtraBody),
+    fallbackToChatgptBridge: config.fallbackToChatgptBridge === undefined ? true : toBoolean(config.fallbackToChatgptBridge),
+    forceBridge: toBoolean(config.forceBridge),
+    costInputPer1M: toNumberText(config.costInputPer1M),
+    costOutputPer1M: toNumberText(config.costOutputPer1M),
+    quotaResetDay: toNumberText(quotaPolicy?.resetDay),
+    quotaMonthlyTokenLimit: toNumberText(quotaPolicy?.monthlyTokenLimit),
+    quotaMonthlyBudgetUsdLimit: toNumberText(quotaPolicy?.monthlyBudgetUsdLimit)
+  };
+}
+
+function buildProviderProfileFromDraft(
+  draft: SystemProviderDraft,
+  editingProviderId: string
+): { provider?: LLMProviderProfile; error?: string } {
+  const id = draft.id.trim();
+  const name = draft.name.trim();
+  if (!id) {
+    return { error: "provider id 不能为空" };
+  }
+  if (!name) {
+    return { error: "provider name 不能为空" };
+  }
+  if (editingProviderId && editingProviderId !== id) {
+    return { error: "编辑已有 provider 时不允许修改 id，请新建后保存" };
+  }
+
+  const timeoutMs = parseOptionalPositiveInteger(draft.timeoutMs, "timeoutMs");
+  if (timeoutMs.error) {
+    return timeoutMs;
+  }
+  const planningTimeoutMs = parseOptionalPositiveInteger(draft.planningTimeoutMs, "planningTimeoutMs");
+  if (planningTimeoutMs.error) {
+    return planningTimeoutMs;
+  }
+  const maxRetries = parseOptionalPositiveInteger(draft.maxRetries, "maxRetries");
+  if (maxRetries.error) {
+    return maxRetries;
+  }
+
+  const selectionOptions = parseOptionalJSONObject(draft.selectionOptions, "selectionOptions");
+  if (selectionOptions.error) {
+    return selectionOptions;
+  }
+  const planningOptions = parseOptionalJSONObject(draft.planningOptions, "planningOptions");
+  if (planningOptions.error) {
+    return planningOptions;
+  }
+  const chatTemplateKwargs = parseOptionalJSONObject(draft.chatTemplateKwargs, "chatTemplateKwargs");
+  if (chatTemplateKwargs.error) {
+    return chatTemplateKwargs;
+  }
+  const planningChatTemplateKwargs = parseOptionalJSONObject(
+    draft.planningChatTemplateKwargs,
+    "planningChatTemplateKwargs"
+  );
+  if (planningChatTemplateKwargs.error) {
+    return planningChatTemplateKwargs;
+  }
+  const extraBody = parseOptionalJSONObject(draft.extraBody, "extraBody");
+  if (extraBody.error) {
+    return extraBody;
+  }
+  const planningExtraBody = parseOptionalJSONObject(draft.planningExtraBody, "planningExtraBody");
+  if (planningExtraBody.error) {
+    return planningExtraBody;
+  }
+
+  const costInputPer1M = parseOptionalPositiveNumber(draft.costInputPer1M, "costInputPer1M");
+  if (costInputPer1M.error) {
+    return costInputPer1M;
+  }
+  const costOutputPer1M = parseOptionalPositiveNumber(draft.costOutputPer1M, "costOutputPer1M");
+  if (costOutputPer1M.error) {
+    return costOutputPer1M;
+  }
+  const quotaResetDay = parseOptionalPositiveInteger(draft.quotaResetDay, "quota.resetDay");
+  if (quotaResetDay.error) {
+    return quotaResetDay;
+  }
+  const quotaMonthlyTokenLimit = parseOptionalPositiveInteger(draft.quotaMonthlyTokenLimit, "quota.monthlyTokenLimit");
+  if (quotaMonthlyTokenLimit.error) {
+    return quotaMonthlyTokenLimit;
+  }
+  const quotaMonthlyBudgetUsdLimit = parseOptionalPositiveNumber(
+    draft.quotaMonthlyBudgetUsdLimit,
+    "quota.monthlyBudgetUsdLimit"
+  );
+  if (quotaMonthlyBudgetUsdLimit.error) {
+    return quotaMonthlyBudgetUsdLimit;
+  }
+  const thinkingBudget = parseOptionalPositiveInteger(draft.thinkingBudget, "thinkingBudget");
+  if (thinkingBudget.error) {
+    return thinkingBudget;
+  }
+  const thinkingMaxNewTokens = parseOptionalPositiveInteger(draft.thinkingMaxNewTokens, "thinkingMaxNewTokens");
+  if (thinkingMaxNewTokens.error) {
+    return thinkingMaxNewTokens;
+  }
+
+  const type = normalizeProviderType(draft.type);
+  const model = normalizeOptionalText(draft.model);
+  const planningModel = normalizeOptionalText(draft.planningModel);
+  const baseUrl = normalizeOptionalText(draft.baseUrl);
+  const apiKey = normalizeOptionalText(draft.apiKey);
+  const chatCompletionsPath = normalizeOptionalText(draft.chatCompletionsPath);
+
+  const commonConfig = {
+    model,
+    planningModel,
+    timeoutMs: timeoutMs.value,
+    planningTimeoutMs: planningTimeoutMs.value,
+    maxRetries: maxRetries.value,
+    strictJson: draft.strictJson
+  };
+
+  if (type === "ollama") {
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig,
+          baseUrl,
+          thinkingBudgetEnabled: draft.thinkingBudgetEnabled,
+          thinkingBudget: thinkingBudget.value,
+          thinkingMaxNewTokens: thinkingMaxNewTokens.value
+        }
+      }
+    };
+  }
+
+  if (type === "llama-server") {
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig,
+          baseUrl,
+          apiKey,
+          selectionOptions: selectionOptions.value,
+          planningOptions: planningOptions.value,
+          chatTemplateKwargs: chatTemplateKwargs.value,
+          planningChatTemplateKwargs: planningChatTemplateKwargs.value,
+          extraBody: extraBody.value,
+          planningExtraBody: planningExtraBody.value
+        }
+      }
+    };
+  }
+
+  if (type === "openai") {
+    const hasQuotaPolicy = quotaResetDay.value !== undefined
+      || quotaMonthlyTokenLimit.value !== undefined
+      || quotaMonthlyBudgetUsdLimit.value !== undefined;
+
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig,
+          baseUrl,
+          apiKey,
+          chatCompletionsPath,
+          selectionOptions: selectionOptions.value,
+          planningOptions: planningOptions.value,
+          fallbackToChatgptBridge: draft.fallbackToChatgptBridge,
+          forceBridge: draft.forceBridge,
+          costInputPer1M: costInputPer1M.value,
+          costOutputPer1M: costOutputPer1M.value,
+          quotaPolicy: hasQuotaPolicy
+            ? {
+                resetDay: quotaResetDay.value ?? 1,
+                monthlyTokenLimit: quotaMonthlyTokenLimit.value ?? null,
+                monthlyBudgetUsdLimit: quotaMonthlyBudgetUsdLimit.value ?? null
+              }
+            : undefined
+        }
+      }
+    };
+  }
+
+  return {
+    provider: {
+      id,
+      name,
+      type: "gpt-plugin",
+      config: {
+        ...commonConfig
+      }
+    }
+  };
+}
+
+function parseOptionalPositiveInteger(raw: string, fieldName: string): { value?: number; error?: string } {
+  const text = raw.trim();
+  if (!text) {
+    return {};
+  }
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { error: `${fieldName} 必须是正整数` };
+  }
+  return { value: Math.floor(parsed) };
+}
+
+function parseOptionalPositiveNumber(raw: string, fieldName: string): { value?: number; error?: string } {
+  const text = raw.trim();
+  if (!text) {
+    return {};
+  }
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { error: `${fieldName} 必须是正数` };
+  }
+  return { value: parsed };
+}
+
+function parseOptionalJSONObject(
+  raw: string,
+  fieldName: string
+): { value?: Record<string, unknown>; error?: string } {
+  const text = raw.trim();
+  if (!text) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { error: `${fieldName} 必须是 JSON 对象` };
+    }
+    return { value: parsed as Record<string, unknown> };
+  } catch (_error) {
+    return { error: `${fieldName} 不是合法 JSON` };
+  }
+}
+
+function normalizeOptionalText(raw: string): string | undefined {
+  const text = raw.trim();
+  return text || undefined;
+}
+
+function toText(raw: unknown): string {
+  return typeof raw === "string" ? raw : "";
+}
+
+function toNumberText(raw: unknown): string {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return "";
+  }
+  return String(raw);
+}
+
+function toBoolean(raw: unknown): boolean {
+  return raw === true;
+}
+
+function toJsonText(raw: unknown): string {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return "";
+  }
+  return JSON.stringify(raw, null, 2);
+}
+
+function asRecord(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  return raw as Record<string, unknown>;
 }

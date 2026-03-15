@@ -96,9 +96,17 @@ export type LLMProviderProfile =
   | GptPluginProviderProfile;
 
 export type LLMProviderStore = {
-  version: 1;
+  version: 2;
   defaultProviderId: string;
+  routingProviderId: string;
+  planningProviderId: string;
   providers: LLMProviderProfile[];
+};
+
+export type LLMProviderSelectionPatch = {
+  defaultProviderId?: string;
+  routingProviderId?: string;
+  planningProviderId?: string;
 };
 
 const LLM_PROVIDER_STORE = DATA_STORE.LLM_PROVIDERS;
@@ -203,17 +211,31 @@ export function deleteLLMProviderProfile(providerId: string): LLMProviderStore {
 }
 
 export function setDefaultLLMProvider(providerId: string): LLMProviderStore {
-  const normalizedId = normalizeProviderId(providerId);
-  if (!normalizedId) {
-    throw new Error("providerId is required");
-  }
+  return setLLMProviderSelections({ defaultProviderId: providerId });
+}
 
+export function setLLMProviderSelections(selection: LLMProviderSelectionPatch): LLMProviderStore {
   const store = readLLMProviderStore();
-  if (!store.providers.some((item) => item.id === normalizedId)) {
-    throw new Error(`provider not found: ${normalizedId}`);
+  const source = selection && typeof selection === "object" ? selection : {};
+
+  const nextDefault = normalizeOptionalSelectionProviderId(source.defaultProviderId);
+  if (nextDefault !== undefined) {
+    assertProviderExists(store, nextDefault, "defaultProviderId");
+    store.defaultProviderId = nextDefault;
   }
 
-  store.defaultProviderId = normalizedId;
+  const nextRouting = normalizeOptionalSelectionProviderId(source.routingProviderId);
+  if (nextRouting !== undefined) {
+    assertProviderExists(store, nextRouting, "routingProviderId");
+    store.routingProviderId = nextRouting;
+  }
+
+  const nextPlanning = normalizeOptionalSelectionProviderId(source.planningProviderId);
+  if (nextPlanning !== undefined) {
+    assertProviderExists(store, nextPlanning, "planningProviderId");
+    store.planningProviderId = nextPlanning;
+  }
+
   return writeLLMProviderStore(store);
 }
 
@@ -277,8 +299,10 @@ export function resolveLegacyEngineSelector(selector: unknown): {
 function createDefaultProviderStoreFromEnv(): LLMProviderStore {
   const profile = createDefaultProviderProfileFromEnv();
   return {
-    version: 1,
+    version: 2,
     defaultProviderId: profile.id,
+    routingProviderId: profile.id,
+    planningProviderId: profile.id,
     providers: [profile]
   };
 }
@@ -421,10 +445,20 @@ function normalizeProviderStore(input: unknown): LLMProviderStore {
   const effectiveDefault = defaultProviderId && providers.some((item) => item.id === defaultProviderId)
     ? defaultProviderId
     : providers[0].id;
+  const routingProviderId = normalizeProviderId(source.routingProviderId);
+  const planningProviderId = normalizeProviderId(source.planningProviderId);
+  const effectiveRouting = routingProviderId && providers.some((item) => item.id === routingProviderId)
+    ? routingProviderId
+    : effectiveDefault;
+  const effectivePlanning = planningProviderId && providers.some((item) => item.id === planningProviderId)
+    ? planningProviderId
+    : effectiveDefault;
 
   return {
-    version: 1,
+    version: 2,
     defaultProviderId: effectiveDefault,
+    routingProviderId: effectiveRouting,
+    planningProviderId: effectivePlanning,
     providers
   };
 }
@@ -625,4 +659,21 @@ function asRecord(input: unknown): Record<string, unknown> | null {
     return null;
   }
   return input as Record<string, unknown>;
+}
+
+function normalizeOptionalSelectionProviderId(raw: unknown): string | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const normalized = normalizeProviderId(raw);
+  if (!normalized) {
+    throw new Error("provider id is required");
+  }
+  return normalized;
+}
+
+function assertProviderExists(store: LLMProviderStore, providerId: string, fieldName: string): void {
+  if (!store.providers.some((item) => item.id === providerId)) {
+    throw new Error(`${fieldName} provider not found: ${providerId}`);
+  }
 }
