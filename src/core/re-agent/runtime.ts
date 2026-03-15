@@ -1,5 +1,5 @@
 import { isReAgentCommandInput, withReAgentPrefix } from "./command";
-import { OllamaReAgentLlmClient, ReAgentLlmClient, ReAgentToolDescriptor } from "./llmClient";
+import { createDefaultReAgentLlmClient, ReAgentLlmClient, ReAgentToolDescriptor } from "./llmClient";
 import { createMcpModule } from "./modules/mcpModule";
 import { createMultiAgentModule } from "./modules/multiAgentModule";
 import { createRagModule } from "./modules/ragModule";
@@ -47,7 +47,7 @@ export class ReAgentRuntime {
 
   constructor(options: ReAgentRuntimeOptions = {}) {
     const modules = options.modules ?? createDefaultReAgentModules();
-    this.llmClient = options.llmClient ?? new OllamaReAgentLlmClient();
+    this.llmClient = options.llmClient ?? createDefaultReAgentLlmClient();
     this.modules = new Map(modules.map((item) => [item.name, item]));
     this.tools = modules.map((item) => ({ name: item.name, ...(item.description ? { description: item.description } : {}) }));
     this.maxSteps = readPositiveInt(options.maxSteps, process.env.RE_AGENT_MAX_STEPS, DEFAULT_MAX_STEPS);

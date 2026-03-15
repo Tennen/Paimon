@@ -77,15 +77,27 @@ export type OpenAIQuotaSnapshot = {
 };
 
 const OPENAI_QUOTA_STORE = DATA_STORE.LLM_OPENAI_QUOTA;
+const DEFAULT_NAMESPACE = "default";
+
+type OpenAIQuotaStoreContainer = {
+  version: 2;
+  namespaces: Record<string, unknown>;
+};
+
+export type OpenAIQuotaManagerOptions = {
+  namespace?: string;
+};
 
 export class OpenAIQuotaManager {
   private readonly store: DataStoreDescriptor;
+  private readonly namespace: string;
 
-  constructor() {
+  constructor(options: OpenAIQuotaManagerOptions = {}) {
     const now = new Date();
     const resetDay = 1;
+    this.namespace = normalizeNamespace(options.namespace);
     this.store = registerStore(OPENAI_QUOTA_STORE, () =>
-      createDefaultState(resolveWindowKey(now, resetDay), resetDay, now.toISOString())
+      createDefaultStoreContainer(this.namespace, now, resetDay)
     );
   }
 
@@ -182,7 +194,7 @@ export class OpenAIQuotaManager {
     const nowIso = now.toISOString();
     const windowKey = resolveWindowKey(now, normalizeResetDay(policy.resetDay));
     const next = createDefaultState(windowKey, normalizeResetDay(policy.resetDay), nowIso);
-    setStore(OPENAI_QUOTA_STORE, next);
+    this.writeNamespaceState(next);
     return next;
   }
 
@@ -223,7 +235,7 @@ export class OpenAIQuotaManager {
     const nowIso = now.toISOString();
     const currentWindowKey = resolveWindowKey(now, normalizedPolicy.resetDay);
     const state = normalizeState(
-      getStore<unknown>(OPENAI_QUOTA_STORE),
+      this.readNamespaceState(),
       currentWindowKey,
       normalizedPolicy.resetDay,
       nowIso
@@ -231,9 +243,11 @@ export class OpenAIQuotaManager {
 
     if (state.windowKey !== currentWindowKey || state.resetDay !== normalizedPolicy.resetDay) {
       const next = createDefaultState(currentWindowKey, normalizedPolicy.resetDay, nowIso);
-      setStore(OPENAI_QUOTA_STORE, next);
+      this.writeNamespaceState(next);
       return next;
     }
+
+    this.writeNamespaceState(state);
     return state;
   }
 
@@ -253,8 +267,20 @@ export class OpenAIQuotaManager {
       current.resetDay,
       now.toISOString()
     );
-    setStore(OPENAI_QUOTA_STORE, next);
+    this.writeNamespaceState(next);
     return next;
+  }
+
+  private readNamespaceState(): unknown {
+    const container = readQuotaStoreContainer(getStore<unknown>(OPENAI_QUOTA_STORE));
+    return container.namespaces[this.namespace];
+  }
+
+  private writeNamespaceState(nextState: OpenAIQuotaState): void {
+    const raw = getStore<unknown>(OPENAI_QUOTA_STORE);
+    const container = readQuotaStoreContainer(raw);
+    container.namespaces[this.namespace] = nextState;
+    setStore(OPENAI_QUOTA_STORE, container);
   }
 }
 
@@ -271,6 +297,35 @@ function normalizePolicy(policy: OpenAIQuotaPolicy): OpenAIQuotaPolicy {
     resetDay: normalizeResetDay(policy.resetDay),
     monthlyTokenLimit: normalizeNullablePositiveInteger(policy.monthlyTokenLimit),
     monthlyBudgetUsdLimit: normalizeNullablePositiveNumber(policy.monthlyBudgetUsdLimit)
+  };
+}
+
+function createDefaultStoreContainer(namespace: string, now: Date, resetDay: number): OpenAIQuotaStoreContainer {
+  const nowIso = now.toISOString();
+  return {
+    version: 2,
+    namespaces: {
+      [normalizeNamespace(namespace)]: createDefaultState(
+        resolveWindowKey(now, resetDay),
+        normalizeResetDay(resetDay),
+        nowIso
+      )
+    }
+  };
+}
+
+function readQuotaStoreContainer(raw: unknown): OpenAIQuotaStoreContainer {
+  if (isRecord(raw) && Number(raw.version) === 2 && isRecord(raw.namespaces)) {
+    return {
+      version: 2,
+      namespaces: { ...raw.namespaces }
+    };
+  }
+  return {
+    version: 2,
+    namespaces: isRecord(raw)
+      ? { [DEFAULT_NAMESPACE]: raw }
+      : {}
   };
 }
 
@@ -485,6 +540,14 @@ function normalizeIsoText(value: unknown): string {
     return "";
   }
   return new Date(time).toISOString();
+}
+
+function normalizeNamespace(raw: unknown): string {
+  const normalized = normalizeText(raw)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || DEFAULT_NAMESPACE;
 }
 
 function roundUsd(value: number): number {

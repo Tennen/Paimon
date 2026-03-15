@@ -1,6 +1,6 @@
 import { SkillSelectionResult, SkillPlanningResult } from "../../types";
 
-export type LLMProvider = "ollama" | "llama-server" | "openai";
+export type LLMProvider = "ollama" | "llama-server" | "openai" | "gpt-plugin";
 
 export type LLMRuntimeContext = {
   now?: string;

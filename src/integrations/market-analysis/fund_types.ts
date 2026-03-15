@@ -2,7 +2,7 @@ import { FeatureCoverage, FundDecisionDashboard } from "./fund_schema";
 
 export type MarketAnalysisAssetType = "equity" | "fund";
 
-export type MarketAnalysisEngine = "local" | "gpt_plugin" | "gemini";
+export type MarketAnalysisEngine = string;
 
 export type FundRiskLevel = "low" | "medium" | "high";
 

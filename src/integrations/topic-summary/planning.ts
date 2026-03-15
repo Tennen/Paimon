@@ -1,6 +1,5 @@
 import { jsonrepair } from "jsonrepair";
 import { createLLMEngine } from "../../engines/llm";
-import { executeInNewChat } from "../chatgpt-bridge/service";
 import { DEFAULT_TARGET_LANGUAGE } from "./defaults";
 import { asRecord, isRecord, normalizeText, toArray } from "./shared";
 import {
@@ -288,11 +287,8 @@ async function chatWithPlanningModel(
   userPrompt: string,
   summaryEngine: TopicSummaryEngine
 ): Promise<string> {
-  if (summaryEngine === "gpt_plugin") {
-    return chatWithGptPluginBridge(systemPrompt, userPrompt);
-  }
-
-  const llmEngine = createLLMEngine();
+  const selector = resolveTopicSummaryProviderSelector(summaryEngine);
+  const llmEngine = createLLMEngine(selector);
   const provider = llmEngine.getProviderName();
 
   const model = String(llmEngine.getModelForStep("planning") || "").trim();
@@ -320,58 +316,15 @@ async function chatWithPlanningModel(
   });
 }
 
-async function chatWithGptPluginBridge(systemPrompt: string, userPrompt: string): Promise<string> {
-  const timeoutMs = parsePositiveInteger(
-    process.env.TOPIC_SUMMARY_GPT_PLUGIN_TIMEOUT_MS,
-    parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS, 30000)
-  );
-  const prompt = buildGptPluginPlanningPrompt(systemPrompt, userPrompt);
-  const request = executeInNewChat(prompt);
-  const response = await withTimeout(
-    Promise.resolve(request),
-    timeoutMs,
-    "gpt_plugin request timeout"
-  );
-  const text = extractTextFromBridgeResponse(response);
-  if (!text) {
-    throw new Error("gpt_plugin returned empty response");
+function resolveTopicSummaryProviderSelector(summaryEngine: TopicSummaryEngine): string | undefined {
+  const normalized = normalizeText(summaryEngine).toLowerCase();
+  if (!normalized || normalized === "local" || normalized === "default" || normalized === "auto") {
+    return undefined;
   }
-  return text;
-}
-
-function buildGptPluginPlanningPrompt(systemPrompt: string, userPrompt: string): string {
-  return [
-    "You are preparing output for an automated parser.",
-    "Return strict JSON only. Do not include markdown, code fences, or explanations.",
-    "<system_prompt>",
-    systemPrompt,
-    "</system_prompt>",
-    "<user_prompt>",
-    userPrompt,
-    "</user_prompt>"
-  ].join("\n");
-}
-
-function extractTextFromBridgeResponse(response: unknown): string {
-  if (typeof response === "string") {
-    return response.trim();
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(normalized)) {
+    return "gpt-plugin";
   }
-
-  const record = asRecord(response);
-  if (!record) {
-    return "";
-  }
-
-  const directText = normalizeText(record.text);
-  if (directText) {
-    return directText;
-  }
-
-  const output = asRecord(record.output);
-  if (!output) {
-    return "";
-  }
-  return normalizeText(output.text);
+  return normalized;
 }
 
 function parsePlanningDigestPatchMap(raw: string): Map<string, PlanningDigestItemPatch> {
@@ -498,19 +451,6 @@ function shouldUsePlanningModelRefine(): boolean {
     return false;
   }
   return true;
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
-  });
-
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  });
 }
 
 function parsePositiveInteger(raw: unknown, fallback: number): number {

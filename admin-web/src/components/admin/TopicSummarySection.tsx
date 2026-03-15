@@ -90,6 +90,8 @@ export function TopicSummarySection(props: TopicSummarySectionProps) {
   const [activeModule, setActiveModule] = useState<TopicSummaryModule>("config");
   const enabledCount = props.topicSummaryConfig.sources.filter((item) => item.enabled).length;
   const selectedProfile = props.topicSummaryProfiles.find((item) => item.id === props.topicSummarySelectedProfileId) ?? null;
+  const summaryEngineValue = props.topicSummaryConfig.summaryEngine || "local";
+  const isBuiltinSummaryEngine = SUMMARY_ENGINE_OPTIONS.some((item) => item.value === summaryEngineValue);
 
   return (
     <Card>
@@ -166,7 +168,7 @@ export function TopicSummarySection(props: TopicSummarySectionProps) {
               <div className="space-y-1.5">
                 <Label>摘要引擎</Label>
                 <Select
-                  value={props.topicSummaryConfig.summaryEngine}
+                  value={summaryEngineValue}
                   onValueChange={(value) => props.onSummaryEngineChange(value as TopicSummaryEngine)}
                 >
                   <SelectTrigger>
@@ -178,8 +180,16 @@ export function TopicSummarySection(props: TopicSummarySectionProps) {
                         {option.label}
                       </SelectItem>
                     ))}
+                    {!isBuiltinSummaryEngine ? (
+                      <SelectItem value={summaryEngineValue}>{summaryEngineValue}（custom provider）</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
+                <Input
+                  value={summaryEngineValue}
+                  placeholder="local / gpt_plugin / your-provider-id"
+                  onChange={(event) => props.onSummaryEngineChange(event.target.value as TopicSummaryEngine)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>默认语言</Label>

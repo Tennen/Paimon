@@ -2062,11 +2062,7 @@ function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
 
 function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnalysisConfig {
   const assetType = config?.assetType === "fund" ? "fund" : "equity";
-  const engine = config?.analysisEngine === "gpt_plugin"
-    ? "gpt_plugin"
-    : config?.analysisEngine === "gemini"
-      ? "gemini"
-      : "local";
+  const engine = normalizeMarketAnalysisEngine(config?.analysisEngine);
   const timeoutMs = Number(config?.gptPlugin?.timeoutMs);
   const fallbackToLocal = typeof config?.gptPlugin?.fallbackToLocal === "boolean"
     ? config.gptPlugin.fallbackToLocal
@@ -2138,7 +2134,7 @@ function normalizeTopicSummaryConfig(config: TopicSummaryConfig | null | undefin
 
   const filters = source.filters ?? fallback.filters;
   const dailyQuota = source.dailyQuota ?? fallback.dailyQuota;
-  const summaryEngine = source.summaryEngine === "gpt_plugin" ? "gpt_plugin" : "local";
+  const summaryEngine = normalizeTopicSummaryEngine(source.summaryEngine);
   const defaultLanguage = normalizeTopicSummaryDefaultLanguage(source.defaultLanguage);
 
   return {
@@ -2167,6 +2163,31 @@ function normalizeTopicSummaryConfig(config: TopicSummaryConfig | null | undefin
       ecosystem: clampNumberValue(dailyQuota.ecosystem, fallback.dailyQuota.ecosystem, 0, 40)
     }
   };
+}
+
+function normalizeMarketAnalysisEngine(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return "local";
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return "gpt_plugin";
+  }
+  if (value === "gemini") {
+    return "gemini";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
+}
+
+function normalizeTopicSummaryEngine(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return "local";
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return "gpt_plugin";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
 }
 
 function normalizeTopicSummaryDefaultLanguage(raw: unknown): TopicSummaryDigestLanguage {

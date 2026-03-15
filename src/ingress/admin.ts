@@ -48,6 +48,13 @@ import {
   OpenAIQuotaManager,
   readOpenAIQuotaPolicyFromEnv
 } from "../integrations/openai/quotaManager";
+import {
+  deleteLLMProviderProfile,
+  getDefaultLLMProviderProfile,
+  readLLMProviderStore,
+  setDefaultLLMProvider,
+  upsertLLMProviderProfile
+} from "../engines/llm/provider_store";
 
 const execAsync = promisify(exec);
 
@@ -72,7 +79,7 @@ type MarketPortfolio = {
 
 type MarketAnalysisAssetType = "equity" | "fund";
 
-type MarketAnalysisEngine = "local" | "gpt_plugin" | "gemini";
+type MarketAnalysisEngine = string;
 
 type MarketGptPluginConfig = {
   timeoutMs: number;
@@ -387,6 +394,102 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(500).json({
           ok: false,
           error: (error as Error).message ?? "failed to update openai quota"
+        });
+      }
+    });
+
+    app.get("/admin/api/llm/providers", (_req: Request, res: ExResponse) => {
+      try {
+        const store = readLLMProviderStore();
+        res.json({
+          ok: true,
+          store,
+          defaultProvider: getDefaultLLMProviderProfile()
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to read llm providers"
+        });
+      }
+    });
+
+    app.put("/admin/api/llm/providers", (req: Request, res: ExResponse) => {
+      const body = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const providerPayload = "provider" in body ? body.provider : body;
+      const defaultProviderId = typeof body.defaultProviderId === "string"
+        ? body.defaultProviderId.trim()
+        : "";
+
+      try {
+        upsertLLMProviderProfile(providerPayload);
+        if (defaultProviderId) {
+          setDefaultLLMProvider(defaultProviderId);
+        }
+        res.json({
+          ok: true,
+          store: readLLMProviderStore(),
+          defaultProvider: getDefaultLLMProviderProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to upsert llm provider"
+        });
+      }
+    });
+
+    app.post("/admin/api/llm/providers/default", (req: Request, res: ExResponse) => {
+      const body = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const providerId = typeof body.providerId === "string" ? body.providerId.trim() : "";
+      if (!providerId) {
+        res.status(400).json({
+          ok: false,
+          error: "providerId is required"
+        });
+        return;
+      }
+
+      try {
+        setDefaultLLMProvider(providerId);
+        res.json({
+          ok: true,
+          store: readLLMProviderStore(),
+          defaultProvider: getDefaultLLMProviderProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to set default llm provider"
+        });
+      }
+    });
+
+    app.delete("/admin/api/llm/providers/:id", (req: Request, res: ExResponse) => {
+      const providerId = String(req.params.id ?? "").trim();
+      if (!providerId) {
+        res.status(400).json({
+          ok: false,
+          error: "provider id is required"
+        });
+        return;
+      }
+
+      try {
+        deleteLLMProviderProfile(providerId);
+        res.json({
+          ok: true,
+          store: readLLMProviderStore(),
+          defaultProvider: getDefaultLLMProviderProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to delete llm provider"
         });
       }
     });
@@ -2025,11 +2128,7 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
   const assetTypeRaw = typeof source.assetType === "string" ? source.assetType.trim().toLowerCase() : "";
   const assetType: MarketAnalysisAssetType = assetTypeRaw === "fund" ? "fund" : "equity";
   const engineRaw = typeof source.analysisEngine === "string" ? source.analysisEngine.trim().toLowerCase() : "";
-  const analysisEngine: MarketAnalysisEngine = engineRaw === "gpt_plugin"
-    ? "gpt_plugin"
-    : engineRaw === "gemini"
-      ? "gemini"
-      : "local";
+  const analysisEngine: MarketAnalysisEngine = normalizeMarketAnalysisEngine(engineRaw);
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin as Record<string, unknown>
     : {};
@@ -2130,6 +2229,20 @@ function normalizeMarketCode(raw: unknown): string {
     return digits.slice(-6);
   }
   return digits.padStart(6, "0");
+}
+
+function normalizeMarketAnalysisEngine(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return "local";
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return "gpt_plugin";
+  }
+  if (value === "gemini") {
+    return "gemini";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
 }
 
 function normalizeDailyTime(raw: string): string | null {

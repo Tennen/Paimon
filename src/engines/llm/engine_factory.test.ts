@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createLLMEngine, normalizeProvider } from "./engine_factory";
+import { GPTPluginLLMEngine } from "./gpt-plugin";
 import { OpenAILLMEngine } from "./openai";
 
 test("normalizeProvider supports openai aliases", () => {
@@ -14,4 +15,11 @@ test("createLLMEngine creates OpenAILLMEngine for openai provider", () => {
   const engine = createLLMEngine("chatgpt");
   assert.ok(engine instanceof OpenAILLMEngine);
   assert.equal(engine.getProviderName(), "openai");
+});
+
+test("createLLMEngine creates GPTPluginLLMEngine for gpt-plugin aliases", () => {
+  const engine = createLLMEngine("gpt_plugin");
+  assert.ok(engine instanceof GPTPluginLLMEngine);
+  assert.equal(engine.getProviderName(), "gpt-plugin");
+  assert.equal(normalizeProvider("chatgpt-bridge"), "gpt-plugin");
 });

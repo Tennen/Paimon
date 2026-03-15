@@ -39,6 +39,8 @@ export function MarketSection(props: MarketSectionProps) {
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
   const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const searchSelectorButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
+  const analysisEngineValue = props.marketAnalysisConfig.analysisEngine || "local";
+  const isBuiltinAnalysisEngine = ["local", "gemini", "gpt_plugin"].includes(analysisEngineValue);
 
   const updateSelectorPosition = useCallback(() => {
     if (openSearchSelectorIndex === null) {
@@ -111,7 +113,7 @@ export function MarketSection(props: MarketSectionProps) {
 
             <div className="space-y-1.5">
               <Label>Analysis Engine</Label>
-              <Select value={props.marketAnalysisConfig.analysisEngine} onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}>
+              <Select value={analysisEngineValue} onValueChange={(value) => props.onMarketAnalysisEngineChange(value as MarketAnalysisEngine)}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择分析引擎" />
                 </SelectTrigger>
@@ -119,8 +121,21 @@ export function MarketSection(props: MarketSectionProps) {
                   <SelectItem value="local">local（本地规则 + 本地LLM解释）</SelectItem>
                   <SelectItem value="gemini">gemini（Google Gemini API）</SelectItem>
                   <SelectItem value="gpt_plugin">gpt_plugin（调用远端GPT插件）</SelectItem>
+                  {!isBuiltinAnalysisEngine ? (
+                    <SelectItem value={analysisEngineValue}>{analysisEngineValue}（custom provider）</SelectItem>
+                  ) : null}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="market-analysis-engine-id">Provider ID（可选）</Label>
+              <Input
+                id="market-analysis-engine-id"
+                value={analysisEngineValue}
+                placeholder="local / gpt_plugin / gemini / your-provider-id"
+                onChange={(event) => props.onMarketAnalysisEngineChange(event.target.value as MarketAnalysisEngine)}
+              />
             </div>
 
             <div className="space-y-1.5">

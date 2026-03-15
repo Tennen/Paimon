@@ -79,7 +79,7 @@ export type MarketPortfolio = {
 
 export type MarketAnalysisAssetType = "equity" | "fund";
 
-export type MarketAnalysisEngine = "local" | "gpt_plugin" | "gemini";
+export type MarketAnalysisEngine = string;
 
 export type MarketFundRiskLevel = "low" | "medium" | "high";
 
@@ -226,7 +226,7 @@ export type TopicSummaryDailyQuota = {
   ecosystem: number;
 };
 
-export type TopicSummaryEngine = "local" | "gpt_plugin";
+export type TopicSummaryEngine = string;
 export type TopicSummaryDigestLanguage = "auto" | "zh-CN" | "en";
 
 export type TopicSummaryConfig = {

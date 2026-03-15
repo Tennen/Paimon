@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { createLLMEngine } from "../../engines/llm";
 import { executeInNewChat } from "../chatgpt-bridge/service";
 import { DEFAULT_ANALYSIS_CONFIG, DEFAULT_TIMEOUT_MS } from "./defaults";
 import { normalizeAnalysisConfig } from "./storage";
@@ -42,59 +43,68 @@ export async function generateExplanationByProvider(signalResult, optionalNewsCo
   if (config.analysisEngine === "gpt_plugin") {
     return generateExplanationViaGptPlugin(signalResult, optionalNewsContext, config);
   }
-  return generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+  return generateExplanationViaConfiguredLlm(
+    signalResult,
+    optionalNewsContext,
+    config.analysisEngine
+  );
 }
 
-async function generateExplanationViaLocalModel(signalResult, optionalNewsContext) {
-  const baseUrl = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-  const model = String(process.env.MARKET_ANALYSIS_LLM_MODEL || process.env.OLLAMA_MODEL || "").trim();
+async function generateExplanationViaConfiguredLlm(signalResult, optionalNewsContext, engineSelector) {
+  const selector = resolveLlmProviderSelector(engineSelector);
+  const llmEngine = createLLMEngine(selector);
+  const provider = selector || llmEngine.getProviderName();
+  const model = String(
+    process.env.MARKET_ANALYSIS_LLM_MODEL
+    || llmEngine.getModelForStep("planning")
+    || llmEngine.getModelForStep("routing")
+    || ""
+  ).trim();
   const timeoutMs = parsePositiveInteger(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS, 15000);
 
   if (!model) {
     throw new Error("missing model for explanation");
   }
 
-  const payload = await fetchJson(`${baseUrl}/api/chat`, timeoutMs, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      messages: [
-        {
-          role: "system",
-          content: [
-            "你是A股持仓分析助手，给用户直接可执行的中文建议。",
-            "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
-            "写作风格要求：自然、具体、克制；禁止套话和机器人口吻，例如“根据以上分析”“综合来看”“仅供参考请谨慎”等空泛词。",
-            "必须覆盖每个 assetSignals 持仓项，并且逐项给出：1) 股票名称与代码 2) 输入关键数据 3) 短期建议 4) 长期建议。",
-            "输入关键数据至少包含可用字段：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段必须写“数据缺失”。",
-            "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议必须明确为“增持/减持/持有(或观望)”之一，并附一句理由。",
-            "允许额外给出 1-3 条组合层面的“参考建议”，且不能与既有 signalResult 冲突。",
-            "请只输出 JSON，不要 markdown，不要额外说明，格式如下：",
-            "{\"summary\":\"整体结论，2-4句\",\"holdings\":[{\"code\":\"600519\",\"name\":\"贵州茅台\",\"input_data\":\"price=..., pctChange=..., ma5=..., ma10=..., ma20=..., volumeChangeRate=..., quantity=..., avgCost=..., positionPnLPct=...\",\"short_term_advice\":\"增持/减持/持有 + 一句理由\",\"long_term_advice\":\"增持/减持/持有 + 一句理由\"}],\"suggestions\":[\"参考建议1\",\"参考建议2\"]}"
-          ].join("\n")
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            signalResult,
-            optionalNewsContext: optionalNewsContext || null
-          })
+  const rawText = await llmEngine.chat({
+    step: "general",
+    model,
+    timeoutMs,
+    ...(llmEngine.getProviderName() === "ollama"
+      ? {
+          options: {
+            temperature: 0.2,
+            top_p: 0.9,
+            num_predict: 1024
+          }
         }
-      ]
-    })
+      : {}),
+    messages: [
+      {
+        role: "system",
+        content: [
+          "你是A股持仓分析助手，给用户直接可执行的中文建议。",
+          "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
+          "写作风格要求：自然、具体、克制；禁止套话和机器人口吻，例如“根据以上分析”“综合来看”“仅供参考请谨慎”等空泛词。",
+          "必须覆盖每个 assetSignals 持仓项，并且逐项给出：1) 股票名称与代码 2) 输入关键数据 3) 短期建议 4) 长期建议。",
+          "输入关键数据至少包含可用字段：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段必须写“数据缺失”。",
+          "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议必须明确为“增持/减持/持有(或观望)”之一，并附一句理由。",
+          "允许额外给出 1-3 条组合层面的“参考建议”，且不能与既有 signalResult 冲突。",
+          "请只输出 JSON，不要 markdown，不要额外说明，格式如下：",
+          "{\"summary\":\"整体结论，2-4句\",\"holdings\":[{\"code\":\"600519\",\"name\":\"贵州茅台\",\"input_data\":\"price=..., pctChange=..., ma5=..., ma10=..., ma20=..., volumeChangeRate=..., quantity=..., avgCost=..., positionPnLPct=...\",\"short_term_advice\":\"增持/减持/持有 + 一句理由\",\"long_term_advice\":\"增持/减持/持有 + 一句理由\"}],\"suggestions\":[\"参考建议1\",\"参考建议2\"]}"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          signalResult,
+          optionalNewsContext: optionalNewsContext || null
+        })
+      }
+    ]
   });
 
-  const content = payload
-    && payload.message
-    && typeof payload.message === "object"
-    && typeof payload.message.content === "string"
-      ? payload.message.content
-      : (typeof payload.response === "string" ? payload.response : "");
-  const parsed = normalizeExplanationOutput(content);
+  const parsed = normalizeExplanationOutput(rawText);
 
   return {
     summary: parsed.summary,
@@ -102,7 +112,7 @@ async function generateExplanationViaLocalModel(signalResult, optionalNewsContex
     holdings: parsed.holdings,
     model,
     generatedAt: new Date().toISOString(),
-    provider: "local"
+    provider
   };
 }
 
@@ -142,10 +152,10 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
     if (!fallbackToLocal) {
       throw new Error(`gpt_plugin failed: ${detail}`);
     }
-    const localFallback = await generateExplanationViaLocalModel(signalResult, optionalNewsContext);
+    const localFallback = await generateExplanationViaConfiguredLlm(signalResult, optionalNewsContext, "local");
     return {
       ...localFallback,
-      provider: "local",
+      provider: localFallback.provider || "local",
       fallbackFrom: "gpt_plugin",
       fallbackReason: `gpt_plugin failed: ${detail}`
     };
@@ -259,6 +269,17 @@ function extractTextFromBridgeResponse(response) {
     return response.message.trim();
   }
   return "";
+}
+
+function resolveLlmProviderSelector(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return undefined;
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return "gpt-plugin";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || undefined;
 }
 
 function normalizeExplanationOutput(raw) {

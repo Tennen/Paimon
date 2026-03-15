@@ -553,10 +553,16 @@ function shouldDropLegacySource(id: string, feedUrl: string): boolean {
 
 export function normalizeSummaryEngine(raw: unknown): TopicSummaryConfig["summaryEngine"] {
   const value = normalizeText(raw).toLowerCase();
+  if (!value || ["local", "default", "auto"].includes(value)) {
+    return "local";
+  }
   if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt_plugin";
   }
-  return "local";
+  return value
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    || "local";
 }
 
 export function normalizeConfigDigestLanguage(raw: unknown): TopicSummaryDigestLanguage {

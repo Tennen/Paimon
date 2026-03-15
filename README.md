@@ -68,6 +68,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 ### 2. LLM 与智能体编排
 
 - 支持 `Ollama`、`llama-server` 和 `OpenAI(ChatGPT API)`
+- 支持多 Provider Profile（多条 `openai-like` / `ollama`，单条 `gpt-plugin`），并可按场景独立选择
 - 支持技能发现、技能规划、工具调用的分步式执行
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
@@ -180,6 +181,26 @@ HA_TOKEN=your_home_assistant_token
 - 可通过 Admin API 查看与管理额度状态：
   - `GET /admin/api/llm/openai/quota`
   - `POST /admin/api/llm/openai/quota`（`action=unblock|exhaust|reset`）
+
+#### 多 Provider Profile（推荐）
+
+- Provider Profile 持久化存储在 `data/llm/providers.json`（storage key: `llm.providers`）
+- 支持创建多条 `openai-like` / `ollama` profile；`gpt-plugin` 仅允许一条
+- 每条 profile 可配置对应 engine 的常用参数（baseUrl/model/planningModel/timeout/options 等）
+
+可用 Admin API：
+
+- `GET /admin/api/llm/providers`
+- `PUT /admin/api/llm/providers`（创建/更新，body 可传 `provider`）
+- `POST /admin/api/llm/providers/default`（设置默认 provider）
+- `DELETE /admin/api/llm/providers/:id`
+
+场景选择规则：
+
+- 主编排（Orchestrator）使用默认 provider（不再只依赖全局 local LLM）
+- `topic-summary` 的 `summaryEngine` 支持 `local` / `gpt_plugin` / `provider-id`
+- `market-analysis` 的 `analysisEngine` 支持 `local` / `gpt_plugin` / `gemini` / `provider-id`
+- `/re` 子 agent 可通过 `RE_AGENT_LLM_PROVIDER` 独立指定 provider
 
 #### 启用企业微信
 

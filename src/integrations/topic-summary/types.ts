@@ -38,7 +38,7 @@ export type TopicSummaryDailyQuota = {
   ecosystem: number;
 };
 
-export type TopicSummaryEngine = "local" | "gpt_plugin";
+export type TopicSummaryEngine = string;
 export type TopicSummaryDigestLanguage = "auto" | "zh-CN" | "en";
 
 export type TopicSummaryConfig = {

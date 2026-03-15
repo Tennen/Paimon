@@ -1,3 +1,5 @@
+import { createLLMEngine } from "../../engines/llm";
+import type { LLMEngine } from "../../engines/llm/llm";
 import { ReActAction, ReAgentMemoryContext, ReAgentTraceStep } from "./types";
 
 export type ReAgentToolDescriptor = { name: string; description?: string };
@@ -20,6 +22,12 @@ export type OllamaReAgentLlmClientOptions = {
   model?: string;
   timeoutMs?: number;
   fetchImpl?: (input: string, init?: RequestInit) => Promise<Response>;
+};
+
+export type EngineReAgentLlmClientOptions = {
+  provider?: string;
+  model?: string;
+  timeoutMs?: number;
 };
 
 const DEFAULT_MODEL = "qwen3.5:9b";
@@ -82,6 +90,81 @@ export class OllamaReAgentLlmClient implements ReAgentLlmClient {
       if (timer) clearTimeout(timer);
     }
   }
+}
+
+export class EngineReAgentLlmClient implements ReAgentLlmClient {
+  private readonly model: string;
+  private readonly timeoutMs: number;
+  private readonly provider: string;
+  private readonly llmEngine: LLMEngine;
+
+  constructor(options: EngineReAgentLlmClientOptions = {}) {
+    this.provider = String(options.provider ?? process.env.RE_AGENT_LLM_PROVIDER ?? "").trim();
+    this.llmEngine = createLLMEngine(this.provider);
+    this.model = String(options.model ?? process.env.RE_AGENT_MODEL ?? "").trim();
+    this.timeoutMs = readPositiveInt(options.timeoutMs, process.env.RE_AGENT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  }
+
+  async nextAction(input: ReAgentLlmStepInput): Promise<ReActAction> {
+    const model = this.resolveModel();
+    const raw = await this.llmEngine.chat({
+      step: "general",
+      model,
+      timeoutMs: this.timeoutMs,
+      ...(this.llmEngine.getProviderName() === "ollama"
+        ? {
+            options: {
+              temperature: 0.2,
+              top_p: 0.9,
+              num_predict: 1024
+            }
+          }
+        : {}),
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: JSON.stringify(
+            {
+              sessionId: input.sessionId,
+              step: `${input.step}/${input.maxSteps}`,
+              input: input.input,
+              tools: input.tools,
+              history: input.history,
+              ...(input.memoryContext ? { memoryContext: toPromptMemoryContext(input.memoryContext) } : {})
+            },
+            null,
+            2
+          )
+        }
+      ]
+    });
+    return parseAction(String(raw ?? "").trim());
+  }
+
+  private resolveModel(): string {
+    const explicit = this.model.trim();
+    if (explicit) {
+      return explicit;
+    }
+    const planning = String(this.llmEngine.getModelForStep("planning") ?? "").trim();
+    if (planning) {
+      return planning;
+    }
+    const routing = String(this.llmEngine.getModelForStep("routing") ?? "").trim();
+    if (routing) {
+      return routing;
+    }
+    throw new Error(`missing re-agent model for provider ${this.llmEngine.getProviderName()}`);
+  }
+}
+
+export function createDefaultReAgentLlmClient(): ReAgentLlmClient {
+  const provider = String(process.env.RE_AGENT_LLM_PROVIDER ?? "").trim();
+  if (!provider) {
+    return new OllamaReAgentLlmClient();
+  }
+  return new EngineReAgentLlmClient({ provider });
 }
 
 function toPromptMemoryContext(input: ReAgentMemoryContext): ReAgentMemoryContext {

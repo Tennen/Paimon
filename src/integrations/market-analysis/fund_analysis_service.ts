@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { createLLMEngine } from "../../engines/llm";
 import { buildFundFeatureContext } from "./fund_feature_engine";
 import { buildFundSystemPrompt, buildFundUserPrompt } from "./fund_prompt_builder";
 import { evaluateFundRules } from "./fund_rule_engine";
@@ -358,7 +359,8 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
   errors: string[];
 }> {
   const retryMax = clampInt(input.analysisConfig.fund.llmRetryMax, 1, 3, 1);
-  const provider = normalizeFundLlmProvider(input.analysisConfig.analysisEngine);
+  const providerSelection = normalizeFundLlmProvider(input.analysisConfig.analysisEngine);
+  const provider = providerSelection.providerLabel;
 
   let lastRawText = "";
   const errors: string[] = [];
@@ -374,9 +376,9 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
     };
 
     try {
-      const llmResponse = provider === "gemini"
+      const llmResponse = providerSelection.useGemini
         ? await generateWithGemini(prompt.system, prompt.user)
-        : await generateWithLocalModel(prompt.system, prompt.user);
+        : await generateWithConfiguredProvider(prompt.system, prompt.user, providerSelection.selector);
 
       lastRawText = llmResponse.text;
       const parsed = parseDashboardFromText(lastRawText);
@@ -396,7 +398,7 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
       return {
         dashboard: validated.dashboard,
         rawText: lastRawText,
-        provider,
+        provider: llmResponse.provider || provider,
         errors
       };
     } catch (error) {
@@ -412,17 +414,38 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
   };
 }
 
-async function generateWithLocalModel(systemPrompt: string, userPrompt: string): Promise<{ text: string }> {
-  const baseUrl = String(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-  const model = String(process.env.MARKET_ANALYSIS_FUND_LOCAL_MODEL || process.env.MARKET_ANALYSIS_LLM_MODEL || process.env.OLLAMA_MODEL || "").trim();
+async function generateWithConfiguredProvider(
+  systemPrompt: string,
+  userPrompt: string,
+  selector?: string
+): Promise<{ text: string; provider: string }> {
+  const llmEngine = createLLMEngine(selector);
+  const provider = selector || llmEngine.getProviderName();
+  const model = String(
+    process.env.MARKET_ANALYSIS_FUND_LOCAL_MODEL
+    || process.env.MARKET_ANALYSIS_LLM_MODEL
+    || llmEngine.getModelForStep("planning")
+    || llmEngine.getModelForStep("routing")
+    || ""
+  ).trim();
   if (!model) {
     throw new Error("missing local model for fund analysis");
   }
 
   const timeoutMs = clampInt(Number(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS), 5000, 60000, 15000);
-  const payload = await postJsonWithTimeout(`${baseUrl}/api/chat`, timeoutMs, {
+  const text = await llmEngine.chat({
+    step: "general",
     model,
-    stream: false,
+    timeoutMs,
+    ...(llmEngine.getProviderName() === "ollama"
+      ? {
+          options: {
+            temperature: 0.2,
+            top_p: 0.9,
+            num_predict: 1024
+          }
+        }
+      : {}),
     messages: [
       {
         role: "system",
@@ -435,28 +458,17 @@ async function generateWithLocalModel(systemPrompt: string, userPrompt: string):
     ]
   });
 
-  if (!payload || typeof payload !== "object") {
-    throw new Error("local model returned empty payload");
-  }
-
-  const source = payload as Record<string, unknown>;
-  const message = source.message && typeof source.message === "object"
-    ? (source.message as Record<string, unknown>)
-    : null;
-  const text = typeof message?.content === "string"
-    ? message.content
-    : typeof source.response === "string"
-      ? source.response
-      : "";
-
   if (!text.trim()) {
     throw new Error("local model returned empty text");
   }
 
-  return { text };
+  return {
+    text,
+    provider
+  };
 }
 
-async function generateWithGemini(systemPrompt: string, userPrompt: string): Promise<{ text: string }> {
+async function generateWithGemini(systemPrompt: string, userPrompt: string): Promise<{ text: string; provider: string }> {
   const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
   if (!apiKey) {
     throw new Error("missing GEMINI_API_KEY");
@@ -511,7 +523,10 @@ async function generateWithGemini(systemPrompt: string, userPrompt: string): Pro
     throw new Error("gemini returned empty text");
   }
 
-  return { text };
+  return {
+    text,
+    provider: "gemini"
+  };
 }
 
 function parseDashboardFromText(text: string): unknown {
@@ -994,8 +1009,39 @@ async function fetchHistoryKline(secid: string, lookbackDays: number, timeoutMs:
   };
 }
 
-function normalizeFundLlmProvider(engine: string): "local" | "gemini" {
-  return engine === "gemini" ? "gemini" : "local";
+function normalizeFundLlmProvider(engine: string): {
+  useGemini: boolean;
+  selector?: string;
+  providerLabel: string;
+} {
+  const value = String(engine || "").trim().toLowerCase();
+  if (value === "gemini") {
+    return {
+      useGemini: true,
+      providerLabel: "gemini"
+    };
+  }
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return {
+      useGemini: false,
+      selector: undefined,
+      providerLabel: "local"
+    };
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return {
+      useGemini: false,
+      selector: "gpt-plugin",
+      providerLabel: "gpt-plugin"
+    };
+  }
+
+  const selector = value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return {
+    useGemini: false,
+    ...(selector ? { selector } : {}),
+    providerLabel: selector || "local"
+  };
 }
 
 function inferFundType(code: string, name: string): FundType {

@@ -262,11 +262,7 @@ export function normalizeAnalysisConfig(input) {
   const engineRaw = typeof source.analysisEngine === "string"
     ? source.analysisEngine.trim().toLowerCase()
     : "";
-  const analysisEngine = engineRaw === "gpt_plugin"
-    ? "gpt_plugin"
-    : engineRaw === "gemini"
-      ? "gemini"
-      : "local";
+  const analysisEngine = normalizeMarketAnalysisEngine(engineRaw);
 
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin
@@ -313,6 +309,20 @@ export function normalizeAnalysisConfig(input) {
       llmRetryMax
     }
   };
+}
+
+function normalizeMarketAnalysisEngine(raw: string): string {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value || value === "local" || value === "default" || value === "auto") {
+    return "local";
+  }
+  if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
+    return "gpt_plugin";
+  }
+  if (value === "gemini") {
+    return "gemini";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
 }
 
 export function buildDefaultState() {
