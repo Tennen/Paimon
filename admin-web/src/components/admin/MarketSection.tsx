@@ -33,18 +33,53 @@ import {
   MarketAnalysisAssetType,
   MarketAnalysisEngine,
   MarketFundRiskLevel,
+  MarketSearchEngineProfile,
   MarketSectionProps
 } from "@/types/admin";
+
+type MarketSearchEngineDraft = {
+  id: string;
+  name: string;
+  endpoint: string;
+  apiKey: string;
+  engine: string;
+  hl: string;
+  gl: string;
+  num: string;
+  querySuffix: string;
+  enabled: boolean;
+};
+
+const EMPTY_SEARCH_ENGINE_DRAFT: MarketSearchEngineDraft = {
+  id: "",
+  name: "",
+  endpoint: "https://serpapi.com/search.json",
+  apiKey: "",
+  engine: "google_news",
+  hl: "zh-cn",
+  gl: "cn",
+  num: "10",
+  querySuffix: "基金 公告 经理 申赎 风险",
+  enabled: true
+};
 
 export function MarketSection(props: MarketSectionProps) {
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
   const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [editingSearchEngineId, setEditingSearchEngineId] = useState("");
+  const [searchEngineDraft, setSearchEngineDraft] = useState<MarketSearchEngineDraft>(EMPTY_SEARCH_ENGINE_DRAFT);
+  const [searchEngineDraftError, setSearchEngineDraftError] = useState("");
   const searchSelectorButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const fallbackProviderId = props.defaultLlmProviderId || props.llmProviders[0]?.id || "";
   const analysisEngineValue = props.marketAnalysisConfig.analysisEngine || fallbackProviderId;
   const analysisEngineSelectValue = analysisEngineValue || "__none__";
+  const fallbackSearchEngineId = props.defaultMarketSearchEngineId || props.marketSearchEngines[0]?.id || "";
+  const searchEngineValue = props.marketAnalysisConfig.searchEngine || fallbackSearchEngineId || "default";
+  const searchEngineSelectValue = searchEngineValue || "default";
   const hasProviderOptions = props.llmProviders.length > 0;
+  const hasSearchEngineOptions = props.marketSearchEngines.length > 0;
   const isKnownAnalysisProvider = props.llmProviders.some((item) => item.id === analysisEngineValue);
+  const isKnownSearchEngine = props.marketSearchEngines.some((item) => item.id === searchEngineValue);
 
   const updateSelectorPosition = useCallback(() => {
     if (openSearchSelectorIndex === null) {
@@ -92,6 +127,84 @@ export function MarketSection(props: MarketSectionProps) {
     }
   }, [openSearchSelectorIndex, props.marketSearchResults]);
 
+  function updateSearchEngineDraft<K extends keyof MarketSearchEngineDraft>(
+    key: K,
+    value: MarketSearchEngineDraft[K]
+  ): void {
+    setSearchEngineDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function startCreateSearchEngine(): void {
+    setEditingSearchEngineId("");
+    setSearchEngineDraft({
+      ...EMPTY_SEARCH_ENGINE_DRAFT,
+      apiKey: searchEngineDraft.apiKey
+    });
+    setSearchEngineDraftError("");
+  }
+
+  function startEditSearchEngine(engine: MarketSearchEngineProfile): void {
+    setEditingSearchEngineId(engine.id);
+    setSearchEngineDraft({
+      id: engine.id,
+      name: engine.name,
+      endpoint: engine.config.endpoint,
+      apiKey: engine.config.apiKey,
+      engine: engine.config.engine,
+      hl: engine.config.hl,
+      gl: engine.config.gl,
+      num: String(engine.config.num),
+      querySuffix: engine.config.querySuffix,
+      enabled: engine.enabled
+    });
+    setSearchEngineDraftError("");
+  }
+
+  function handleSaveSearchEngine(): void {
+    const normalizedId = normalizeSearchEngineId(searchEngineDraft.id);
+    const normalizedName = searchEngineDraft.name.trim();
+    const num = Number(searchEngineDraft.num);
+    if (!normalizedId) {
+      setSearchEngineDraftError("Search Engine id 不能为空");
+      return;
+    }
+    if (!normalizedName) {
+      setSearchEngineDraftError("Search Engine 名称不能为空");
+      return;
+    }
+    if (!Number.isFinite(num) || num <= 0) {
+      setSearchEngineDraftError("num 必须是正整数");
+      return;
+    }
+    setSearchEngineDraftError("");
+    props.onUpsertMarketSearchEngine({
+      id: normalizedId,
+      name: normalizedName,
+      type: "serpapi",
+      enabled: searchEngineDraft.enabled,
+      config: {
+        endpoint: searchEngineDraft.endpoint.trim() || "https://serpapi.com/search.json",
+        apiKey: searchEngineDraft.apiKey.trim(),
+        engine: searchEngineDraft.engine.trim() || "google_news",
+        hl: searchEngineDraft.hl.trim() || "zh-cn",
+        gl: searchEngineDraft.gl.trim() || "cn",
+        num: Math.max(1, Math.min(20, Math.floor(num))),
+        querySuffix: searchEngineDraft.querySuffix.trim() || "基金 公告 经理 申赎 风险"
+      }
+    });
+  }
+
+  function handleDeleteSearchEngine(engineId: string): void {
+    const confirmed = window.confirm(`确认删除 Search Engine "${engineId}" 吗？`);
+    if (!confirmed) {
+      return;
+    }
+    props.onDeleteMarketSearchEngine(engineId);
+    if (editingSearchEngineId === engineId) {
+      startCreateSearchEngine();
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -101,7 +214,7 @@ export function MarketSection(props: MarketSectionProps) {
       <CardContent className="space-y-4">
         <div className="space-y-3 rounded-md border border-border p-3">
           <h3 className="text-sm font-medium">分析引擎配置</h3>
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-5">
             <div className="space-y-1.5">
               <Label>Asset Type</Label>
               <Select value={props.marketAnalysisConfig.assetType} onValueChange={(value) => props.onMarketAssetTypeChange(value as MarketAnalysisAssetType)}>
@@ -142,6 +255,36 @@ export function MarketSection(props: MarketSectionProps) {
               </Select>
               <p className="text-xs text-muted-foreground">
                 直接选择 LLM provider；旧配置值会显示为 legacy，可切换到 provider id 完成迁移。
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>News Search Engine</Label>
+              <Select
+                value={searchEngineSelectValue}
+                onValueChange={(value) => props.onMarketSearchEngineChange(value)}
+                disabled={!hasSearchEngineOptions}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="选择新闻检索引擎" />
+                </SelectTrigger>
+                <SelectContent>
+                  {props.marketSearchEngines.length === 0 ? (
+                    <SelectItem value="default" disabled>暂无 Search Engine，请先在下方新增</SelectItem>
+                  ) : (
+                    props.marketSearchEngines.map((engine) => (
+                      <SelectItem key={engine.id} value={engine.id}>
+                        {engine.name}（{engine.id} / {engine.type}）
+                      </SelectItem>
+                    ))
+                  )}
+                  {!isKnownSearchEngine && searchEngineValue ? (
+                    <SelectItem value={searchEngineValue}>{searchEngineValue}（legacy）</SelectItem>
+                  ) : null}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                选择基金新闻检索引擎（SerpAPI 可配置多套 key/endpoint）。
               </p>
             </div>
 
@@ -242,6 +385,170 @@ export function MarketSection(props: MarketSectionProps) {
             >
               {props.savingMarketAnalysisConfig ? "保存中..." : "保存分析引擎配置"}
             </Button>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-md border border-border p-3">
+          <h3 className="text-sm font-medium">News Search Engine Profiles</h3>
+          <div className="grid gap-3 md:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-id">id</Label>
+              <Input
+                id="market-search-engine-id"
+                value={searchEngineDraft.id}
+                onChange={(event) => updateSearchEngineDraft("id", event.target.value)}
+                placeholder="serpapi-main"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-name">name</Label>
+              <Input
+                id="market-search-engine-name"
+                value={searchEngineDraft.name}
+                onChange={(event) => updateSearchEngineDraft("name", event.target.value)}
+                placeholder="SerpAPI Main"
+              />
+            </div>
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="market-search-engine-endpoint">endpoint</Label>
+              <Input
+                id="market-search-engine-endpoint"
+                value={searchEngineDraft.endpoint}
+                onChange={(event) => updateSearchEngineDraft("endpoint", event.target.value)}
+                placeholder="https://serpapi.com/search.json"
+              />
+            </div>
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="market-search-engine-apikey">apiKey</Label>
+              <Input
+                id="market-search-engine-apikey"
+                value={searchEngineDraft.apiKey}
+                onChange={(event) => updateSearchEngineDraft("apiKey", event.target.value)}
+                placeholder="serpapi key"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-engine">engine</Label>
+              <Input
+                id="market-search-engine-engine"
+                value={searchEngineDraft.engine}
+                onChange={(event) => updateSearchEngineDraft("engine", event.target.value)}
+                placeholder="google_news"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-num">num</Label>
+              <Input
+                id="market-search-engine-num"
+                type="number"
+                min={1}
+                max={20}
+                value={searchEngineDraft.num}
+                onChange={(event) => updateSearchEngineDraft("num", event.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-hl">hl</Label>
+              <Input
+                id="market-search-engine-hl"
+                value={searchEngineDraft.hl}
+                onChange={(event) => updateSearchEngineDraft("hl", event.target.value)}
+                placeholder="zh-cn"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="market-search-engine-gl">gl</Label>
+              <Input
+                id="market-search-engine-gl"
+                value={searchEngineDraft.gl}
+                onChange={(event) => updateSearchEngineDraft("gl", event.target.value)}
+                placeholder="cn"
+              />
+            </div>
+            <div className="space-y-1.5 md:col-span-3">
+              <Label htmlFor="market-search-engine-query-suffix">querySuffix</Label>
+              <Input
+                id="market-search-engine-query-suffix"
+                value={searchEngineDraft.querySuffix}
+                onChange={(event) => updateSearchEngineDraft("querySuffix", event.target.value)}
+                placeholder="基金 公告 经理 申赎 风险"
+              />
+            </div>
+            <div className="flex items-end">
+              <div className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2">
+                <Label htmlFor="market-search-engine-enabled" className="text-xs">enabled</Label>
+                <Switch
+                  id="market-search-engine-enabled"
+                  checked={searchEngineDraft.enabled}
+                  onCheckedChange={(value) => updateSearchEngineDraft("enabled", value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {searchEngineDraftError ? (
+            <p className="text-xs text-red-500">{searchEngineDraftError}</p>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={handleSaveSearchEngine}
+              disabled={props.savingMarketSearchEngine}
+            >
+              {props.savingMarketSearchEngine ? "保存中..." : (editingSearchEngineId ? "更新 Search Engine" : "新增 Search Engine")}
+            </Button>
+            <Button type="button" variant="outline" onClick={startCreateSearchEngine}>
+              新建草稿
+            </Button>
+            <Button type="button" variant="secondary" onClick={props.onRefreshMarketSearchEngines}>
+              刷新列表
+            </Button>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            {props.marketSearchEngines.length === 0 ? (
+              <div className="text-xs text-muted-foreground">暂无 Search Engine 配置</div>
+            ) : (
+              props.marketSearchEngines.map((engine) => (
+                <div key={engine.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+                  <div className="space-y-0.5">
+                    <div className="text-sm font-medium">
+                      {engine.name}（{engine.id}）
+                      {engine.id === props.defaultMarketSearchEngineId ? " [default]" : ""}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      type={engine.type} | endpoint={engine.config.endpoint} | enabled={String(engine.enabled)}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => startEditSearchEngine(engine)}>
+                      编辑
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => props.onSetDefaultMarketSearchEngine(engine.id)}
+                      disabled={engine.id === props.defaultMarketSearchEngineId || props.savingMarketSearchEngine}
+                    >
+                      设为默认
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => handleDeleteSearchEngine(engine.id)}
+                      disabled={props.marketSearchEngines.length <= 1 || props.deletingMarketSearchEngineId === engine.id}
+                    >
+                      {props.deletingMarketSearchEngineId === engine.id ? "删除中..." : "删除"}
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
@@ -604,4 +911,13 @@ export function MarketSection(props: MarketSectionProps) {
       </CardContent>
     </Card>
   );
+}
+
+function normalizeSearchEngineId(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
 }

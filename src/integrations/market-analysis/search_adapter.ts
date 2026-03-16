@@ -1,8 +1,14 @@
 import { FundNewsItem } from "./fund_types";
+import {
+  MarketSearchEngineProfile,
+  getMarketSearchEngineProfile,
+  resolveMarketSearchEngineSelector
+} from "./search_engine_store";
 
 export type FundNewsSearchInput = {
   fundCode: string;
   fundName: string;
+  searchEngine?: string;
   timeoutMs: number;
   maxItems: number;
 };
@@ -33,13 +39,23 @@ export async function fetchFundNews(input: FundNewsSearchInput): Promise<FundNew
     };
   }
 
-  const serpApiResult = await fetchFromSerpApi(input);
-  sourceChain.push(...serpApiResult.source_chain);
-  errors.push(...serpApiResult.errors);
+  const selectedSearchEngineId = resolveMarketSearchEngineSelector(input.searchEngine);
+  const selectedSearchEngine = getMarketSearchEngineProfile(selectedSearchEngineId);
+  if (selectedSearchEngine) {
+    sourceChain.push(`search_engine:${selectedSearchEngine.id}`);
+  } else {
+    sourceChain.push(`search_engine:missing:${selectedSearchEngineId}`);
+  }
 
-  if (serpApiResult.items.length > 0) {
+  const engineResult = selectedSearchEngine
+    ? await fetchFromSearchEngine(selectedSearchEngine, input)
+    : { items: [], source_chain: [], errors: ["search engine profile not found"] };
+  sourceChain.push(...engineResult.source_chain);
+  errors.push(...engineResult.errors);
+
+  if (engineResult.items.length > 0) {
     return {
-      items: serpApiResult.items.slice(0, Math.max(1, input.maxItems)),
+      items: engineResult.items.slice(0, Math.max(1, input.maxItems)),
       source_chain: sourceChain,
       errors
     };
@@ -65,28 +81,63 @@ export async function fetchFundNews(input: FundNewsSearchInput): Promise<FundNew
   };
 }
 
-async function fetchFromSerpApi(input: FundNewsSearchInput): Promise<FundNewsSearchResult> {
-  const apiKey = String(process.env.SERPAPI_KEY || "").trim();
-  if (!apiKey) {
+async function fetchFromSearchEngine(
+  profile: MarketSearchEngineProfile,
+  input: FundNewsSearchInput
+): Promise<FundNewsSearchResult> {
+  if (!profile.enabled) {
     return {
       items: [],
-      source_chain: [],
-      errors: ["missing SERPAPI_KEY"]
+      source_chain: [`search_engine:${profile.id}:disabled`],
+      errors: []
     };
   }
 
-  const endpoint = String(process.env.SERPAPI_ENDPOINT || "https://serpapi.com/search.json").trim();
-  const queryParts = [input.fundName, input.fundCode, "基金 公告 经理 申赎 风险"]
+  if (profile.type === "serpapi") {
+    return fetchFromSerpApiProfile(profile, input);
+  }
+
+  return {
+    items: [],
+    source_chain: [`search_engine:${profile.id}:unsupported_type`],
+    errors: [`unsupported search engine type: ${String(profile.type || "")}`]
+  };
+}
+
+async function fetchFromSerpApiProfile(
+  profile: MarketSearchEngineProfile,
+  input: FundNewsSearchInput
+): Promise<FundNewsSearchResult> {
+  const apiKey = String(profile.config.apiKey || "").trim();
+  if (!apiKey) {
+    return {
+      items: [],
+      source_chain: ["serpapi:disabled_no_key"],
+      errors: []
+    };
+  }
+
+  const endpoint = String(profile.config.endpoint || "https://serpapi.com/search.json").trim();
+  const querySuffix = String(profile.config.querySuffix || "基金 公告 经理 申赎 风险").trim();
+  const queryParts = [input.fundName, input.fundCode, querySuffix]
     .map((item) => String(item || "").trim())
     .filter(Boolean);
   const query = queryParts.join(" ");
 
   const url = new URL(endpoint);
-  url.searchParams.set("engine", "google_news");
+  const engine = String(profile.config.engine || "google_news").trim() || "google_news";
+  const hl = String(profile.config.hl || "zh-cn").trim() || "zh-cn";
+  const gl = String(profile.config.gl || "cn").trim() || "cn";
+  const configuredNum = Number(profile.config.num);
+  const normalizedNum = Number.isFinite(configuredNum) && configuredNum > 0
+    ? Math.floor(configuredNum)
+    : Math.max(5, Math.min(20, input.maxItems * 2));
+
+  url.searchParams.set("engine", engine);
   url.searchParams.set("q", query);
-  url.searchParams.set("hl", "zh-cn");
-  url.searchParams.set("gl", "cn");
-  url.searchParams.set("num", String(Math.max(5, Math.min(20, input.maxItems * 2))));
+  url.searchParams.set("hl", hl);
+  url.searchParams.set("gl", gl);
+  url.searchParams.set("num", String(Math.max(1, Math.min(20, normalizedNum))));
   url.searchParams.set("api_key", apiKey);
 
   try {
@@ -94,13 +145,13 @@ async function fetchFromSerpApi(input: FundNewsSearchInput): Promise<FundNewsSea
     const items = normalizeSerpApiItems(payload);
     return {
       items,
-      source_chain: ["serpapi:google_news"],
+      source_chain: [`serpapi:${engine}`],
       errors: []
     };
   } catch (error) {
     return {
       items: [],
-      source_chain: ["serpapi:google_news"],
+      source_chain: [`serpapi:${engine}`],
       errors: [error instanceof Error ? error.message : String(error)]
     };
   }

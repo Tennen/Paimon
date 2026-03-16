@@ -10,6 +10,7 @@ export type MarketAnalysisConfig = {
   version: 1;
   assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
+  searchEngine: string;
   gptPlugin: {
     timeoutMs: number;
     fallbackToLocal: boolean;

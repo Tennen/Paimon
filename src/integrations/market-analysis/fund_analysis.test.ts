@@ -9,6 +9,7 @@ const baseConfig: MarketAnalysisConfig = {
   version: 1,
   assetType: "fund",
   analysisEngine: "local",
+  searchEngine: "default",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true

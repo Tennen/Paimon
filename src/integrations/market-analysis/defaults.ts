@@ -17,6 +17,7 @@ export const DEFAULT_ANALYSIS_CONFIG = {
   version: 1,
   assetType: "equity",
   analysisEngine: "local",
+  searchEngine: "default",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true

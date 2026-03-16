@@ -94,7 +94,8 @@ export async function runFundAnalysis(input: RunFundAnalysisInput): Promise<RunF
     const ingestion = await collectRawContext(identity, {
       lookbackDays,
       timeoutMs: DEFAULT_TIMEOUT_MS,
-      accountCash: input.portfolio.cash
+      accountCash: input.portfolio.cash,
+      searchEngine: input.analysisConfig.searchEngine
     });
     auditSteps.push(ingestion.auditStep);
     if (ingestion.raw.errors.length > 0) {
@@ -271,7 +272,7 @@ function buildFundIdentity(holding: {
 
 async function collectRawContext(
   identity: FundIdentity,
-  options: { lookbackDays: number; timeoutMs: number; accountCash: number }
+  options: { lookbackDays: number; timeoutMs: number; accountCash: number; searchEngine: string }
 ): Promise<{ raw: FundRawContext; auditStep: FundAuditStep }> {
   const start = Date.now();
   const sourceChain: string[] = [];
@@ -292,6 +293,7 @@ async function collectRawContext(
   const news = await fetchFundNews({
     fundCode: identity.fund_code,
     fundName: identity.fund_name,
+    searchEngine: options.searchEngine,
     timeoutMs: options.timeoutMs,
     maxItems: 8
   });
@@ -361,27 +363,32 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
   const retryMax = clampInt(input.analysisConfig.fund.llmRetryMax, 1, 3, 1);
   const providerSelection = normalizeFundLlmProvider(input.analysisConfig.analysisEngine);
   const provider = providerSelection.providerLabel;
+  const systemPrompt = buildFundSystemPrompt();
+  const baseUserPrompt = buildFundUserPrompt({
+    raw: input.raw,
+    features: input.feature,
+    rules: input.rules
+  });
 
   let lastRawText = "";
   const errors: string[] = [];
+  let currentUserPrompt = baseUserPrompt;
 
   for (let attempt = 0; attempt <= retryMax; attempt += 1) {
-    const prompt = {
-      system: buildFundSystemPrompt(),
-      user: buildFundUserPrompt({
-        raw: input.raw,
-        features: input.feature,
-        rules: input.rules
-      })
-    };
-
     try {
-      const llmResponse = await generateWithConfiguredProvider(prompt.system, prompt.user, providerSelection.selector);
+      const llmResponse = await generateWithConfiguredProvider(
+        systemPrompt,
+        currentUserPrompt,
+        providerSelection.selector
+      );
 
       lastRawText = llmResponse.text;
       const parsed = parseDashboardFromText(lastRawText);
       if (!parsed) {
         errors.push(`attempt_${attempt + 1}: invalid_json`);
+        if (attempt < retryMax) {
+          currentUserPrompt = buildDashboardRepairUserPrompt(baseUserPrompt, lastRawText, ["invalid_json"]);
+        }
         continue;
       }
 
@@ -389,6 +396,11 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
       if (!validated.isValid) {
         errors.push(`attempt_${attempt + 1}: missing_fields:${validated.missingFields.join(",")}`);
         if (attempt < retryMax) {
+          currentUserPrompt = buildDashboardRepairUserPrompt(
+            baseUserPrompt,
+            lastRawText,
+            validated.missingFields.map((field) => `missing_field:${field}`)
+          );
           continue;
         }
       }
@@ -410,6 +422,27 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
     provider,
     errors
   };
+}
+
+function buildDashboardRepairUserPrompt(basePrompt: string, previousOutput: string, issues: string[]): string {
+  const payload = {
+    repair_mode: true,
+    issues,
+    requirements: [
+      "仅输出一个完整 JSON 对象",
+      "必须覆盖 FundDecisionDashboard 全部字段",
+      "若数据不足必须写 insufficient_data",
+      "decision_type 不能与 blocked_actions 冲突"
+    ],
+    previous_output_excerpt: truncateText(previousOutput, 2400)
+  };
+
+  return [
+    basePrompt,
+    "",
+    "# 修复任务",
+    JSON.stringify(payload, null, 2)
+  ].join("\n");
 }
 
 async function generateWithConfiguredProvider(
@@ -1146,6 +1179,17 @@ function extractFirstJsonObject(text: string): string {
     return "";
   }
   return text.slice(start, end + 1).trim();
+}
+
+function truncateText(input: string, maxLength: number): string {
+  const source = String(input || "").trim();
+  if (!source) {
+    return "";
+  }
+  if (source.length <= maxLength) {
+    return source;
+  }
+  return `${source.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function normalizePrice(value: unknown): number {

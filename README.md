@@ -265,6 +265,14 @@ STT_FAST_WHISPER_MODEL=small
 
 基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
 
+基金路径的微信文本输出会按单基金展示：
+
+- 决策动作、评分、置信度
+- 核心结论、执行建议与仓位调整提示
+- 关键指标摘要（如 `ret20d`、`maxDD`、`excess20d`、`coverage`）
+- 风险提示与数据完整性标记
+- 新闻检索状态（`SerpAPI 命中/未命中/未启用`，以及回退新闻源状态）
+
 持仓字段说明（Admin 与持久化一致）：
 
 - `code` 必填
@@ -304,6 +312,21 @@ MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 ```
 
 `SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置（优先使用 Provider 配置页统一管理）。
+
+当 `SERPAPI_KEY` 未配置时，基金流程不会中断，会在审计链路中标记 `serpapi:disabled_no_key` 并继续走回退新闻源（若已配置 `MARKET_ANALYSIS_NEWS_API`）。
+
+Admin 侧新增 `News Search Engine Profiles`：
+
+- 支持维护多套 SerpAPI 配置（`id/name/enabled/endpoint/apiKey/engine/hl/gl/num/querySuffix`）
+- `Market Analysis` 配置新增 `News Search Engine` 选择器，可绑定具体 profile
+- 默认 profile 持久化在 `market-analysis/search-engines.json`
+
+相关接口：
+
+- `GET /admin/api/search-engines`
+- `PUT /admin/api/search-engines`
+- `POST /admin/api/search-engines/default`
+- `DELETE /admin/api/search-engines/:id`
 
 如果只是先把服务跑起来，核心是先保证：
 

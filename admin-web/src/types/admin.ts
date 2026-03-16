@@ -138,8 +138,40 @@ export type LLMProvidersPayload = {
   defaultProvider: LLMProviderProfile;
 };
 
+export type MarketSearchEngineType = "serpapi";
+
+export type SerpApiMarketSearchEngineConfig = {
+  endpoint: string;
+  apiKey: string;
+  engine: string;
+  hl: string;
+  gl: string;
+  num: number;
+  querySuffix: string;
+};
+
+export type MarketSearchEngineProfile = {
+  id: string;
+  name: string;
+  type: MarketSearchEngineType;
+  enabled: boolean;
+  config: SerpApiMarketSearchEngineConfig;
+};
+
+export type MarketSearchEngineStore = {
+  version: number;
+  defaultEngineId: string;
+  engines: MarketSearchEngineProfile[];
+};
+
+export type MarketSearchEnginesPayload = {
+  store: MarketSearchEngineStore;
+  defaultEngine: MarketSearchEngineProfile;
+};
+
 export type AdminConfig = {
   llmProviders?: LLMProvidersPayload;
+  searchEngines?: MarketSearchEnginesPayload;
   model: string;
   planningModel: string;
   planningTimeoutMs: string;
@@ -222,6 +254,7 @@ export type MarketAnalysisConfig = {
   version: 1;
   assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
+  searchEngine: string;
   gptPlugin: {
     timeoutMs: number;
     fallbackToLocal: boolean;
@@ -291,11 +324,16 @@ export type MarketSectionProps = {
   marketConfig: MarketConfig | null;
   marketPortfolio: MarketPortfolio;
   marketAnalysisConfig: MarketAnalysisConfig;
+  marketSearchEngineStore: MarketSearchEngineStore | null;
+  marketSearchEngines: MarketSearchEngineProfile[];
+  defaultMarketSearchEngineId: string;
   llmProviders: LLMProviderProfile[];
   defaultLlmProviderId: string;
   marketRuns: MarketRunSummary[];
   savingMarketPortfolio: boolean;
   savingMarketAnalysisConfig: boolean;
+  savingMarketSearchEngine: boolean;
+  deletingMarketSearchEngineId: string;
   marketFundSaveStates: Array<"saved" | "dirty" | "saving">;
   bootstrappingMarketTasks: boolean;
   runningMarketOncePhase: MarketPhase | null;
@@ -312,6 +350,11 @@ export type MarketSectionProps = {
   onCashChange: (value: number) => void;
   onMarketAssetTypeChange: (value: MarketAnalysisAssetType) => void;
   onMarketAnalysisEngineChange: (value: MarketAnalysisEngine) => void;
+  onMarketSearchEngineChange: (value: string) => void;
+  onUpsertMarketSearchEngine: (engine: MarketSearchEngineProfile) => void;
+  onDeleteMarketSearchEngine: (engineId: string) => void;
+  onSetDefaultMarketSearchEngine: (engineId: string) => void;
+  onRefreshMarketSearchEngines: () => void;
   onMarketGptPluginTimeoutMsChange: (value: number) => void;
   onMarketGptPluginFallbackToLocalChange: (value: boolean) => void;
   onMarketFundEnabledChange: (value: boolean) => void;
@@ -645,6 +688,7 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
   assetType: "equity",
   analysisEngine: "local",
+  searchEngine: "default",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true

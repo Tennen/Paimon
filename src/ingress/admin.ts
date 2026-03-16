@@ -56,6 +56,14 @@ import {
   setDefaultLLMProvider,
   upsertLLMProviderProfile
 } from "../engines/llm/provider_store";
+import {
+  deleteMarketSearchEngineProfile,
+  getDefaultMarketSearchEngineProfile,
+  readMarketSearchEngineStore,
+  resolveMarketSearchEngineSelector,
+  setDefaultMarketSearchEngine,
+  upsertMarketSearchEngineProfile
+} from "../integrations/market-analysis/search_engine_store";
 
 const execAsync = promisify(exec);
 
@@ -99,6 +107,7 @@ type MarketAnalysisConfig = {
   version: 1;
   assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
+  searchEngine: string;
   gptPlugin: MarketGptPluginConfig;
   fund: MarketFundAnalysisConfig;
 };
@@ -201,6 +210,7 @@ const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
   assetType: "equity",
   analysisEngine: "local",
+  searchEngine: "default",
   gptPlugin: {
     timeoutMs: 20000,
     fallbackToLocal: true
@@ -252,11 +262,17 @@ export class AdminIngressAdapter implements IngressAdapter {
       const codexConfig = this.codexConfigService.getConfig();
       const llmProviderStore = readLLMProviderStore();
       const defaultLLMProvider = getDefaultLLMProviderProfile();
+      const marketSearchEngineStore = readMarketSearchEngineStore();
+      const defaultMarketSearchEngine = getDefaultMarketSearchEngineProfile();
       const thinkingBudgetDefault = getEnvValue(envPath, "LLM_THINKING_BUDGET");
       res.json({
         llmProviders: {
           store: llmProviderStore,
           defaultProvider: defaultLLMProvider
+        },
+        searchEngines: {
+          store: marketSearchEngineStore,
+          defaultEngine: defaultMarketSearchEngine
         },
         model: this.envStore.getModel(),
         planningModel: getEnvValue(envPath, "OLLAMA_PLANNING_MODEL"),
@@ -535,6 +551,104 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({
           ok: false,
           error: (error as Error).message ?? "failed to delete llm provider"
+        });
+      }
+    });
+
+    app.get("/admin/api/search-engines", (_req: Request, res: ExResponse) => {
+      try {
+        const store = readMarketSearchEngineStore();
+        res.json({
+          ok: true,
+          store,
+          defaultEngine: getDefaultMarketSearchEngineProfile()
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to read market search engines"
+        });
+      }
+    });
+
+    app.put("/admin/api/search-engines", (req: Request, res: ExResponse) => {
+      const body = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const enginePayload = "engine" in body ? body.engine : body;
+      const defaultEngineId = typeof body.defaultEngineId === "string"
+        ? body.defaultEngineId.trim()
+        : "";
+
+      try {
+        upsertMarketSearchEngineProfile(enginePayload);
+        if (defaultEngineId) {
+          setDefaultMarketSearchEngine(defaultEngineId);
+        }
+        res.json({
+          ok: true,
+          store: readMarketSearchEngineStore(),
+          defaultEngine: getDefaultMarketSearchEngineProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to upsert market search engine"
+        });
+      }
+    });
+
+    app.post("/admin/api/search-engines/default", (req: Request, res: ExResponse) => {
+      const body = req.body && typeof req.body === "object"
+        ? req.body as Record<string, unknown>
+        : {};
+      const engineId = typeof body.engineId === "string"
+        ? body.engineId.trim()
+        : (typeof body.id === "string" ? body.id.trim() : "");
+      if (!engineId) {
+        res.status(400).json({
+          ok: false,
+          error: "engineId is required"
+        });
+        return;
+      }
+
+      try {
+        setDefaultMarketSearchEngine(engineId);
+        res.json({
+          ok: true,
+          store: readMarketSearchEngineStore(),
+          defaultEngine: getDefaultMarketSearchEngineProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to set default market search engine"
+        });
+      }
+    });
+
+    app.delete("/admin/api/search-engines/:id", (req: Request, res: ExResponse) => {
+      const engineId = String(req.params.id ?? "").trim();
+      if (!engineId) {
+        res.status(400).json({
+          ok: false,
+          error: "engine id is required"
+        });
+        return;
+      }
+
+      try {
+        deleteMarketSearchEngineProfile(engineId);
+        res.json({
+          ok: true,
+          store: readMarketSearchEngineStore(),
+          defaultEngine: getDefaultMarketSearchEngineProfile()
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to delete market search engine"
         });
       }
     });
@@ -1150,6 +1264,7 @@ export class AdminIngressAdapter implements IngressAdapter {
       const hasPortfolio = "portfolio" in payload || "funds" in payload || "cash" in payload;
       const hasConfig = "config" in payload
         || "analysisEngine" in payload
+        || "searchEngine" in payload
         || "assetType" in payload
         || "gptPlugin" in payload
         || "fund" in payload;
@@ -2280,6 +2395,8 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
   const assetType: MarketAnalysisAssetType = assetTypeRaw === "fund" ? "fund" : "equity";
   const engineRaw = typeof source.analysisEngine === "string" ? source.analysisEngine.trim().toLowerCase() : "";
   const analysisEngine: MarketAnalysisEngine = normalizeMarketAnalysisEngine(engineRaw);
+  const searchEngineRaw = typeof source.searchEngine === "string" ? source.searchEngine.trim().toLowerCase() : "";
+  const searchEngine = normalizeMarketSearchEngine(searchEngineRaw);
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin as Record<string, unknown>
     : {};
@@ -2305,6 +2422,7 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
     version: 1,
     assetType,
     analysisEngine,
+    searchEngine,
     gptPlugin: {
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0
         ? Math.floor(timeoutMs)
@@ -2434,6 +2552,10 @@ function normalizeMarketAnalysisEngine(raw: unknown): string {
     return "gemini";
   }
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
+}
+
+function normalizeMarketSearchEngine(raw: unknown): string {
+  return resolveMarketSearchEngineSelector(raw);
 }
 
 function normalizeDailyTime(raw: string): string | null {
@@ -2814,6 +2936,7 @@ function ensureMarketStorage(): void {
   registerStore(MARKET_CONFIG_STORE, () => DEFAULT_MARKET_ANALYSIS_CONFIG);
   registerStore(MARKET_STATE_STORE, () => buildDefaultMarketState());
   registerStore(DATA_STORE.MARKET_RUNS, () => ({ version: 1, runs: {} }));
+  readMarketSearchEngineStore();
 }
 
 function roundTo(value: number, digits: number): number {

@@ -275,6 +275,10 @@ export function normalizeAnalysisConfig(input) {
     ? source.analysisEngine.trim().toLowerCase()
     : "";
   const analysisEngine = normalizeMarketAnalysisEngine(engineRaw);
+  const searchEngineRaw = typeof source.searchEngine === "string"
+    ? source.searchEngine.trim().toLowerCase()
+    : "";
+  const searchEngine = normalizeMarketSearchEngine(searchEngineRaw);
 
   const gptPlugin = source.gptPlugin && typeof source.gptPlugin === "object"
     ? source.gptPlugin
@@ -309,6 +313,7 @@ export function normalizeAnalysisConfig(input) {
     version: 1,
     assetType,
     analysisEngine,
+    searchEngine,
     gptPlugin: {
       timeoutMs,
       fallbackToLocal
@@ -335,6 +340,17 @@ function normalizeMarketAnalysisEngine(raw: string): string {
     return "gemini";
   }
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
+}
+
+function normalizeMarketSearchEngine(raw: string): string {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value || value === "default" || value === "auto" || value === "local") {
+    return "default";
+  }
+  if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
+    return "serpapi";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
 
 export function buildDefaultState() {

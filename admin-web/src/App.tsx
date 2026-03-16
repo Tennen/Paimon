@@ -34,6 +34,8 @@ import {
   MarketPortfolioImportResponse,
   MarketRunOnceResponse,
   MarketRunSummary,
+  MarketSearchEngineProfile,
+  MarketSearchEngineStore,
   MarketSecuritySearchItem,
   LLMProviderProfile,
   LLMProviderStore,
@@ -96,8 +98,11 @@ export default function App() {
   const [users, setUsers] = useState<PushUser[]>([]);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [llmProviderStore, setLlmProviderStore] = useState<LLMProviderStore | null>(null);
+  const [marketSearchEngineStore, setMarketSearchEngineStore] = useState<MarketSearchEngineStore | null>(null);
   const [savingLLMProvider, setSavingLLMProvider] = useState(false);
   const [deletingLLMProviderId, setDeletingLLMProviderId] = useState("");
+  const [savingMarketSearchEngine, setSavingMarketSearchEngine] = useState(false);
+  const [deletingMarketSearchEngineId, setDeletingMarketSearchEngineId] = useState("");
   const [updatingMainFlowProviders, setUpdatingMainFlowProviders] = useState(false);
   const [codexDraft, setCodexDraft] = useState<CodexDraft>(EMPTY_CODEX_DRAFT);
   const [memoryDraft, setMemoryDraft] = useState<SystemMemoryDraft>(EMPTY_MEMORY_DRAFT);
@@ -169,6 +174,11 @@ export default function App() {
   const enabledUsers = useMemo(() => users.filter((user) => user.enabled), [users]);
   const llmProviders = useMemo(() => llmProviderStore?.providers ?? [], [llmProviderStore]);
   const defaultLlmProviderId = useMemo(() => resolveDefaultLlmProviderId(llmProviderStore), [llmProviderStore]);
+  const marketSearchEngines = useMemo(() => marketSearchEngineStore?.engines ?? [], [marketSearchEngineStore]);
+  const defaultMarketSearchEngineId = useMemo(
+    () => resolveDefaultMarketSearchEngineId(marketSearchEngineStore),
+    [marketSearchEngineStore]
+  );
 
   const userMap = useMemo(() => {
     return new Map(users.map((user) => [user.id, user]));
@@ -177,12 +187,14 @@ export default function App() {
   useEffect(() => {
     setMarketAnalysisConfig((prev) => {
       const nextAnalysisEngine = resolveMarketAnalysisProviderId(prev.analysisEngine, llmProviderStore);
-      if (nextAnalysisEngine === prev.analysisEngine) {
+      const nextSearchEngine = resolveMarketSearchEngineId(prev.searchEngine, marketSearchEngineStore);
+      if (nextAnalysisEngine === prev.analysisEngine && nextSearchEngine === prev.searchEngine) {
         return prev;
       }
       return {
         ...prev,
-        analysisEngine: nextAnalysisEngine
+        analysisEngine: nextAnalysisEngine,
+        searchEngine: nextSearchEngine
       };
     });
 
@@ -196,7 +208,7 @@ export default function App() {
         summaryEngine: nextSummaryEngine
       };
     });
-  }, [llmProviderStore]);
+  }, [llmProviderStore, marketSearchEngineStore]);
 
   function updateCodexDraft<K extends keyof CodexDraft>(key: K, value: CodexDraft[K]): void {
     setCodexDraft((prev) => ({ ...prev, [key]: value }));
@@ -290,6 +302,11 @@ export default function App() {
     } else {
       await loadLLMProviders();
     }
+    if (payload.searchEngines?.store) {
+      setMarketSearchEngineStore(payload.searchEngines.store);
+    } else {
+      await loadSearchEngines();
+    }
     setCodexDraft({
       model: payload.codexModel || "",
       reasoningEffort: payload.codexReasoningEffort || ""
@@ -318,6 +335,17 @@ export default function App() {
     }>("/admin/api/llm/providers");
     if (payload.store && Array.isArray(payload.store.providers)) {
       setLlmProviderStore(payload.store);
+    }
+  }
+
+  async function loadSearchEngines(): Promise<void> {
+    const payload = await request<{
+      ok: boolean;
+      store: MarketSearchEngineStore;
+      defaultEngine: MarketSearchEngineProfile;
+    }>("/admin/api/search-engines");
+    if (payload.store && Array.isArray(payload.store.engines)) {
+      setMarketSearchEngineStore(payload.store);
     }
   }
 
@@ -352,7 +380,8 @@ export default function App() {
     const analysisConfigRaw = normalizeMarketAnalysisConfig(payload.config ?? DEFAULT_MARKET_ANALYSIS_CONFIG);
     const analysisConfig = {
       ...analysisConfigRaw,
-      analysisEngine: resolveMarketAnalysisProviderId(analysisConfigRaw.analysisEngine, llmProviderStore)
+      analysisEngine: resolveMarketAnalysisProviderId(analysisConfigRaw.analysisEngine, llmProviderStore),
+      searchEngine: resolveMarketSearchEngineId(analysisConfigRaw.searchEngine, marketSearchEngineStore)
     };
     setMarketPortfolio(portfolio);
     setMarketAnalysisConfig(analysisConfig);
@@ -549,6 +578,101 @@ export default function App() {
       notifyError("保存主流程 Provider 失败", error);
     } finally {
       setUpdatingMainFlowProviders(false);
+    }
+  }
+
+  async function handleUpsertMarketSearchEngine(engine: MarketSearchEngineProfile): Promise<void> {
+    setSavingMarketSearchEngine(true);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        store: MarketSearchEngineStore;
+        defaultEngine: MarketSearchEngineProfile;
+      }>("/admin/api/search-engines", {
+        method: "PUT",
+        body: JSON.stringify({ engine })
+      });
+      setMarketSearchEngineStore(payload.store);
+      setConfig((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          searchEngines: {
+            store: payload.store,
+            defaultEngine: payload.defaultEngine
+          }
+        };
+      });
+      setNotice({ type: "success", title: "Search Engine 配置已保存" });
+    } catch (error) {
+      notifyError("保存 Search Engine 配置失败", error);
+    } finally {
+      setSavingMarketSearchEngine(false);
+    }
+  }
+
+  async function handleDeleteMarketSearchEngine(engineId: string): Promise<void> {
+    setDeletingMarketSearchEngineId(engineId);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        store: MarketSearchEngineStore;
+        defaultEngine: MarketSearchEngineProfile;
+      }>(`/admin/api/search-engines/${encodeURIComponent(engineId)}`, {
+        method: "DELETE"
+      });
+      setMarketSearchEngineStore(payload.store);
+      setConfig((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          searchEngines: {
+            store: payload.store,
+            defaultEngine: payload.defaultEngine
+          }
+        };
+      });
+      setNotice({ type: "success", title: "Search Engine 已删除" });
+    } catch (error) {
+      notifyError("删除 Search Engine 失败", error);
+    } finally {
+      setDeletingMarketSearchEngineId("");
+    }
+  }
+
+  async function handleSetDefaultMarketSearchEngine(engineId: string): Promise<void> {
+    setSavingMarketSearchEngine(true);
+    try {
+      const payload = await request<{
+        ok: boolean;
+        store: MarketSearchEngineStore;
+        defaultEngine: MarketSearchEngineProfile;
+      }>("/admin/api/search-engines/default", {
+        method: "POST",
+        body: JSON.stringify({ engineId })
+      });
+      setMarketSearchEngineStore(payload.store);
+      setConfig((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return {
+          ...prev,
+          searchEngines: {
+            store: payload.store,
+            defaultEngine: payload.defaultEngine
+          }
+        };
+      });
+      setNotice({ type: "success", title: "默认 Search Engine 已更新" });
+    } catch (error) {
+      notifyError("更新默认 Search Engine 失败", error);
+    } finally {
+      setSavingMarketSearchEngine(false);
     }
   }
 
@@ -959,6 +1083,13 @@ export default function App() {
     }));
   }
 
+  function handleMarketSearchEngineChange(value: string): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      searchEngine: value
+    }));
+  }
+
   function handleMarketGptPluginTimeoutMsChange(value: number): void {
     setMarketAnalysisConfig((prev) => ({
       ...prev,
@@ -1312,7 +1443,8 @@ export default function App() {
     const normalizedConfigRaw = normalizeMarketAnalysisConfig(marketAnalysisConfig);
     const normalizedConfig = {
       ...normalizedConfigRaw,
-      analysisEngine: resolveMarketAnalysisProviderId(normalizedConfigRaw.analysisEngine, llmProviderStore)
+      analysisEngine: resolveMarketAnalysisProviderId(normalizedConfigRaw.analysisEngine, llmProviderStore),
+      searchEngine: resolveMarketSearchEngineId(normalizedConfigRaw.searchEngine, marketSearchEngineStore)
     };
 
     setSavingMarketAnalysisConfig(true);
@@ -1326,7 +1458,8 @@ export default function App() {
       const nextConfigRaw = normalizeMarketAnalysisConfig(response.config);
       const nextConfig = {
         ...nextConfigRaw,
-        analysisEngine: resolveMarketAnalysisProviderId(nextConfigRaw.analysisEngine, llmProviderStore)
+        analysisEngine: resolveMarketAnalysisProviderId(nextConfigRaw.analysisEngine, llmProviderStore),
+        searchEngine: resolveMarketSearchEngineId(nextConfigRaw.searchEngine, marketSearchEngineStore)
       };
       setMarketAnalysisConfig(nextConfig);
       setNotice({ type: "success", title: "Market 分析引擎配置已保存" });
@@ -1915,11 +2048,16 @@ export default function App() {
               marketConfig={marketConfig}
               marketPortfolio={marketPortfolio}
               marketAnalysisConfig={marketAnalysisConfig}
+              marketSearchEngineStore={marketSearchEngineStore}
+              marketSearchEngines={marketSearchEngines}
+              defaultMarketSearchEngineId={defaultMarketSearchEngineId}
               llmProviders={llmProviders}
               defaultLlmProviderId={defaultLlmProviderId}
               marketRuns={marketRuns}
               savingMarketPortfolio={savingMarketPortfolio}
               savingMarketAnalysisConfig={savingMarketAnalysisConfig}
+              savingMarketSearchEngine={savingMarketSearchEngine}
+              deletingMarketSearchEngineId={deletingMarketSearchEngineId}
               marketFundSaveStates={marketFundSaveStates}
               bootstrappingMarketTasks={bootstrappingMarketTasks}
               runningMarketOncePhase={runningMarketOncePhase}
@@ -1936,6 +2074,11 @@ export default function App() {
               onCashChange={handleMarketCashChange}
               onMarketAssetTypeChange={handleMarketAssetTypeChange}
               onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
+              onMarketSearchEngineChange={handleMarketSearchEngineChange}
+              onUpsertMarketSearchEngine={(engine) => void handleUpsertMarketSearchEngine(engine)}
+              onDeleteMarketSearchEngine={(engineId) => void handleDeleteMarketSearchEngine(engineId)}
+              onSetDefaultMarketSearchEngine={(engineId) => void handleSetDefaultMarketSearchEngine(engineId)}
+              onRefreshMarketSearchEngines={() => void loadSearchEngines()}
               onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
               onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
               onMarketFundEnabledChange={handleMarketFundEnabledChange}
@@ -2103,6 +2246,7 @@ function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
 function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnalysisConfig {
   const assetType = config?.assetType === "fund" ? "fund" : "equity";
   const engine = normalizeMarketAnalysisEngine(config?.analysisEngine);
+  const searchEngine = normalizeMarketSearchEngine(config?.searchEngine);
   const timeoutMs = Number(config?.gptPlugin?.timeoutMs);
   const fallbackToLocal = typeof config?.gptPlugin?.fallbackToLocal === "boolean"
     ? config.gptPlugin.fallbackToLocal
@@ -2119,6 +2263,7 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
     version: 1,
     assetType,
     analysisEngine: engine,
+    searchEngine,
     gptPlugin: {
       timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.floor(timeoutMs) : DEFAULT_MARKET_ANALYSIS_CONFIG.gptPlugin.timeoutMs,
       fallbackToLocal
@@ -2219,6 +2364,17 @@ function normalizeMarketAnalysisEngine(raw: unknown): string {
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "local";
 }
 
+function normalizeMarketSearchEngine(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (!value || value === "default" || value === "auto" || value === "local") {
+    return "default";
+  }
+  if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
+    return "serpapi";
+  }
+  return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
+}
+
 function normalizeTopicSummaryEngine(raw: unknown): string {
   const value = String(raw ?? "").trim().toLowerCase();
   if (!value || value === "local" || value === "default" || value === "auto") {
@@ -2240,6 +2396,16 @@ function resolveDefaultLlmProviderId(store: LLMProviderStore | null | undefined)
   return store.providers[0].id;
 }
 
+function resolveDefaultMarketSearchEngineId(store: MarketSearchEngineStore | null | undefined): string {
+  if (!store || !Array.isArray(store.engines) || store.engines.length === 0) {
+    return "";
+  }
+  if (store.engines.some((item) => item.id === store.defaultEngineId)) {
+    return store.defaultEngineId;
+  }
+  return store.engines[0].id;
+}
+
 function resolveMarketAnalysisProviderId(raw: unknown, store: LLMProviderStore | null | undefined): string {
   const normalized = normalizeMarketAnalysisEngine(raw);
   return resolveModuleProviderId(normalized, store, { allowGeminiLegacy: true });
@@ -2248,6 +2414,26 @@ function resolveMarketAnalysisProviderId(raw: unknown, store: LLMProviderStore |
 function resolveTopicSummaryProviderId(raw: unknown, store: LLMProviderStore | null | undefined): string {
   const normalized = normalizeTopicSummaryEngine(raw);
   return resolveModuleProviderId(normalized, store);
+}
+
+function resolveMarketSearchEngineId(raw: unknown, store: MarketSearchEngineStore | null | undefined): string {
+  const normalized = normalizeMarketSearchEngine(raw);
+  if (!store || !Array.isArray(store.engines) || store.engines.length === 0) {
+    return normalized;
+  }
+
+  if (normalized === "default") {
+    return resolveDefaultMarketSearchEngineId(store) || normalized;
+  }
+  if (normalized === "serpapi") {
+    const serpApiEngineId = store.engines.find((item) => item.type === "serpapi" && item.enabled)?.id
+      ?? store.engines.find((item) => item.type === "serpapi")?.id;
+    return serpApiEngineId || resolveDefaultMarketSearchEngineId(store) || normalized;
+  }
+  if (store.engines.some((item) => item.id === normalized)) {
+    return normalized;
+  }
+  return resolveDefaultMarketSearchEngineId(store) || normalized;
 }
 
 function resolveModuleProviderId(

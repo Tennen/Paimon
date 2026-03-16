@@ -86,6 +86,18 @@ export function buildRunResponseText(result) {
   ];
 
   if (assetType === "fund" && Array.isArray(signalResult.fund_dashboards)) {
+    const fundRecords = Array.isArray(result.marketData && result.marketData.funds)
+      ? result.marketData.funds
+      : [];
+    const fundRecordMap = new Map();
+    for (const record of fundRecords) {
+      const code = String(record && record.identity && record.identity.fund_code || "").trim();
+      if (!code) {
+        continue;
+      }
+      fundRecordMap.set(code, record);
+    }
+
     if (signalResult.fund_dashboards.length === 0) {
       lines.push("基金决策: 无可用标的");
     } else {
@@ -95,17 +107,47 @@ export function buildRunResponseText(result) {
         const name = String(dashboard.fund_name || "").trim();
         const label = name && code ? `${name}(${code})` : (name || code || "-");
         const decision = String(dashboard.decision_type || "watch").trim();
+        const score = Number.isFinite(Number(dashboard.sentiment_score))
+          ? Math.round(Number(dashboard.sentiment_score))
+          : 0;
         const confidence = Number.isFinite(Number(dashboard.confidence))
           ? Number(dashboard.confidence).toFixed(2)
           : "0.00";
         const conclusion = dashboard.core_conclusion && dashboard.core_conclusion.one_sentence
           ? String(dashboard.core_conclusion.one_sentence).trim()
           : "未提供";
-        lines.push(`- ${label}: ${decision} (confidence=${confidence})`);
+        const actionSuggestion = dashboard.action_plan && dashboard.action_plan.suggestion
+          ? String(dashboard.action_plan.suggestion).trim()
+          : "";
+        const positionChange = dashboard.action_plan && dashboard.action_plan.position_change
+          ? String(dashboard.action_plan.position_change).trim()
+          : "";
+        const metricSummary = buildFundMetricSummary(dashboard);
+        const record = fundRecordMap.get(code);
+        const newsStatus = describeNewsStatus(record && record.raw_context);
+        const newsHeadline = pickTopNewsHeadline(record && record.raw_context);
+
+        lines.push(`- ${label}: ${decision} | score=${score} | confidence=${confidence}`);
         lines.push(`  结论: ${conclusion}`);
+        if (actionSuggestion || positionChange) {
+          lines.push(`  执行: ${actionSuggestion || "未提供"}${positionChange ? ` | 仓位: ${positionChange}` : ""}`);
+        }
+        if (metricSummary.length > 0) {
+          lines.push(`  关键指标: ${metricSummary.join(" | ")}`);
+        }
         const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
         if (risks.length > 0) {
           lines.push(`  风险: ${risks.join(" | ")}`);
+        }
+        if (dashboard.insufficient_data && dashboard.insufficient_data.is_insufficient) {
+          const missing = Array.isArray(dashboard.insufficient_data.missing_fields)
+            ? dashboard.insufficient_data.missing_fields.slice(0, 4).join(", ")
+            : "";
+          lines.push(`  数据完整性: 不足${missing ? ` (missing=${missing})` : ""}`);
+        }
+        lines.push(`  新闻检索: ${newsStatus}`);
+        if (newsHeadline) {
+          lines.push(`  新闻样本: ${newsHeadline}`);
         }
       }
     }
@@ -181,4 +223,122 @@ export function buildHelpText() {
     `- 状态: ${MARKET_STATE_STORE}`,
     `- 快照明细: ${MARKET_RUNS_STORE}`
   ].join("\n");
+}
+
+function buildFundMetricSummary(dashboard) {
+  const metrics = [];
+  const returns = dashboard && dashboard.data_perspective && dashboard.data_perspective.return_metrics
+    ? dashboard.data_perspective.return_metrics
+    : {};
+  const risks = dashboard && dashboard.data_perspective && dashboard.data_perspective.risk_metrics
+    ? dashboard.data_perspective.risk_metrics
+    : {};
+  const relative = dashboard && dashboard.data_perspective && dashboard.data_perspective.relative_metrics
+    ? dashboard.data_perspective.relative_metrics
+    : {};
+  const coverage = dashboard && dashboard.data_perspective
+    ? String(dashboard.data_perspective.feature_coverage || "").trim()
+    : "";
+
+  if (coverage) {
+    metrics.push(`coverage=${coverage}`);
+  }
+
+  const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
+  if (ret20d) {
+    metrics.push(`ret20d=${ret20d}`);
+  }
+  const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
+  if (ret60d) {
+    metrics.push(`ret60d=${ret60d}`);
+  }
+  const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
+  if (drawdown) {
+    metrics.push(`maxDD=${drawdown}`);
+  }
+  const volatility = formatMetricValue(risks.volatility_annualized, 2, "%", false);
+  if (volatility) {
+    metrics.push(`vol=${volatility}`);
+  }
+  const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
+  if (excess20d) {
+    metrics.push(`excess20d=${excess20d}`);
+  }
+
+  return metrics.slice(0, 5);
+}
+
+function formatMetricValue(value, digits, suffix, signed) {
+  if (value === null || value === undefined || value === "not_supported") {
+    return "";
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  const normalized = Number(numeric.toFixed(digits));
+  const prefix = signed && normalized > 0 ? "+" : "";
+  return `${prefix}${normalized}${suffix || ""}`;
+}
+
+function describeNewsStatus(rawContext) {
+  const sourceChain = Array.isArray(rawContext && rawContext.source_chain) ? rawContext.source_chain : [];
+  const errors = Array.isArray(rawContext && rawContext.errors) ? rawContext.errors : [];
+  const newsItems = rawContext && rawContext.events && Array.isArray(rawContext.events.market_news)
+    ? rawContext.events.market_news
+    : [];
+  const newsCount = newsItems.length;
+  const disabledSearchEngine = sourceChain.find((item) => /search_engine:.+:disabled$/.test(String(item || "")));
+  if (disabledSearchEngine) {
+    const engineId = String(disabledSearchEngine).replace(/^search_engine:/, "").replace(/:disabled$/, "");
+    return `Search Engine 已禁用（${engineId || "unknown"}）`;
+  }
+  const missingSearchEngine = sourceChain.find((item) => /search_engine:missing:/.test(String(item || "")));
+  if (missingSearchEngine) {
+    return `Search Engine 缺失（${String(missingSearchEngine).replace(/^search_engine:missing:/, "")}）`;
+  }
+
+  if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
+    return `使用环境变量新闻上下文 (${newsCount}条)`;
+  }
+  if (sourceChain.includes("serpapi:disabled_no_key")) {
+    return "未启用 SerpAPI（SERPAPI_KEY 未配置）";
+  }
+  const serpApiSource = sourceChain.find((item) => String(item || "").startsWith("serpapi:"));
+  if (serpApiSource) {
+    const serpApiEngine = String(serpApiSource).replace(/^serpapi:/, "") || "unknown";
+    if (newsCount > 0) {
+      return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
+    }
+    const serpError = errors.find((item) => /serpapi/i.test(String(item || "")));
+    if (serpError) {
+      return `SerpAPI 失败: ${serpError}`;
+    }
+    return `SerpAPI(${serpApiEngine}) 已调用，未命中相关新闻`;
+  }
+  const fallbackSource = sourceChain.find((item) => String(item).startsWith("fallback:"));
+  if (fallbackSource) {
+    return newsCount > 0 ? `回退新闻源命中 ${newsCount} 条` : "回退新闻源无结果";
+  }
+  const serpError = errors.find((item) => /serpapi/i.test(String(item || "")));
+  if (serpError) {
+    return `SerpAPI 失败: ${serpError}`;
+  }
+  return newsCount > 0 ? `新闻命中 ${newsCount} 条` : "未获取到相关新闻";
+}
+
+function pickTopNewsHeadline(rawContext) {
+  const newsItems = rawContext && rawContext.events && Array.isArray(rawContext.events.market_news)
+    ? rawContext.events.market_news
+    : [];
+  if (newsItems.length === 0) {
+    return "";
+  }
+  const item = newsItems[0] || {};
+  const title = String(item.title || "").trim();
+  const source = String(item.source || "").trim();
+  if (!title) {
+    return "";
+  }
+  return source ? `${title} (${source})` : title;
 }
