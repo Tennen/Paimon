@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { jsonrepair } from "jsonrepair";
-import { CodexAdapter, CodexPendingApproval, CodexRunEvent, CodexRunResult } from "./codexAdapter";
+import { CodexAdapter, CodexPendingApproval, CodexRunEvent, CodexRunResult } from "../codex/adapter";
 import { cleanNotifyText, EvolutionNotifier, formatGitLogSummary } from "./evolutionNotifier";
 import { EvolutionStateStore } from "./stateStore";
 import { TestRunner } from "./testRunner";

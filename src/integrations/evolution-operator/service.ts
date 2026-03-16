@@ -1,6 +1,6 @@
 import { EvolutionEngine } from "./evolutionEngine";
 import { EvolutionSnapshot } from "./types";
-import { CodexConfigSnapshot, EvolutionCodexConfigService, UpdateCodexConfigInput } from "./codexConfigService";
+import { CodexConfigSnapshot, CodexConfigService, UpdateCodexConfigInput } from "../codex/configService";
 
 export type EnqueueEvolutionGoalInput = {
   goal: string;
@@ -9,9 +9,9 @@ export type EnqueueEvolutionGoalInput = {
 
 export class EvolutionOperatorService {
   private readonly engine: EvolutionEngine;
-  private readonly codexConfig: EvolutionCodexConfigService;
+  private readonly codexConfig: CodexConfigService;
 
-  constructor(engine: EvolutionEngine, codexConfig: EvolutionCodexConfigService) {
+  constructor(engine: EvolutionEngine, codexConfig: CodexConfigService) {
     this.engine = engine;
     this.codexConfig = codexConfig;
   }

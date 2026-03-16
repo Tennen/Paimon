@@ -209,13 +209,16 @@ export function buildRunResponseText(result) {
 export function buildHelpText() {
   return [
     "Market Analysis 命令:",
-    "/market fund <midday|close>    运行基金分析主流程（标准化->特征->规则->LLM->JSON）",
+    "/market fund <midday|close>    运行基金分析主流程（标准化->特征->规则->LLM）",
     "/market equity <midday|close>  运行原股票信号流程",
     "/market midday         运行 13:30 盘中分析",
     "/market close          运行 15:15 收盘分析",
     "/market status         查看最近一次运行结果",
     "/market portfolio      查看当前持仓配置",
     "/market add <code> <quantity> <avgCost> [name]    添加/加仓持仓（同 code 自动加权成本）",
+    "",
+    "说明:",
+    "- 当 analysisEngine 实际 provider=codex 且启用解释时，会切换为“单次 markdown 报告”模式，并尝试生成长图推送。",
     "",
     "配置存储键:",
     `- 持仓: ${MARKET_PORTFOLIO_STORE}`,

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { resolveAnalysisAssetType, isFundAnalysisEnabled } from "./analysis_router";
+import { generateCodexMarkdownReport, shouldUseCodexMarkdownReport } from "./codex_markdown_report";
 import { fetchOptionalNewsContext, generateExplanationByProvider, isExplanationEnabled } from "./explanation";
 import { runFundAnalysis } from "./fund_analysis_service";
 import { fetchMarketData, resolveIndexCodes } from "./marketData";
@@ -13,6 +14,9 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
     requestedAssetType: options.assetType,
     analysisConfig
   });
+  const explanationEnabled = withExplanation && isExplanationEnabled();
+  const useCodexMarkdownBatch = explanationEnabled && shouldUseCodexMarkdownReport(analysisConfig.analysisEngine);
+  const useNativeExplanation = explanationEnabled && !useCodexMarkdownBatch;
 
   let marketData = null;
   let signalResult = null;
@@ -23,7 +27,7 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
     try {
       const fundResult = await runFundAnalysis({
         phase,
-        withExplanation,
+        withExplanation: useNativeExplanation,
         portfolio,
         analysisConfig
       });
@@ -72,11 +76,43 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
       optionalNewsContext = null;
     }
   } else {
-    const equityResult = await runLegacyEquityAnalysis(phase, withExplanation, portfolio, analysisConfig);
+    const equityResult = await runLegacyEquityAnalysis(phase, useNativeExplanation, portfolio, analysisConfig);
     marketData = equityResult.marketData;
     signalResult = equityResult.signalResult;
     explanation = equityResult.explanation;
     optionalNewsContext = equityResult.optionalNewsContext;
+  }
+
+  if (useCodexMarkdownBatch) {
+    try {
+      const report = await generateCodexMarkdownReport({
+        phase,
+        portfolio,
+        marketData,
+        signalResult,
+        optionalNewsContext,
+        analysisEngine: analysisConfig.analysisEngine
+      });
+
+      if (report) {
+        explanation = {
+          summary: report.summary,
+          provider: report.provider,
+          model: report.model,
+          generatedAt: report.generatedAt,
+          markdown: report.markdown,
+          inputPath: report.inputPath,
+          outputPath: report.outputPath
+        };
+      }
+    } catch (error) {
+      explanation = {
+        summary: "",
+        error: (error && error.message) ? error.message : String(error || "unknown error"),
+        generatedAt: new Date().toISOString(),
+        provider: analysisConfig.analysisEngine
+      };
+    }
   }
 
   const persisted = persistRun({

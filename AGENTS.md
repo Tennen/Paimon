@@ -38,6 +38,8 @@ This file defines hard constraints for coding agents working in this repository.
   - External system adapters and domain runtime modules.
   - Encapsulate HTTP/WebSocket/protocol details.
   - Default: no cross-domain orchestration/business workflow state.
+  - Shared codex capabilities (CLI adapter/config/markdown report runner) belong in `src/integrations/codex/`.
+  - User-facing message/media adapters (for example markdown-to-image rendering) belong in `src/integrations/user-message/`.
   - Runtime-domain exceptions currently allowed:
     - `src/integrations/evolution-operator/`
     - `src/integrations/topic-summary/`

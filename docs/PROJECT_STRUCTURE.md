@@ -22,6 +22,7 @@ src/
     stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # Outbound adapters and domain runtimes (flat by domain)
+    codex/
     chatgpt-bridge/
     evolution-operator/
     homeassistant/
@@ -33,6 +34,7 @@ src/
     system-maintenance/
     terminal/
     topic-summary/
+    user-message/
     writing-organizer/
     wecom/
   memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
@@ -58,6 +60,8 @@ data/              # Runtime data files
 - Core orchestration/runtime loop -> `src/core/` (including `src/core/re-agent/`).
 - Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
 - Third-party protocol/client adapters -> `src/integrations/<domain>/`.
+- Shared codex execution/config/markdown-report adapters -> `src/integrations/codex/`.
+- User-facing message/media adapters (markdown-to-image, response media shaping) -> `src/integrations/user-message/`.
 - Domain runtime exceptions under integrations are allowed only for explicit runtime domains:
   - `evolution-operator`
   - `topic-summary`
@@ -113,6 +117,7 @@ data/              # Runtime data files
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
 - 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责，基金输出包含动作、关键指标、风险与新闻检索状态。
+- markdown 长图渲染适配器位于 `src/integrations/user-message/markdownImageAdapter.ts`，由各业务集成按需调用（例如 market/topic-summary）。
 
 ## Structural Change Checklist
 

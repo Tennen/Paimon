@@ -17,7 +17,7 @@ import { EnvConfigStore } from "./config/envConfigStore";
 import { SchedulerService } from "./scheduler/schedulerService";
 import { AdminIngressAdapter } from "./ingress/admin";
 import { EvolutionEngine } from "./integrations/evolution-operator/evolutionEngine";
-import { EvolutionCodexConfigService } from "./integrations/evolution-operator/codexConfigService";
+import { CodexConfigService } from "./integrations/codex/configService";
 import { EvolutionOperatorService } from "./integrations/evolution-operator/service";
 import { sttRuntime } from "./engines/stt";
 import { registerSystemShortcuts } from "./core/systemShortcuts";
@@ -31,7 +31,7 @@ const skillManager = new SkillManager();
 const memoryStore = new MemoryStore();
 const envStore = new EnvConfigStore();
 const evolutionEngine = new EvolutionEngine();
-const codexConfigService = new EvolutionCodexConfigService(envStore);
+const codexConfigService = new CodexConfigService(envStore);
 const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConfigService);
 const reAgentRuntime = new ReAgentRuntime();
 

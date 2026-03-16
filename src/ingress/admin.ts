@@ -25,7 +25,7 @@ import {
 } from "../scheduler/schedulerService";
 import { ScheduledTask } from "../scheduler/taskStore";
 import { EvolutionEngine } from "../integrations/evolution-operator/evolutionEngine";
-import { EvolutionCodexConfigService } from "../integrations/evolution-operator/codexConfigService";
+import { CodexConfigService } from "../integrations/codex/configService";
 import { EvolutionOperatorService } from "../integrations/evolution-operator/service";
 import {
   addTopicSummaryProfile,
@@ -231,7 +231,7 @@ const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
 export class AdminIngressAdapter implements IngressAdapter {
   private readonly envStore: EnvConfigStore;
   private readonly scheduler: SchedulerService;
-  private readonly codexConfigService: EvolutionCodexConfigService;
+  private readonly codexConfigService: CodexConfigService;
   private readonly evolutionService?: EvolutionOperatorService;
   private readonly adminDistCandidates: string[];
   private readonly openAIQuotaManager: OpenAIQuotaManager;
@@ -245,7 +245,7 @@ export class AdminIngressAdapter implements IngressAdapter {
   ) {
     this.envStore = envStore;
     this.scheduler = scheduler;
-    this.codexConfigService = new EvolutionCodexConfigService(envStore);
+    this.codexConfigService = new CodexConfigService(envStore);
     this.evolutionService = evolutionService
       ?? (evolutionEngine ? new EvolutionOperatorService(evolutionEngine, this.codexConfigService) : undefined);
     this.adminDistCandidates = adminDistCandidates && adminDistCandidates.length > 0

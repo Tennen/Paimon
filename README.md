@@ -294,9 +294,11 @@ STT_FAST_WHISPER_MODEL=small
 `/market` 已支持双路径：
 
 - `/market equity <midday|close>`：原股票信号路径
-- `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM -> JSON）
+- `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM）
 
 基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
+
+当 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm` 时，`/market` 会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并尝试渲染长图用于推送。
 
 基金路径的微信文本输出会按单基金展示：
 

@@ -7,6 +7,7 @@ import {
   formatPortfolioAddResult,
   formatStatus
 } from "./formatters";
+import { renderMarkdownAsLongImage } from "../user-message/markdownImageAdapter";
 import { runAnalysis } from "./runtime";
 import { addPortfolioHolding, ensureStorage, readPortfolio, readState } from "./storage";
 
@@ -42,8 +43,26 @@ export async function execute(input) {
   const result = await runAnalysis(phase, withExplanation, {
     assetType
   });
+
+  let text = buildRunResponseText(result);
+  let image = null;
+  const markdownReport = String(result.explanation && result.explanation.markdown || "").trim();
+  if (markdownReport) {
+    try {
+      image = await renderMarkdownAsLongImage({
+        markdown: markdownReport,
+        title: `Market Analysis ${phase}`,
+        filenamePrefix: `market-${phase}`
+      });
+    } catch (error) {
+      const detail = (error && error.message) ? error.message : String(error || "unknown error");
+      text = `${text}\n长图生成失败: ${detail}`;
+    }
+  }
+
   return {
-    text: buildRunResponseText(result),
+    text,
+    ...(image ? { image } : {}),
     result: {
       runId: result.persisted.id,
       phase: result.signalResult.phase,
@@ -51,7 +70,8 @@ export async function execute(input) {
       marketState: result.signalResult.marketState,
       generatedAt: result.signalResult.generatedAt,
       signalResult: result.signalResult,
-      explanation: result.explanation
+      explanation: result.explanation,
+      ...(markdownReport ? { markdownReport } : {})
     }
   };
 }

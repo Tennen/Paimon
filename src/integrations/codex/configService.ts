@@ -13,7 +13,7 @@ export type UpdateCodexConfigInput = {
 
 const ALLOWED_REASONING_EFFORT = new Set(["minimal", "low", "medium", "high", "xhigh"]);
 
-export class EvolutionCodexConfigService {
+export class CodexConfigService {
   private readonly envStore: EnvConfigStore;
 
   constructor(envStore: EnvConfigStore) {
