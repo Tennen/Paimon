@@ -1,4 +1,4 @@
-import { ParsedCommand } from "./types";
+import { ParsedCommand, WritingDocumentMode } from "./types";
 import {
   normalizeStateSection,
   normalizeTopicId,
@@ -96,6 +96,28 @@ export function parseCommand(input: string): ParsedCommand {
     if (!topicId) {
       throw new Error("summarize 需要 topic-id，例如: /writing summarize relationship-boundaries");
     }
+
+    const requestedModeRaw = (
+      readFlagString(parsed.flags, "mode")
+      ?? readFlagString(parsed.flags, "doc-mode")
+      ?? parsed.positionals[1]
+      ?? ""
+    ).trim().toLowerCase();
+
+    if (requestedModeRaw) {
+      const normalizedMode = normalizeDocumentMode(requestedModeRaw);
+      if (!normalizedMode) {
+        throw new Error(
+          "summarize 的 mode 仅支持 knowledge_entry|article|memo|research_note"
+        );
+      }
+      return {
+        kind: "summarize",
+        topicId,
+        mode: normalizedMode
+      };
+    }
+
     return { kind: "summarize", topicId };
   }
 
@@ -154,4 +176,16 @@ export function parseCommand(input: string): ParsedCommand {
   }
 
   return { kind: "help" };
+}
+
+function normalizeDocumentMode(raw: string): WritingDocumentMode | null {
+  if (
+    raw === "knowledge_entry"
+    || raw === "article"
+    || raw === "memo"
+    || raw === "research_note"
+  ) {
+    return raw;
+  }
+  return null;
 }

@@ -79,7 +79,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照
 - `terminal`: 执行本机命令
 - `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
-- `writing-organizer`: 增量写作整理，支持 rolling raw 输入、summary/outline/draft 生成与上一版回滚
+- `writing-organizer`: 材料整理流水线（`Material -> Insight -> Document`），支持增量采集、结构化提炼、版本化 Markdown 文档与回滚
 - `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
@@ -122,6 +122,17 @@ npm install
 ### 2. 配置环境变量
 
 项目启动时会读取根目录 `.env`。可参考仓库内的 `.env.example` 作为模板，下面保留最小可用配置示例。
+
+#### 持久化驱动（JSON / SQLite）
+
+默认使用 JSON 文件存储。若要切换为 SQLite 主存储（`src/storage/persistence.ts` 驱动层），可配置：
+
+```env
+STORAGE_DRIVER=sqlite
+STORAGE_SQLITE_PATH=data/storage/metadata.sqlite
+```
+
+当 `STORAGE_DRIVER=sqlite` 时，业务模块仍然通过 `registerStore/getStore/setStore/appendStore` 访问存储，不需要感知底层介质。
 
 #### 使用 Ollama
 
@@ -196,7 +207,7 @@ GEMINI_PLANNING_MODEL=gemini-2.0-flash
 
 #### 多 Provider Profile（推荐）
 
-- Provider Profile 持久化存储在 `data/llm/providers.json`（storage key: `llm.providers`）
+- Provider Profile 使用 storage key `llm.providers` 持久化（`json-file` 驱动下对应 `data/llm/providers.json`）
 - 支持创建多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` profile；`gpt-plugin` 仅允许一条
 - 每条 profile 可配置对应 engine 的常用参数（baseUrl/model/planningModel/timeout/options 等）
 
@@ -416,19 +427,27 @@ Memory 规则（global hybrid memory）：
 
 ## Incremental Writing Organizer
 
-写作整理能力使用 `/writing` 直达命令，数据结构固定在 `data/writing/topics/<topic-id>/` 下：
+写作整理能力使用 `/writing` 直达命令，默认按 `Material -> Insight -> Document` 流程运行。
+
+每个 topic 的数据位于 `data/writing/topics/<topic-id>/`，结构如下：
 
 - `raw/*.md`：原始片段，rolling 存储（单文件最多 200 行）
 - `state/{summary,outline,draft}.md`：当前版本
 - `backup/*.prev.md`：上一版备份
 - `meta.json`：topic 元信息（用于命令与 admin 查询）
+- `knowledge/materials/<YYYY>/<MM>/mat_*.json`：Material 原始与清洗文本
+- `knowledge/insights/<YYYY>/<MM>/ins_*.json`：Insight 结构化提炼结果
+- `knowledge/documents/<YYYY>/<MM>/doc_*_vNNN_<mode>.md`：版本化 Document
+- `knowledge/documents/<YYYY>/<MM>/doc_*_vNNN_<mode>.meta.json`：Document metadata（`material_ids`、`version`、`path` 等）
+
+默认 `summarize` 会生成 `knowledge_entry` 模式文档；topic 标题包含 `article/memo/research` 关键词时会自动切换到对应模式。
 
 常用命令：
 
 - `/writing topics`
 - `/writing show <topic-id>`
 - `/writing append <topic-id> "一段新内容"`
-- `/writing summarize <topic-id>`
+- `/writing summarize <topic-id> [--mode knowledge_entry|article|memo|research_note]`
 - `/writing restore <topic-id>`
 - `/writing set <topic-id> <summary|outline|draft> "内容"`（手动整理）
 
@@ -437,18 +456,78 @@ Memory 规则（global hybrid memory）：
 项目默认把运行数据写入 `data/` 目录，主要包括：
 
 - 会话记忆（统一全局会话）
-- 全局双层记忆数据文件：
+- 全局双层记忆数据（`json-file` 驱动下对应文件）：
   - `data/memory/raw.json`（raw memory）
   - `data/memory/summary.json`（summary memory）
   - `data/memory/summary-index.json`（summary 向量索引）
 - 审计日志
 - 定时任务和推送用户
 - Topic Summary 配置与状态
-- Incremental Writing Organizer 主题目录、raw/state/backup 与 meta
+- Incremental Writing Organizer 主题目录、raw/state/backup、knowledge artifacts 与 meta
 - Market Analysis 配置、持仓与运行记录
 - Evolution 队列与指标
 
 持久化统一走 `src/storage/persistence.ts`，业务模块不直接依赖具体文件路径。
+
+## SQLite 部署（Persistence 主存储）
+
+如果你要把当前 JSON 持久化数据迁移到 SQLite（覆盖 `DATA_STORE` 下所有 store），使用：
+
+```bash
+npx tsx tools/migrate_persistence_to_sqlite.ts --strict
+```
+
+可选参数：
+
+- `--db <path>`：指定 SQLite 文件路径
+- `--stores a,b`：只迁移指定 store（值需来自 `DATA_STORE`）
+- `--list`：列出全部 store 定义
+
+迁移完成后，在 `.env` 设置：
+
+```env
+STORAGE_DRIVER=sqlite
+STORAGE_SQLITE_PATH=data/storage/metadata.sqlite
+```
+
+重启服务即可切换到 SQLite 驱动。
+
+## SQLite 索引部署（Writing Organizer Knowledge，可选）
+
+Writing Organizer 默认使用 JSON + Markdown 持久化。若要提升检索与统计效率，可额外部署 SQLite 元数据索引。
+
+### 1. 环境准备
+
+- Python 3.9+（需自带 `sqlite3` 标准库）
+- 可选：`sqlite3` CLI（用于手工验证）
+
+### 2. 构建 SQLite 索引
+
+```bash
+python3 tools/migrate_writing_knowledge_to_sqlite.py \
+  --topics-root data/writing/topics \
+  --db data/writing/index/metadata.sqlite
+```
+
+脚本会扫描 `knowledge/materials|insights|documents`，重建三张主表：
+
+- `materials`
+- `insights`
+- `documents`
+
+并在可用时自动重建 FTS 表（`materials_fts`、`documents_fts`）。
+
+### 3. 验证索引
+
+```bash
+sqlite3 data/writing/index/metadata.sqlite \"SELECT count(*) FROM materials;\"
+sqlite3 data/writing/index/metadata.sqlite \"SELECT count(*) FROM insights;\"
+sqlite3 data/writing/index/metadata.sqlite \"SELECT count(*) FROM documents;\"
+```
+
+### 4. 定时同步（建议）
+
+可通过 cron/systemd 定时执行上面的迁移脚本，把 JSON/Markdown 的最新内容同步到 SQLite 索引层。
 
 ## 扩展方式
 

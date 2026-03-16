@@ -7,6 +7,8 @@ This directory contains standalone scripts and bridge programs used by Paimon.
 - `fast-whisper-transcribe.py`: helper script used by `STT_PROVIDER=fast-whisper`.
 - `llama-server-daemon-macos.sh`: manage `llama-server` as a macOS launchd daemon (silent/background).
 - `market-smoke.ts`: smoke test for `market-analysis` + `chatgpt-bridge` integration.
+- `migrate_persistence_to_sqlite.ts`: migrate all `src/storage/persistence.ts` managed stores from JSON files into SQLite.
+- `migrate_writing_knowledge_to_sqlite.py`: rebuild writing-organizer SQLite metadata index from JSON/Markdown artifacts.
 - `ollama-model-to-gguf.js`: export an Ollama-downloaded GGUF blob into `~/.llm/models`.
 - `wecom-bridge.go`: production-ready WeCom callback bridge (recommended on VPS).
 - `wecom-bridge.js`: Node.js implementation of the same bridge (for quick local use).
@@ -30,6 +32,20 @@ Market smoke script:
 
 ```bash
 npx tsx tools/market-smoke.ts
+```
+
+Persistence store migration (JSON -> SQLite):
+
+```bash
+npx tsx tools/migrate_persistence_to_sqlite.ts --strict
+```
+
+Writing organizer SQLite index rebuild:
+
+```bash
+python3 tools/migrate_writing_knowledge_to_sqlite.py \
+  --topics-root data/writing/topics \
+  --db data/writing/index/metadata.sqlite
 ```
 
 llama-server daemon on macOS (silent by default):

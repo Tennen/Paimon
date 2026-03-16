@@ -12,9 +12,9 @@ export function buildHelpText(): string {
   return [
     "Incremental Writing Organizer 用法",
     "- /writing topics: 查看 topic 列表",
-    "- /writing show <topic-id>: 查看 meta + state + backup + raw 文件统计",
-    "- /writing append <topic-id> \"一段新内容\": 追加原始片段（raw rolling，单文件最多 200 行）",
-    "- /writing summarize <topic-id>: 先备份当前 state，再生成新的 summary/outline/draft",
+    "- /writing show <topic-id>: 查看 meta + state + backup + raw 文件统计 + Material/Insight/Document 产物统计",
+    "- /writing append <topic-id> \"一段新内容\": 追加原始片段并生成 Material",
+    "- /writing summarize <topic-id> [--mode knowledge_entry|article|memo|research_note]: 先备份当前 state，再执行 Material -> Insight -> Document 生成",
     "- /writing restore <topic-id>: 从 backup 恢复上一版 state",
     "- /writing set <topic-id> <summary|outline|draft> \"内容\": 手动更新某个 state 文件",
     "",
@@ -47,6 +47,16 @@ export function formatTopicDetail(detail: WritingTopicDetail): string {
     .map((file) => `- ${file.name}: ${file.lineCount} lines`)
     .join("\n") || "- (empty)";
 
+  const artifactLines = detail.artifacts
+    ? [
+      `Materials: ${detail.artifacts.materialCount}`,
+      `Insights: ${detail.artifacts.insightCount}`,
+      `Documents: ${detail.artifacts.documentCount}`,
+      `Latest Insight: ${detail.artifacts.latestInsight?.id ?? "(none)"}`,
+      `Latest Document: ${detail.artifacts.latestDocument?.id ?? "(none)"}${detail.artifacts.latestDocument ? ` @ ${detail.artifacts.latestDocument.path}` : ""}`
+    ]
+    : ["Materials: 0", "Insights: 0", "Documents: 0"];
+
   return [
     `Topic: ${detail.meta.topicId}`,
     `Title: ${detail.meta.title}`,
@@ -60,6 +70,9 @@ export function formatTopicDetail(detail: WritingTopicDetail): string {
     "Backup Preview:",
     formatStatePreview(detail.backup),
     "",
+    "Artifacts:",
+    artifactLines.join("\n"),
+    "",
     "Raw Files:",
     rawLines
   ].join("\n");
@@ -69,7 +82,8 @@ export function formatAppendResult(result: WritingAppendResult): string {
   return [
     `已追加 ${result.appendedLines} 行到 topic ${result.topicId}`,
     `当前 raw 文件: ${result.latestRawFile}`,
-    `raw 统计: ${result.meta.rawFileCount} files / ${result.meta.rawLineCount} lines`
+    `raw 统计: ${result.meta.rawFileCount} files / ${result.meta.rawLineCount} lines`,
+    `material: ${result.materialIds?.join(", ") ?? "(none)"}`
   ].join("\n");
 }
 
@@ -78,6 +92,9 @@ export function formatSummarizeResult(result: WritingSummarizeResult): string {
     `topic ${result.topicId} summarize 完成`,
     `生成时间: ${result.generatedAt}`,
     `raw 行数: ${result.rawLineCount}`,
+    `material 数量: ${result.materialCount ?? 0}`,
+    `文档模式: ${result.mode ?? "knowledge_entry"}`,
+    `文档路径: ${result.document?.path ?? "(none)"}`,
     "",
     "Summary Preview:",
     previewText(result.state.summary),
