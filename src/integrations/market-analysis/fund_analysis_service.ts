@@ -1286,9 +1286,15 @@ function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const SENSITIVE_QUERY_KEYS = new Set(["api_key", "apikey", "token", "access_token", "auth", "authorization", "key", "secret"]);
+
 async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  const target = toSafeLogUrl(url);
+
+  console.log(`[MarketAnalysis][HTTP][fund] request GET ${target} timeout=${timeoutMs}ms`);
 
   try {
     const response = await fetch(url, {
@@ -1298,7 +1304,14 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
     if (!response.ok) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
+    const durationMs = Date.now() - startedAt;
+    console.log(`[MarketAnalysis][HTTP][fund] response GET ${target} status=${response.status} duration=${durationMs}ms`);
     return await response.json();
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[MarketAnalysis][HTTP][fund] failed GET ${target} duration=${durationMs}ms error=${message}`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -1307,6 +1320,10 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
 async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  const target = toSafeLogUrl(url);
+
+  console.log(`[MarketAnalysis][HTTP][fund] request GET ${target} timeout=${timeoutMs}ms response=text`);
 
   try {
     const response = await fetch(url, {
@@ -1318,8 +1335,42 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<str
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
 
+    const durationMs = Date.now() - startedAt;
+    console.log(`[MarketAnalysis][HTTP][fund] response GET ${target} status=${response.status} duration=${durationMs}ms response=text`);
     return await response.text();
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[MarketAnalysis][HTTP][fund] failed GET ${target} duration=${durationMs}ms response=text error=${message}`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+}
+
+function toSafeLogUrl(input: string): string {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return "-";
+  }
+
+  try {
+    const parsed = new URL(raw);
+    for (const [key] of parsed.searchParams) {
+      if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+        parsed.searchParams.set(key, "***");
+      }
+    }
+    const search = parsed.searchParams.toString();
+    return truncateLogText(`${parsed.origin}${parsed.pathname}${search ? `?${search}` : ""}`, 220);
+  } catch {
+    return truncateLogText(raw, 220);
+  }
+}
+
+function truncateLogText(input: string, maxLength: number): string {
+  if (input.length <= maxLength) {
+    return input;
+  }
+  return `${input.slice(0, maxLength)}...`;
 }

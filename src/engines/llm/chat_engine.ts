@@ -47,15 +47,37 @@ export abstract class LLMChatEngine implements LLMEngine {
   async chat(request: LLMChatRequest): Promise<string> {
     const step = request.step ?? "general";
     const model = request.model ?? this.resolveModelForChatStep(step);
-    return this.executeChat({
-      step,
-      model,
-      messages: request.messages,
-      timeoutMs: request.timeoutMs,
-      options: request.options,
-      keepAlive: request.keepAlive,
-      planningOptions: request.planningOptions
-    });
+    const provider = this.getProviderName();
+    const startedAt = Date.now();
+    const timeoutText = typeof request.timeoutMs === "number" && Number.isFinite(request.timeoutMs) && request.timeoutMs > 0
+      ? ` timeout=${Math.floor(request.timeoutMs)}ms`
+      : "";
+
+    console.log(
+      `[LLM][${provider}][chat:${step}] request model=${model || "unknown"} messages=${request.messages.length}${timeoutText}`
+    );
+
+    try {
+      const output = await this.executeChat({
+        step,
+        model,
+        messages: request.messages,
+        timeoutMs: request.timeoutMs,
+        options: request.options,
+        keepAlive: request.keepAlive,
+        planningOptions: request.planningOptions
+      });
+      console.log(
+        `[LLM][${provider}][chat:${step}] success model=${model || "unknown"} duration=${Date.now() - startedAt}ms output_chars=${output.length}`
+      );
+      return output;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[LLM][${provider}][chat:${step}] failed model=${model || "unknown"} duration=${Date.now() - startedAt}ms error=${message}`
+      );
+      throw error;
+    }
   }
 
   async route(text: string, runtimeContext: LLMRuntimeContext): Promise<SkillSelectionResult> {

@@ -118,6 +118,12 @@ export class CodexLLMEngine extends LLMChatEngine {
       model: request.model,
       reasoningEffort
     });
+    const startedAt = Date.now();
+    const outputFileName = path.basename(outputFile);
+
+    console.log(
+      `[LLM][codex][exec:${request.step}] start model=${request.model || "unknown"} timeout=${timeoutMs}ms reasoning=${reasoningEffort || "default"} output_file=${outputFileName}`
+    );
     const result = await runCodexCommand(args, {
       cwd: this.options.rootDir,
       timeoutMs,
@@ -125,13 +131,22 @@ export class CodexLLMEngine extends LLMChatEngine {
     });
 
     if (!result.ok) {
+      console.error(
+        `[LLM][codex][exec:${request.step}] failed model=${request.model || "unknown"} duration=${Date.now() - startedAt}ms output_file=${outputFileName} error=${result.error || "codex execution failed"}`
+      );
       throw new Error(result.error || "codex execution failed");
     }
 
     const output = String(result.output ?? "").trim();
     if (!output) {
+      console.error(
+        `[LLM][codex][exec:${request.step}] failed model=${request.model || "unknown"} duration=${Date.now() - startedAt}ms output_file=${outputFileName} error=codex returned empty response`
+      );
       throw new Error("codex returned empty response");
     }
+    console.log(
+      `[LLM][codex][exec:${request.step}] success model=${request.model || "unknown"} duration=${Date.now() - startedAt}ms output_file=${outputFileName} output_chars=${output.length}`
+    );
     return output;
   }
 }
@@ -210,6 +225,14 @@ async function runCodexCommand(
   options: { cwd: string; timeoutMs: number; outputFile: string }
 ): Promise<CodexExecutionResult> {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const timeoutMs = Math.max(1000, options.timeoutMs);
+    const taskRef = path.basename(options.outputFile);
+
+    console.log(
+      `[LLM][codex][cli] spawn task=${taskRef} timeout=${timeoutMs}ms ${summarizeCodexArgs(args)}`
+    );
+
     const child = spawn("codex", args, {
       cwd: options.cwd,
       env: process.env
@@ -219,13 +242,13 @@ async function runCodexCommand(
     let stderr = "";
     let settled = false;
 
-    const timeoutMs = Math.max(1000, options.timeoutMs);
     const timer = setTimeout(() => {
       if (settled) {
         return;
       }
       settled = true;
       child.kill("SIGKILL");
+      console.error(`[LLM][codex][cli] timeout task=${taskRef} duration=${Date.now() - startedAt}ms`);
       resolve({
         ok: false,
         output: "",
@@ -248,12 +271,14 @@ async function runCodexCommand(
       settled = true;
       clearTimeout(timer);
       const code = (error as NodeJS.ErrnoException).code;
+      const message = code === "ENOENT"
+        ? "codex CLI not found in PATH"
+        : `codex spawn failed: ${(error as Error).message}`;
+      console.error(`[LLM][codex][cli] spawn_failed task=${taskRef} duration=${Date.now() - startedAt}ms error=${message}`);
       resolve({
         ok: false,
         output: "",
-        error: code === "ENOENT"
-          ? "codex CLI not found in PATH"
-          : `codex spawn failed: ${(error as Error).message}`
+        error: message
       });
     });
 
@@ -264,8 +289,13 @@ async function runCodexCommand(
       settled = true;
       clearTimeout(timer);
 
-      const output = readTextFile(options.outputFile) || extractCodexTextFromStdout(stdout);
+      const fileOutput = readTextFile(options.outputFile);
+      const output = fileOutput || extractCodexTextFromStdout(stdout);
+      const outputSource = fileOutput ? "file" : "stdout";
       if (code === 0 && output) {
+        console.log(
+          `[LLM][codex][cli] success task=${taskRef} code=0 duration=${Date.now() - startedAt}ms output_source=${outputSource} output_chars=${output.length}`
+        );
         resolve({ ok: true, output, error: "" });
         return;
       }
@@ -273,11 +303,15 @@ async function runCodexCommand(
       const detail = [
         code === 0 ? "" : `code=${String(code ?? "null")}`,
         signal ? `signal=${signal}` : "",
-        truncateText(stderr, 320),
-        truncateText(stdout, 320)
+        stderr ? `stderr=${truncateText(stderr, 320)}` : "",
+        stdout ? `stdout=${truncateText(stdout, 320)}` : ""
       ]
         .filter(Boolean)
         .join(" | ");
+
+      console.error(
+        `[LLM][codex][cli] failed task=${taskRef} duration=${Date.now() - startedAt}ms${detail ? ` detail=${detail}` : ""}`
+      );
 
       resolve({
         ok: false,
@@ -449,6 +483,32 @@ function buildTaskId(step: string): string {
     .replace(/^-+|-+$/g, "") || "general";
   const nonce = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   return `llm-${safeStep}-${nonce}`;
+}
+
+function summarizeCodexArgs(args: string[]): string {
+  const summary: string[] = [];
+
+  for (let i = 0; i < args.length; i += 1) {
+    const token = String(args[i] ?? "");
+    if (token === "--json") {
+      summary.push("json=true");
+      continue;
+    }
+    if ((token === "--model" || token === "--sandbox" || token === "-a" || token === "--config") && i + 1 < args.length) {
+      const key = token === "--model"
+        ? "model"
+        : token === "--sandbox"
+          ? "sandbox"
+          : token === "-a"
+            ? "approval"
+            : "config";
+      summary.push(`${key}=${truncateText(String(args[i + 1] ?? ""), 80)}`);
+      i += 1;
+      continue;
+    }
+  }
+
+  return summary.join(" ");
 }
 
 function truncateText(text: string, maxLength: number): string {

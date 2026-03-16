@@ -3,6 +3,11 @@
 export async function fetchJson(url, timeoutMs, init) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  const method = resolveHttpMethod(init);
+  const target = toSafeLogUrl(url);
+
+  console.log(`[MarketAnalysis][HTTP] request ${method} ${target} timeout=${timeoutMs}ms`);
 
   try {
     const response = await fetch(url, {
@@ -15,10 +20,54 @@ export async function fetchJson(url, timeoutMs, init) {
       throw new Error(`HTTP ${response.status} for ${url}`);
     }
 
+    const durationMs = Date.now() - startedAt;
+    console.log(`[MarketAnalysis][HTTP] response ${method} ${target} status=${response.status} duration=${durationMs}ms`);
     return await response.json();
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[MarketAnalysis][HTTP] failed ${method} ${target} duration=${durationMs}ms error=${message}`);
+    throw error;
   } finally {
     clearTimeout(timer);
   }
+}
+
+const SENSITIVE_QUERY_KEYS = new Set(["api_key", "apikey", "token", "access_token", "auth", "authorization", "key", "secret"]);
+
+function resolveHttpMethod(init) {
+  const method = init && typeof init.method === "string"
+    ? init.method.trim().toUpperCase()
+    : "";
+  return method || "GET";
+}
+
+function toSafeLogUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return "-";
+  }
+
+  try {
+    const parsed = new URL(raw);
+    for (const [key] of parsed.searchParams) {
+      if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+        parsed.searchParams.set(key, "***");
+      }
+    }
+    const search = parsed.searchParams.toString();
+    return truncateLogText(`${parsed.origin}${parsed.pathname}${search ? `?${search}` : ""}`, 220);
+  } catch {
+    return truncateLogText(raw, 220);
+  }
+}
+
+function truncateLogText(input, maxLength) {
+  const text = String(input || "");
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength)}...`;
 }
 
 export function normalizeCode(raw) {
