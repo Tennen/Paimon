@@ -25,7 +25,9 @@ import {
   AdminConfig,
   LLMProviderProfile,
   LLMProviderStore,
-  LLMProviderType
+  LLMProviderType,
+  SearchEngineProfile,
+  SearchEngineStore
 } from "@/types/admin";
 
 export type SystemMemoryDraft = {
@@ -85,8 +87,11 @@ type SystemSectionProps = {
   config: AdminConfig | null;
   models: string[];
   llmProviderStore: LLMProviderStore | null;
+  searchEngineStore: SearchEngineStore | null;
   savingLLMProvider: boolean;
   deletingLLMProviderId: string;
+  savingSearchEngine: boolean;
+  deletingSearchEngineId: string;
   updatingMainFlowProviders: boolean;
   memoryDraft: SystemMemoryDraft;
   operationState: SystemOperationState;
@@ -95,8 +100,12 @@ type SystemSectionProps = {
   onRefreshModels: () => void;
   onRefreshConfig: () => void;
   onRefreshLLMProviders: () => void;
+  onRefreshSearchEngines: () => void;
   onUpsertLLMProvider: (provider: LLMProviderProfile) => void;
   onDeleteLLMProvider: (providerId: string) => void;
+  onUpsertSearchEngine: (engine: SearchEngineProfile) => void;
+  onDeleteSearchEngine: (engineId: string) => void;
+  onSetDefaultSearchEngine: (engineId: string) => void;
   onSetMainFlowProviders: (selection: MainFlowProviderSelectionDraft) => void;
   onSaveMemoryConfig: () => void;
   onRestartPm2: () => void;
@@ -105,14 +114,39 @@ type SystemSectionProps = {
   onDeployRepo: () => void;
 };
 
-type SystemModule = "operations" | "llm" | "memory" | "runtime";
+type SystemModule = "operations" | "llm" | "search" | "memory" | "runtime";
 
 const MODULE_ITEMS: Array<{ key: SystemModule; label: string }> = [
   { key: "operations", label: "运维操作" },
   { key: "llm", label: "LLM Providers" },
+  { key: "search", label: "Search Engines" },
   { key: "memory", label: "Memory" },
   { key: "runtime", label: "运行时" }
 ];
+
+type SystemSearchEngineDraft = {
+  id: string;
+  name: string;
+  endpoint: string;
+  apiKey: string;
+  engine: string;
+  hl: string;
+  gl: string;
+  num: string;
+  enabled: boolean;
+};
+
+const EMPTY_SEARCH_ENGINE_DRAFT: SystemSearchEngineDraft = {
+  id: "",
+  name: "",
+  endpoint: "https://serpapi.com/search.json",
+  apiKey: "",
+  engine: "google_news",
+  hl: "zh-cn",
+  gl: "cn",
+  num: "10",
+  enabled: true
+};
 
 const EMPTY_PROVIDER_DRAFT: SystemProviderDraft = {
   id: "",
@@ -150,6 +184,9 @@ export function SystemSection(props: SystemSectionProps) {
   const [editingProviderId, setEditingProviderId] = useState("");
   const [providerDraft, setProviderDraft] = useState<SystemProviderDraft>(EMPTY_PROVIDER_DRAFT);
   const [providerDraftError, setProviderDraftError] = useState("");
+  const [editingSearchEngineId, setEditingSearchEngineId] = useState("");
+  const [searchEngineDraft, setSearchEngineDraft] = useState<SystemSearchEngineDraft>(EMPTY_SEARCH_ENGINE_DRAFT);
+  const [searchEngineDraftError, setSearchEngineDraftError] = useState("");
   const [mainFlowDraft, setMainFlowDraft] = useState<MainFlowProviderSelectionDraft>({
     defaultProviderId: "",
     routingProviderId: "",
@@ -158,6 +195,12 @@ export function SystemSection(props: SystemSectionProps) {
 
   const providerStore = props.llmProviderStore;
   const providerItems = providerStore?.providers ?? [];
+  const searchEngineStore = props.searchEngineStore;
+  const searchEngineItems = searchEngineStore?.engines ?? [];
+  const defaultSearchEngineId = searchEngineStore?.defaultEngineId
+    && searchEngineItems.some((item) => item.id === searchEngineStore.defaultEngineId)
+    ? searchEngineStore.defaultEngineId
+    : (searchEngineItems[0]?.id ?? "");
 
   useEffect(() => {
     if (!providerStore) {
@@ -242,6 +285,83 @@ export function SystemSection(props: SystemSectionProps) {
       name: prev.name,
       type: providerType
     }));
+  }
+
+  function updateSearchEngineDraft<K extends keyof SystemSearchEngineDraft>(
+    key: K,
+    value: SystemSearchEngineDraft[K]
+  ): void {
+    setSearchEngineDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function startCreateSearchEngine(): void {
+    setEditingSearchEngineId("");
+    setSearchEngineDraft({
+      ...EMPTY_SEARCH_ENGINE_DRAFT,
+      apiKey: searchEngineDraft.apiKey
+    });
+    setSearchEngineDraftError("");
+  }
+
+  function startEditSearchEngine(engine: SearchEngineProfile): void {
+    setEditingSearchEngineId(engine.id);
+    setSearchEngineDraft({
+      id: engine.id,
+      name: engine.name,
+      endpoint: engine.config.endpoint,
+      apiKey: engine.config.apiKey,
+      engine: engine.config.engine,
+      hl: engine.config.hl,
+      gl: engine.config.gl,
+      num: String(engine.config.num),
+      enabled: engine.enabled
+    });
+    setSearchEngineDraftError("");
+  }
+
+  function handleSaveSearchEngine(): void {
+    const normalizedId = normalizeSearchEngineId(searchEngineDraft.id);
+    const normalizedName = searchEngineDraft.name.trim();
+    const num = Number(searchEngineDraft.num);
+    if (!normalizedId) {
+      setSearchEngineDraftError("Search Engine id 不能为空");
+      return;
+    }
+    if (!normalizedName) {
+      setSearchEngineDraftError("Search Engine 名称不能为空");
+      return;
+    }
+    if (!Number.isFinite(num) || num <= 0) {
+      setSearchEngineDraftError("num 必须是正整数");
+      return;
+    }
+
+    setSearchEngineDraftError("");
+    props.onUpsertSearchEngine({
+      id: normalizedId,
+      name: normalizedName,
+      type: "serpapi",
+      enabled: searchEngineDraft.enabled,
+      config: {
+        endpoint: searchEngineDraft.endpoint.trim() || "https://serpapi.com/search.json",
+        apiKey: searchEngineDraft.apiKey.trim(),
+        engine: searchEngineDraft.engine.trim() || "google_news",
+        hl: searchEngineDraft.hl.trim() || "zh-cn",
+        gl: searchEngineDraft.gl.trim() || "cn",
+        num: Math.max(1, Math.min(20, Math.floor(num)))
+      }
+    });
+  }
+
+  function handleDeleteSearchEngine(engineId: string): void {
+    const confirmed = window.confirm(`确认删除 Search Engine \"${engineId}\" 吗？`);
+    if (!confirmed) {
+      return;
+    }
+    props.onDeleteSearchEngine(engineId);
+    if (editingSearchEngineId === engineId) {
+      startCreateSearchEngine();
+    }
   }
 
   const selectedRoutingLabel = providerMap.get(mainFlowDraft.routingProviderId)?.name ?? "-";
@@ -754,6 +874,166 @@ export function SystemSection(props: SystemSectionProps) {
         </div>
       ) : null}
 
+      {activeModule === "search" ? (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Search Engine Profiles</CardTitle>
+              <CardDescription>全局搜索引擎配置（当前支持 SerpAPI），供各业务模块复用。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {searchEngineItems.length === 0 ? (
+                <div className="text-sm text-muted-foreground">当前无 Search Engine 配置。</div>
+              ) : (
+                searchEngineItems.map((engine) => (
+                  <div key={engine.id} className="rounded-md border p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{engine.name}</span>
+                          <Badge variant="outline">{engine.type}</Badge>
+                          <Badge variant="secondary">{engine.id}</Badge>
+                          {engine.id === defaultSearchEngineId ? <Badge>default</Badge> : null}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          endpoint={engine.config.endpoint} | enabled={String(engine.enabled)}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="outline" onClick={() => startEditSearchEngine(engine)}>
+                          编辑
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          disabled={engine.id === defaultSearchEngineId || props.savingSearchEngine}
+                          onClick={() => props.onSetDefaultSearchEngine(engine.id)}
+                        >
+                          设为默认
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="destructive"
+                          disabled={searchEngineItems.length <= 1 || props.deletingSearchEngineId === engine.id}
+                          onClick={() => handleDeleteSearchEngine(engine.id)}
+                        >
+                          {props.deletingSearchEngineId === engine.id ? "删除中..." : "删除"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>{editingSearchEngineId ? `编辑 Search Engine: ${editingSearchEngineId}` : "新增 Search Engine"}</CardTitle>
+              <CardDescription>业务特定检索词（如基金 querySuffix）请在业务配置中维护，不放在全局 profile。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={startCreateSearchEngine}>
+                  新建 Search Engine
+                </Button>
+                <Button type="button" variant="outline" onClick={props.onRefreshSearchEngines}>
+                  刷新 Search Engine 列表
+                </Button>
+                <Button type="button" onClick={handleSaveSearchEngine} disabled={props.savingSearchEngine}>
+                  {props.savingSearchEngine ? "保存中..." : "保存 Search Engine"}
+                </Button>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Search Engine ID</Label>
+                  <Input
+                    value={searchEngineDraft.id}
+                    onChange={(event) => updateSearchEngineDraft("id", event.target.value)}
+                    disabled={Boolean(editingSearchEngineId)}
+                    placeholder="例如: serpapi-main"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Search Engine 名称</Label>
+                  <Input
+                    value={searchEngineDraft.name}
+                    onChange={(event) => updateSearchEngineDraft("name", event.target.value)}
+                    placeholder="用于 UI 展示"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>endpoint</Label>
+                  <Input
+                    value={searchEngineDraft.endpoint}
+                    onChange={(event) => updateSearchEngineDraft("endpoint", event.target.value)}
+                    placeholder="https://serpapi.com/search.json"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>apiKey</Label>
+                  <Input
+                    type="password"
+                    value={searchEngineDraft.apiKey}
+                    onChange={(event) => updateSearchEngineDraft("apiKey", event.target.value)}
+                    placeholder="serpapi key"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>engine</Label>
+                  <Input
+                    value={searchEngineDraft.engine}
+                    onChange={(event) => updateSearchEngineDraft("engine", event.target.value)}
+                    placeholder="google_news"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>num</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={searchEngineDraft.num}
+                    onChange={(event) => updateSearchEngineDraft("num", event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>hl</Label>
+                  <Input
+                    value={searchEngineDraft.hl}
+                    onChange={(event) => updateSearchEngineDraft("hl", event.target.value)}
+                    placeholder="zh-cn"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>gl</Label>
+                  <Input
+                    value={searchEngineDraft.gl}
+                    onChange={(event) => updateSearchEngineDraft("gl", event.target.value)}
+                    placeholder="cn"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>enabled</Label>
+                  <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                    <span className="text-sm text-muted-foreground">禁用后业务会自动回退到其他数据源</span>
+                    <Switch
+                      checked={searchEngineDraft.enabled}
+                      onCheckedChange={(value) => updateSearchEngineDraft("enabled", value)}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {searchEngineDraftError ? <div className="text-sm text-red-500">{searchEngineDraftError}</div> : null}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
       {activeModule === "memory" ? (
         <MemorySection
           config={props.config}
@@ -812,6 +1092,15 @@ function normalizeProviderType(raw: string): LLMProviderType {
     return raw;
   }
   return "ollama";
+}
+
+function normalizeSearchEngineId(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
 }
 
 function convertProviderToDraft(profile: LLMProviderProfile): SystemProviderDraft {

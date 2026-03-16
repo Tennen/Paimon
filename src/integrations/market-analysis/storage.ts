@@ -302,6 +302,9 @@ export function normalizeAnalysisConfig(input) {
     DEFAULT_ANALYSIS_CONFIG.fund.featureLookbackDays
   );
   const llmRetryMax = parsePositiveInteger(fund.llmRetryMax, DEFAULT_ANALYSIS_CONFIG.fund.llmRetryMax);
+  const newsQuerySuffix = typeof fund.newsQuerySuffix === "string"
+    ? fund.newsQuerySuffix.trim()
+    : DEFAULT_ANALYSIS_CONFIG.fund.newsQuerySuffix;
   const riskRaw = typeof fund.ruleRiskLevel === "string"
     ? fund.ruleRiskLevel.trim().toLowerCase()
     : "";
@@ -323,7 +326,8 @@ export function normalizeAnalysisConfig(input) {
       maxAgeDays,
       featureLookbackDays,
       ruleRiskLevel,
-      llmRetryMax
+      llmRetryMax,
+      newsQuerySuffix: newsQuerySuffix || DEFAULT_ANALYSIS_CONFIG.fund.newsQuerySuffix
     }
   };
 }

@@ -21,6 +21,7 @@ export type MarketAnalysisConfig = {
     featureLookbackDays: number;
     ruleRiskLevel: FundRiskLevel;
     llmRetryMax: number;
+    newsQuerySuffix: string;
   };
 };
 

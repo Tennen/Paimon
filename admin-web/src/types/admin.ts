@@ -138,40 +138,39 @@ export type LLMProvidersPayload = {
   defaultProvider: LLMProviderProfile;
 };
 
-export type MarketSearchEngineType = "serpapi";
+export type SearchEngineType = "serpapi";
 
-export type SerpApiMarketSearchEngineConfig = {
+export type SerpApiSearchEngineConfig = {
   endpoint: string;
   apiKey: string;
   engine: string;
   hl: string;
   gl: string;
   num: number;
-  querySuffix: string;
 };
 
-export type MarketSearchEngineProfile = {
+export type SearchEngineProfile = {
   id: string;
   name: string;
-  type: MarketSearchEngineType;
+  type: SearchEngineType;
   enabled: boolean;
-  config: SerpApiMarketSearchEngineConfig;
+  config: SerpApiSearchEngineConfig;
 };
 
-export type MarketSearchEngineStore = {
+export type SearchEngineStore = {
   version: number;
   defaultEngineId: string;
-  engines: MarketSearchEngineProfile[];
+  engines: SearchEngineProfile[];
 };
 
-export type MarketSearchEnginesPayload = {
-  store: MarketSearchEngineStore;
-  defaultEngine: MarketSearchEngineProfile;
+export type SearchEnginesPayload = {
+  store: SearchEngineStore;
+  defaultEngine: SearchEngineProfile;
 };
 
 export type AdminConfig = {
   llmProviders?: LLMProvidersPayload;
-  searchEngines?: MarketSearchEnginesPayload;
+  searchEngines?: SearchEnginesPayload;
   model: string;
   planningModel: string;
   planningTimeoutMs: string;
@@ -265,6 +264,7 @@ export type MarketAnalysisConfig = {
     featureLookbackDays: number;
     ruleRiskLevel: MarketFundRiskLevel;
     llmRetryMax: number;
+    newsQuerySuffix: string;
   };
 };
 
@@ -324,16 +324,13 @@ export type MarketSectionProps = {
   marketConfig: MarketConfig | null;
   marketPortfolio: MarketPortfolio;
   marketAnalysisConfig: MarketAnalysisConfig;
-  marketSearchEngineStore: MarketSearchEngineStore | null;
-  marketSearchEngines: MarketSearchEngineProfile[];
+  marketSearchEngines: SearchEngineProfile[];
   defaultMarketSearchEngineId: string;
   llmProviders: LLMProviderProfile[];
   defaultLlmProviderId: string;
   marketRuns: MarketRunSummary[];
   savingMarketPortfolio: boolean;
   savingMarketAnalysisConfig: boolean;
-  savingMarketSearchEngine: boolean;
-  deletingMarketSearchEngineId: string;
   marketFundSaveStates: Array<"saved" | "dirty" | "saving">;
   bootstrappingMarketTasks: boolean;
   runningMarketOncePhase: MarketPhase | null;
@@ -351,10 +348,7 @@ export type MarketSectionProps = {
   onMarketAssetTypeChange: (value: MarketAnalysisAssetType) => void;
   onMarketAnalysisEngineChange: (value: MarketAnalysisEngine) => void;
   onMarketSearchEngineChange: (value: string) => void;
-  onUpsertMarketSearchEngine: (engine: MarketSearchEngineProfile) => void;
-  onDeleteMarketSearchEngine: (engineId: string) => void;
-  onSetDefaultMarketSearchEngine: (engineId: string) => void;
-  onRefreshMarketSearchEngines: () => void;
+  onMarketFundNewsQuerySuffixChange: (value: string) => void;
   onMarketGptPluginTimeoutMsChange: (value: number) => void;
   onMarketGptPluginFallbackToLocalChange: (value: boolean) => void;
   onMarketFundEnabledChange: (value: boolean) => void;
@@ -698,7 +692,8 @@ export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
     maxAgeDays: 5,
     featureLookbackDays: 120,
     ruleRiskLevel: "medium",
-    llmRetryMax: 1
+    llmRetryMax: 1,
+    newsQuerySuffix: "基金 公告 经理 申赎 风险"
   }
 };
 

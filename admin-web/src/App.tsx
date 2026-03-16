@@ -34,8 +34,8 @@ import {
   MarketPortfolioImportResponse,
   MarketRunOnceResponse,
   MarketRunSummary,
-  MarketSearchEngineProfile,
-  MarketSearchEngineStore,
+  SearchEngineProfile,
+  SearchEngineStore,
   MarketSecuritySearchItem,
   LLMProviderProfile,
   LLMProviderStore,
@@ -98,7 +98,7 @@ export default function App() {
   const [users, setUsers] = useState<PushUser[]>([]);
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [llmProviderStore, setLlmProviderStore] = useState<LLMProviderStore | null>(null);
-  const [marketSearchEngineStore, setMarketSearchEngineStore] = useState<MarketSearchEngineStore | null>(null);
+  const [marketSearchEngineStore, setMarketSearchEngineStore] = useState<SearchEngineStore | null>(null);
   const [savingLLMProvider, setSavingLLMProvider] = useState(false);
   const [deletingLLMProviderId, setDeletingLLMProviderId] = useState("");
   const [savingMarketSearchEngine, setSavingMarketSearchEngine] = useState(false);
@@ -341,8 +341,8 @@ export default function App() {
   async function loadSearchEngines(): Promise<void> {
     const payload = await request<{
       ok: boolean;
-      store: MarketSearchEngineStore;
-      defaultEngine: MarketSearchEngineProfile;
+      store: SearchEngineStore;
+      defaultEngine: SearchEngineProfile;
     }>("/admin/api/search-engines");
     if (payload.store && Array.isArray(payload.store.engines)) {
       setMarketSearchEngineStore(payload.store);
@@ -581,13 +581,13 @@ export default function App() {
     }
   }
 
-  async function handleUpsertMarketSearchEngine(engine: MarketSearchEngineProfile): Promise<void> {
+  async function handleUpsertMarketSearchEngine(engine: SearchEngineProfile): Promise<void> {
     setSavingMarketSearchEngine(true);
     try {
       const payload = await request<{
         ok: boolean;
-        store: MarketSearchEngineStore;
-        defaultEngine: MarketSearchEngineProfile;
+        store: SearchEngineStore;
+        defaultEngine: SearchEngineProfile;
       }>("/admin/api/search-engines", {
         method: "PUT",
         body: JSON.stringify({ engine })
@@ -618,8 +618,8 @@ export default function App() {
     try {
       const payload = await request<{
         ok: boolean;
-        store: MarketSearchEngineStore;
-        defaultEngine: MarketSearchEngineProfile;
+        store: SearchEngineStore;
+        defaultEngine: SearchEngineProfile;
       }>(`/admin/api/search-engines/${encodeURIComponent(engineId)}`, {
         method: "DELETE"
       });
@@ -649,8 +649,8 @@ export default function App() {
     try {
       const payload = await request<{
         ok: boolean;
-        store: MarketSearchEngineStore;
-        defaultEngine: MarketSearchEngineProfile;
+        store: SearchEngineStore;
+        defaultEngine: SearchEngineProfile;
       }>("/admin/api/search-engines/default", {
         method: "POST",
         body: JSON.stringify({ engineId })
@@ -1156,6 +1156,16 @@ export default function App() {
       fund: {
         ...prev.fund,
         llmRetryMax: Number.isFinite(value) ? Math.max(1, Math.floor(value)) : 1
+      }
+    }));
+  }
+
+  function handleMarketFundNewsQuerySuffixChange(value: string): void {
+    setMarketAnalysisConfig((prev) => ({
+      ...prev,
+      fund: {
+        ...prev.fund,
+        newsQuerySuffix: String(value || "")
       }
     }));
   }
@@ -1998,8 +2008,11 @@ export default function App() {
               config={config}
               models={models}
               llmProviderStore={llmProviderStore}
+              searchEngineStore={marketSearchEngineStore}
               savingLLMProvider={savingLLMProvider}
               deletingLLMProviderId={deletingLLMProviderId}
+              savingSearchEngine={savingMarketSearchEngine}
+              deletingSearchEngineId={deletingMarketSearchEngineId}
               updatingMainFlowProviders={updatingMainFlowProviders}
               memoryDraft={memoryDraft}
               operationState={systemOperationState}
@@ -2008,8 +2021,12 @@ export default function App() {
               onRefreshModels={() => void loadModels()}
               onRefreshConfig={() => void loadConfig()}
               onRefreshLLMProviders={() => void loadLLMProviders()}
+              onRefreshSearchEngines={() => void loadSearchEngines()}
               onUpsertLLMProvider={(provider) => void handleUpsertLLMProvider(provider)}
               onDeleteLLMProvider={(providerId) => void handleDeleteLLMProvider(providerId)}
+              onUpsertSearchEngine={(engine) => void handleUpsertMarketSearchEngine(engine)}
+              onDeleteSearchEngine={(engineId) => void handleDeleteMarketSearchEngine(engineId)}
+              onSetDefaultSearchEngine={(engineId) => void handleSetDefaultMarketSearchEngine(engineId)}
               onSetMainFlowProviders={(selection) => void handleSetMainFlowProviders(selection)}
               onSaveMemoryConfig={() => void handleSaveMemoryConfig()}
               onRestartPm2={() => void handleRestartPm2()}
@@ -2048,7 +2065,6 @@ export default function App() {
               marketConfig={marketConfig}
               marketPortfolio={marketPortfolio}
               marketAnalysisConfig={marketAnalysisConfig}
-              marketSearchEngineStore={marketSearchEngineStore}
               marketSearchEngines={marketSearchEngines}
               defaultMarketSearchEngineId={defaultMarketSearchEngineId}
               llmProviders={llmProviders}
@@ -2056,8 +2072,6 @@ export default function App() {
               marketRuns={marketRuns}
               savingMarketPortfolio={savingMarketPortfolio}
               savingMarketAnalysisConfig={savingMarketAnalysisConfig}
-              savingMarketSearchEngine={savingMarketSearchEngine}
-              deletingMarketSearchEngineId={deletingMarketSearchEngineId}
               marketFundSaveStates={marketFundSaveStates}
               bootstrappingMarketTasks={bootstrappingMarketTasks}
               runningMarketOncePhase={runningMarketOncePhase}
@@ -2075,10 +2089,7 @@ export default function App() {
               onMarketAssetTypeChange={handleMarketAssetTypeChange}
               onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
               onMarketSearchEngineChange={handleMarketSearchEngineChange}
-              onUpsertMarketSearchEngine={(engine) => void handleUpsertMarketSearchEngine(engine)}
-              onDeleteMarketSearchEngine={(engineId) => void handleDeleteMarketSearchEngine(engineId)}
-              onSetDefaultMarketSearchEngine={(engineId) => void handleSetDefaultMarketSearchEngine(engineId)}
-              onRefreshMarketSearchEngines={() => void loadSearchEngines()}
+              onMarketFundNewsQuerySuffixChange={handleMarketFundNewsQuerySuffixChange}
               onMarketGptPluginTimeoutMsChange={handleMarketGptPluginTimeoutMsChange}
               onMarketGptPluginFallbackToLocalChange={handleMarketGptPluginFallbackToLocalChange}
               onMarketFundEnabledChange={handleMarketFundEnabledChange}
@@ -2254,6 +2265,9 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
   const maxAgeDays = Number(config?.fund?.maxAgeDays);
   const featureLookbackDays = Number(config?.fund?.featureLookbackDays);
   const llmRetryMax = Number(config?.fund?.llmRetryMax);
+  const newsQuerySuffix = typeof config?.fund?.newsQuerySuffix === "string"
+    ? config.fund.newsQuerySuffix.trim()
+    : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.newsQuerySuffix;
   const riskLevel = config?.fund?.ruleRiskLevel === "low"
     ? "low"
     : config?.fund?.ruleRiskLevel === "high"
@@ -2281,7 +2295,8 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
       ruleRiskLevel: riskLevel,
       llmRetryMax: Number.isFinite(llmRetryMax) && llmRetryMax > 0
         ? Math.floor(llmRetryMax)
-        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax,
+      newsQuerySuffix: newsQuerySuffix || DEFAULT_MARKET_ANALYSIS_CONFIG.fund.newsQuerySuffix
     }
   };
 }
@@ -2396,7 +2411,7 @@ function resolveDefaultLlmProviderId(store: LLMProviderStore | null | undefined)
   return store.providers[0].id;
 }
 
-function resolveDefaultMarketSearchEngineId(store: MarketSearchEngineStore | null | undefined): string {
+function resolveDefaultMarketSearchEngineId(store: SearchEngineStore | null | undefined): string {
   if (!store || !Array.isArray(store.engines) || store.engines.length === 0) {
     return "";
   }
@@ -2416,7 +2431,7 @@ function resolveTopicSummaryProviderId(raw: unknown, store: LLMProviderStore | n
   return resolveModuleProviderId(normalized, store);
 }
 
-function resolveMarketSearchEngineId(raw: unknown, store: MarketSearchEngineStore | null | undefined): string {
+function resolveMarketSearchEngineId(raw: unknown, store: SearchEngineStore | null | undefined): string {
   const normalized = normalizeMarketSearchEngine(raw);
   if (!store || !Array.isArray(store.engines) || store.engines.length === 0) {
     return normalized;

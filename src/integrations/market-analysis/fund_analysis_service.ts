@@ -95,7 +95,8 @@ export async function runFundAnalysis(input: RunFundAnalysisInput): Promise<RunF
       lookbackDays,
       timeoutMs: DEFAULT_TIMEOUT_MS,
       accountCash: input.portfolio.cash,
-      searchEngine: input.analysisConfig.searchEngine
+      searchEngine: input.analysisConfig.searchEngine,
+      querySuffix: input.analysisConfig.fund.newsQuerySuffix
     });
     auditSteps.push(ingestion.auditStep);
     if (ingestion.raw.errors.length > 0) {
@@ -272,7 +273,7 @@ function buildFundIdentity(holding: {
 
 async function collectRawContext(
   identity: FundIdentity,
-  options: { lookbackDays: number; timeoutMs: number; accountCash: number; searchEngine: string }
+  options: { lookbackDays: number; timeoutMs: number; accountCash: number; searchEngine: string; querySuffix: string }
 ): Promise<{ raw: FundRawContext; auditStep: FundAuditStep }> {
   const start = Date.now();
   const sourceChain: string[] = [];
@@ -294,6 +295,7 @@ async function collectRawContext(
     fundCode: identity.fund_code,
     fundName: identity.fund_name,
     searchEngine: options.searchEngine,
+    querySuffix: options.querySuffix,
     timeoutMs: options.timeoutMs,
     maxItems: 8
   });

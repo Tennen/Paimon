@@ -57,13 +57,13 @@ import {
   upsertLLMProviderProfile
 } from "../engines/llm/provider_store";
 import {
-  deleteMarketSearchEngineProfile,
-  getDefaultMarketSearchEngineProfile,
-  readMarketSearchEngineStore,
-  resolveMarketSearchEngineSelector,
-  setDefaultMarketSearchEngine,
-  upsertMarketSearchEngineProfile
-} from "../integrations/market-analysis/search_engine_store";
+  deleteSearchEngineProfile,
+  getDefaultSearchEngineProfile,
+  readSearchEngineStore,
+  resolveSearchEngineSelector,
+  setDefaultSearchEngine,
+  upsertSearchEngineProfile
+} from "../integrations/search-engine/store";
 
 const execAsync = promisify(exec);
 
@@ -101,6 +101,7 @@ type MarketFundAnalysisConfig = {
   featureLookbackDays: number;
   ruleRiskLevel: "low" | "medium" | "high";
   llmRetryMax: number;
+  newsQuerySuffix: string;
 };
 
 type MarketAnalysisConfig = {
@@ -220,7 +221,8 @@ const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
     maxAgeDays: 5,
     featureLookbackDays: 120,
     ruleRiskLevel: "medium",
-    llmRetryMax: 1
+    llmRetryMax: 1,
+    newsQuerySuffix: "基金 公告 经理 申赎 风险"
   }
 };
 
@@ -262,8 +264,8 @@ export class AdminIngressAdapter implements IngressAdapter {
       const codexConfig = this.codexConfigService.getConfig();
       const llmProviderStore = readLLMProviderStore();
       const defaultLLMProvider = getDefaultLLMProviderProfile();
-      const marketSearchEngineStore = readMarketSearchEngineStore();
-      const defaultMarketSearchEngine = getDefaultMarketSearchEngineProfile();
+      const marketSearchEngineStore = readSearchEngineStore();
+      const defaultMarketSearchEngine = getDefaultSearchEngineProfile();
       const thinkingBudgetDefault = getEnvValue(envPath, "LLM_THINKING_BUDGET");
       res.json({
         llmProviders: {
@@ -557,16 +559,16 @@ export class AdminIngressAdapter implements IngressAdapter {
 
     app.get("/admin/api/search-engines", (_req: Request, res: ExResponse) => {
       try {
-        const store = readMarketSearchEngineStore();
+        const store = readSearchEngineStore();
         res.json({
           ok: true,
           store,
-          defaultEngine: getDefaultMarketSearchEngineProfile()
+          defaultEngine: getDefaultSearchEngineProfile()
         });
       } catch (error) {
         res.status(500).json({
           ok: false,
-          error: (error as Error).message ?? "failed to read market search engines"
+          error: (error as Error).message ?? "failed to read search engines"
         });
       }
     });
@@ -581,19 +583,19 @@ export class AdminIngressAdapter implements IngressAdapter {
         : "";
 
       try {
-        upsertMarketSearchEngineProfile(enginePayload);
+        upsertSearchEngineProfile(enginePayload);
         if (defaultEngineId) {
-          setDefaultMarketSearchEngine(defaultEngineId);
+          setDefaultSearchEngine(defaultEngineId);
         }
         res.json({
           ok: true,
-          store: readMarketSearchEngineStore(),
-          defaultEngine: getDefaultMarketSearchEngineProfile()
+          store: readSearchEngineStore(),
+          defaultEngine: getDefaultSearchEngineProfile()
         });
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to upsert market search engine"
+          error: (error as Error).message ?? "failed to upsert search engine"
         });
       }
     });
@@ -614,16 +616,16 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
 
       try {
-        setDefaultMarketSearchEngine(engineId);
+        setDefaultSearchEngine(engineId);
         res.json({
           ok: true,
-          store: readMarketSearchEngineStore(),
-          defaultEngine: getDefaultMarketSearchEngineProfile()
+          store: readSearchEngineStore(),
+          defaultEngine: getDefaultSearchEngineProfile()
         });
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to set default market search engine"
+          error: (error as Error).message ?? "failed to set default search engine"
         });
       }
     });
@@ -639,16 +641,16 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
 
       try {
-        deleteMarketSearchEngineProfile(engineId);
+        deleteSearchEngineProfile(engineId);
         res.json({
           ok: true,
-          store: readMarketSearchEngineStore(),
-          defaultEngine: getDefaultMarketSearchEngineProfile()
+          store: readSearchEngineStore(),
+          defaultEngine: getDefaultSearchEngineProfile()
         });
       } catch (error) {
         res.status(400).json({
           ok: false,
-          error: (error as Error).message ?? "failed to delete market search engine"
+          error: (error as Error).message ?? "failed to delete search engine"
         });
       }
     });
@@ -2409,6 +2411,9 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
   const maxAgeDays = Number(fund.maxAgeDays);
   const featureLookbackDays = Number(fund.featureLookbackDays);
   const llmRetryMax = Number(fund.llmRetryMax);
+  const newsQuerySuffix = typeof fund.newsQuerySuffix === "string"
+    ? fund.newsQuerySuffix.trim()
+    : "";
   const ruleRiskLevelRaw = typeof fund.ruleRiskLevel === "string"
     ? fund.ruleRiskLevel.trim().toLowerCase()
     : "";
@@ -2440,7 +2445,8 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
       ruleRiskLevel,
       llmRetryMax: Number.isFinite(llmRetryMax) && llmRetryMax > 0
         ? Math.floor(llmRetryMax)
-        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax
+        : DEFAULT_MARKET_ANALYSIS_CONFIG.fund.llmRetryMax,
+      newsQuerySuffix: newsQuerySuffix || DEFAULT_MARKET_ANALYSIS_CONFIG.fund.newsQuerySuffix
     }
   };
 }
@@ -2555,7 +2561,7 @@ function normalizeMarketAnalysisEngine(raw: unknown): string {
 }
 
 function normalizeMarketSearchEngine(raw: unknown): string {
-  return resolveMarketSearchEngineSelector(raw);
+  return resolveSearchEngineSelector(raw);
 }
 
 function normalizeDailyTime(raw: string): string | null {
@@ -2936,7 +2942,7 @@ function ensureMarketStorage(): void {
   registerStore(MARKET_CONFIG_STORE, () => DEFAULT_MARKET_ANALYSIS_CONFIG);
   registerStore(MARKET_STATE_STORE, () => buildDefaultMarketState());
   registerStore(DATA_STORE.MARKET_RUNS, () => ({ version: 1, runs: {} }));
-  readMarketSearchEngineStore();
+  readSearchEngineStore();
 }
 
 function roundTo(value: number, digits: number): number {

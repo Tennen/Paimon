@@ -109,8 +109,9 @@ data/              # Runtime data files
 
 - 基金主流程 prompt 由 `src/integrations/market-analysis/fund_prompt_builder.ts` 统一组装（基础信息/行情摘要/特征/规则/新闻状态/schema 约束）。
 - 基金新闻检索由 `src/integrations/market-analysis/search_adapter.ts` 负责；未配置 `SERPAPI_KEY` 时会标记 `serpapi:disabled_no_key` 并保持 fail-open。
-- 搜索引擎 profile 存储在 `src/integrations/market-analysis/search_engine_store.ts`，持久化 key 为 `market.search_engines`（文件 `market-analysis/search-engines.json`）。
-- Admin API 提供搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
+- 全局搜索引擎 profile 存储在 `src/integrations/search-engine/store.ts`，持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
+- `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
+- Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
 - 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责，基金输出包含动作、关键指标、风险与新闻检索状态。
 
 ## Structural Change Checklist

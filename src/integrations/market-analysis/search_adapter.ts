@@ -1,14 +1,15 @@
 import { FundNewsItem } from "./fund_types";
 import {
-  MarketSearchEngineProfile,
-  getMarketSearchEngineProfile,
-  resolveMarketSearchEngineSelector
-} from "./search_engine_store";
+  SearchEngineProfile,
+  getSearchEngineProfile,
+  resolveSearchEngineSelector
+} from "../search-engine/store";
 
 export type FundNewsSearchInput = {
   fundCode: string;
   fundName: string;
   searchEngine?: string;
+  querySuffix?: string;
   timeoutMs: number;
   maxItems: number;
 };
@@ -39,8 +40,8 @@ export async function fetchFundNews(input: FundNewsSearchInput): Promise<FundNew
     };
   }
 
-  const selectedSearchEngineId = resolveMarketSearchEngineSelector(input.searchEngine);
-  const selectedSearchEngine = getMarketSearchEngineProfile(selectedSearchEngineId);
+  const selectedSearchEngineId = resolveSearchEngineSelector(input.searchEngine);
+  const selectedSearchEngine = getSearchEngineProfile(selectedSearchEngineId);
   if (selectedSearchEngine) {
     sourceChain.push(`search_engine:${selectedSearchEngine.id}`);
   } else {
@@ -82,7 +83,7 @@ export async function fetchFundNews(input: FundNewsSearchInput): Promise<FundNew
 }
 
 async function fetchFromSearchEngine(
-  profile: MarketSearchEngineProfile,
+  profile: SearchEngineProfile,
   input: FundNewsSearchInput
 ): Promise<FundNewsSearchResult> {
   if (!profile.enabled) {
@@ -105,7 +106,7 @@ async function fetchFromSearchEngine(
 }
 
 async function fetchFromSerpApiProfile(
-  profile: MarketSearchEngineProfile,
+  profile: SearchEngineProfile,
   input: FundNewsSearchInput
 ): Promise<FundNewsSearchResult> {
   const apiKey = String(profile.config.apiKey || "").trim();
@@ -118,7 +119,7 @@ async function fetchFromSerpApiProfile(
   }
 
   const endpoint = String(profile.config.endpoint || "https://serpapi.com/search.json").trim();
-  const querySuffix = String(profile.config.querySuffix || "基金 公告 经理 申赎 风险").trim();
+  const querySuffix = String(input.querySuffix || "基金 公告 经理 申赎 风险").trim();
   const queryParts = [input.fundName, input.fundCode, querySuffix]
     .map((item) => String(item || "").trim())
     .filter(Boolean);

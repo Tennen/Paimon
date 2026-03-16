@@ -19,7 +19,8 @@ const baseConfig: MarketAnalysisConfig = {
     maxAgeDays: 3,
     featureLookbackDays: 120,
     ruleRiskLevel: "medium",
-    llmRetryMax: 1
+    llmRetryMax: 1,
+    newsQuerySuffix: "基金 公告 经理 申赎 风险"
   }
 };
 

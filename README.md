@@ -315,11 +315,11 @@ MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 
 当 `SERPAPI_KEY` 未配置时，基金流程不会中断，会在审计链路中标记 `serpapi:disabled_no_key` 并继续走回退新闻源（若已配置 `MARKET_ANALYSIS_NEWS_API`）。
 
-Admin 侧新增 `News Search Engine Profiles`：
+Admin 侧新增全局 `Search Engine Profiles`（System 模块）：
 
-- 支持维护多套 SerpAPI 配置（`id/name/enabled/endpoint/apiKey/engine/hl/gl/num/querySuffix`）
-- `Market Analysis` 配置新增 `News Search Engine` 选择器，可绑定具体 profile
-- 默认 profile 持久化在 `market-analysis/search-engines.json`
+- 支持维护多套 SerpAPI 配置（`id/name/enabled/endpoint/apiKey/engine/hl/gl/num`）
+- `Market Analysis` 配置中可选择 `News Search Engine`，并单独配置业务侧 `fund.newsQuerySuffix`
+- 默认 profile 持久化在 `search-engines/profiles.json`
 
 相关接口：
 
