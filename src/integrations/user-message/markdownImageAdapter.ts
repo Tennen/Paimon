@@ -1,4 +1,6 @@
 import fs from "fs";
+import path from "path";
+import { spawnSync } from "child_process";
 import { Image } from "../../types";
 
 type RenderMarkdownImageInput = {
@@ -67,6 +69,7 @@ const FONT_CANDIDATES = [
   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 ];
+const AUTO_INSTALL_ATTEMPTED = new Set<string>();
 
 export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput): Promise<Image> {
   const markdown = String(input.markdown || "").trim();
@@ -525,41 +528,99 @@ function normalizeFileStem(raw: string | undefined): string {
     .toLowerCase();
 }
 
-function loadSatori(): SatoriLike {
+function loadModuleWithAutoInstall<T>(moduleName: string): T {
   try {
-    const mod = require("satori") as { default?: SatoriLike } | SatoriLike;
-    const fn = (typeof mod === "function" ? mod : mod.default) as SatoriLike | undefined;
-    if (!fn) {
-      throw new Error("invalid satori export");
+    return require(moduleName) as T;
+  } catch (error) {
+    if (!isMissingTopLevelModuleError(error, moduleName)) {
+      throw error;
     }
-    return fn;
-  } catch {
-    throw new Error("Missing dependency satori. Run: npm install satori --no-save");
+    installDependencyOnce(moduleName);
+    try {
+      return require(moduleName) as T;
+    } catch {
+      throw new Error(
+        `Missing dependency ${moduleName}. Auto-install attempted but module is still unavailable. Run: npm install ${moduleName} --no-save`
+      );
+    }
   }
+}
+
+function isMissingTopLevelModuleError(error: unknown, moduleName: string): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const maybeError = error as NodeJS.ErrnoException;
+  if (maybeError.code !== "MODULE_NOT_FOUND") {
+    return false;
+  }
+  const message = String(maybeError.message || "");
+  return message.includes(`'${moduleName}'`) || message.includes(`"${moduleName}"`);
+}
+
+function installDependencyOnce(moduleName: string): void {
+  if (AUTO_INSTALL_ATTEMPTED.has(moduleName)) {
+    return;
+  }
+  AUTO_INSTALL_ATTEMPTED.add(moduleName);
+
+  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+  const installCwd = resolvePackageRoot(process.cwd()) || resolvePackageRoot(__dirname) || process.cwd();
+  const result = spawnSync(npmCommand, ["install", moduleName, "--no-save"], {
+    cwd: installCwd,
+    env: process.env,
+    stdio: "inherit"
+  });
+
+  if (result.error) {
+    throw new Error(
+      `Missing dependency ${moduleName}. Auto-install failed (${result.error.message}). Run: npm install ${moduleName} --no-save`
+    );
+  }
+  if (typeof result.status === "number" && result.status !== 0) {
+    throw new Error(
+      `Missing dependency ${moduleName}. Auto-install failed with exit code ${result.status}. Run: npm install ${moduleName} --no-save`
+    );
+  }
+}
+
+function resolvePackageRoot(startDir: string): string | null {
+  let current = startDir;
+  while (true) {
+    if (fs.existsSync(path.join(current, "package.json"))) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function loadSatori(): SatoriLike {
+  const mod = loadModuleWithAutoInstall<{ default?: SatoriLike } | SatoriLike>("satori");
+  const fn = (typeof mod === "function" ? mod : mod.default) as SatoriLike | undefined;
+  if (!fn) {
+    throw new Error("invalid satori export");
+  }
+  return fn;
 }
 
 function loadResvgCtor(): ResvgCtor {
-  try {
-    const mod = require("@resvg/resvg-js") as { Resvg?: ResvgCtor };
-    if (!mod.Resvg) {
-      throw new Error("invalid @resvg/resvg-js export");
-    }
-    return mod.Resvg;
-  } catch {
-    throw new Error("Missing dependency @resvg/resvg-js. Run: npm install @resvg/resvg-js --no-save");
+  const mod = loadModuleWithAutoInstall<{ Resvg?: ResvgCtor }>("@resvg/resvg-js");
+  if (!mod.Resvg) {
+    throw new Error("invalid @resvg/resvg-js export");
   }
+  return mod.Resvg;
 }
 
 function loadRemark(): () => { parse: (markdown: string) => unknown } {
-  try {
-    const mod = require("remark") as { remark?: () => { parse: (markdown: string) => unknown } };
-    if (!mod.remark) {
-      throw new Error("invalid remark export");
-    }
-    return mod.remark;
-  } catch {
-    throw new Error("Missing dependency remark. Run: npm install remark --no-save");
+  const mod = loadModuleWithAutoInstall<{ remark?: () => { parse: (markdown: string) => unknown } }>("remark");
+  if (!mod.remark) {
+    throw new Error("invalid remark export");
   }
+  return mod.remark;
 }
 
 function loadFontData(): Buffer {
