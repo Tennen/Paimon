@@ -7,6 +7,8 @@ import { fetchMarketData, resolveIndexCodes } from "./marketData";
 import { executeRuleEngine, calculateFeatureLayer } from "./signals";
 import { persistRun, readAnalysisConfig, readPortfolio } from "./storage";
 
+const MARKET_IMAGE_PIPELINE_FAILED = "MARKET_IMAGE_PIPELINE_FAILED";
+
 export async function runAnalysis(phase, withExplanation, options = {}) {
   const portfolio = readPortfolio();
   const analysisConfig = readAnalysisConfig();
@@ -17,6 +19,9 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
   const explanationEnabled = withExplanation && isExplanationEnabled();
   const useCodexMarkdownBatch = explanationEnabled && shouldUseCodexMarkdownReport(analysisConfig.analysisEngine);
   const useNativeExplanation = explanationEnabled && !useCodexMarkdownBatch;
+  if (withExplanation && !useCodexMarkdownBatch) {
+    throw createMarketImagePipelineError("markdown report pipeline requires codex analysis engine");
+  }
 
   let marketData = null;
   let signalResult = null;
@@ -84,8 +89,9 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
   }
 
   if (useCodexMarkdownBatch) {
+    let report = null;
     try {
-      const report = await generateCodexMarkdownReport({
+      report = await generateCodexMarkdownReport({
         phase,
         portfolio,
         marketData,
@@ -93,25 +99,31 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
         optionalNewsContext,
         analysisEngine: analysisConfig.analysisEngine
       });
-
-      if (report) {
-        explanation = {
-          summary: report.summary,
-          provider: report.provider,
-          model: report.model,
-          generatedAt: report.generatedAt,
-          markdown: report.markdown,
-          inputPath: report.inputPath,
-          outputPath: report.outputPath
-        };
-      }
     } catch (error) {
-      explanation = {
-        summary: "",
-        error: (error && error.message) ? error.message : String(error || "unknown error"),
-        generatedAt: new Date().toISOString(),
-        provider: analysisConfig.analysisEngine
-      };
+      const detail = (error && error.message) ? error.message : String(error || "unknown error");
+      throw createMarketImagePipelineError(`failed to generate markdown report: ${detail}`, error);
+    }
+
+    const markdown = String(report && report.markdown || "").trim();
+    if (!report || !markdown) {
+      throw createMarketImagePipelineError("markdown report is required when explanation is enabled");
+    }
+
+    explanation = {
+      summary: report.summary,
+      provider: report.provider,
+      model: report.model,
+      generatedAt: report.generatedAt,
+      markdown,
+      inputPath: report.inputPath,
+      outputPath: report.outputPath
+    };
+  }
+
+  if (withExplanation) {
+    const markdown = String(explanation && explanation.markdown || "").trim();
+    if (!markdown) {
+      throw createMarketImagePipelineError("markdown report is required when explanation is enabled");
     }
   }
 
@@ -177,4 +189,14 @@ async function runLegacyEquityAnalysis(phase, withExplanation, portfolio, analys
     explanation,
     optionalNewsContext
   };
+}
+
+function createMarketImagePipelineError(reason, cause) {
+  const detail = String(reason || "unknown error").trim() || "unknown error";
+  const error = new Error(`${MARKET_IMAGE_PIPELINE_FAILED}: ${detail}`);
+  error.code = MARKET_IMAGE_PIPELINE_FAILED;
+  if (cause) {
+    error.cause = cause;
+  }
+  return error;
 }

@@ -109,6 +109,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 - `Ollama`、`llama-server`、OpenAI API 或 Codex CLI，作为 LLM provider
 - `Python 3`，如果要启用 `fast-whisper` 语音转写
+- `satori`、`@resvg/resvg-js`、`remark`，如果要启用 `/market` markdown 长图推送链路
 - `Home Assistant`，如果要启用智能家居能力
 - 企业微信应用配置，若要通过 WeCom 收发消息
 - 一台可公网访问的 VPS，若要使用 WeCom bridge 模式
@@ -117,6 +118,12 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 ```bash
 npm install
+```
+
+若你基于旧依赖版本升级，请额外确认 market 生图依赖已安装：
+
+```bash
+npm install satori @resvg/resvg-js remark
 ```
 
 ### 2. 配置环境变量
@@ -298,7 +305,13 @@ STT_FAST_WHISPER_MODEL=small
 
 基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
 
-当 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm` 时，`/market` 会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并尝试渲染长图用于推送。
+当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染长图用于推送。
+
+该链路为强制模式，不再向下兼容纯文本解释回退：
+
+- `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
+- 运行环境缺少 `satori`、`@resvg/resvg-js` 或 `remark` 依赖时，会直接报错（不会发送纯文本兜底）
+- 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 
 基金路径的微信文本输出会按单基金展示：
 
@@ -445,6 +458,7 @@ npm start
 - 在公网机器上部署 `tools/wecom-bridge.go` 或 `tools/wecom-bridge.js`
 - 本地 Paimon 通过 `WECOM_BRIDGE_URL` 主动连接 bridge 的 SSE 流
 - 这样企业微信请求先到 bridge，再由 bridge 转发给本地 Agent
+- 包含图片的响应（如 `/market` 解释模式长图）仅支持 bridge 发送；直连回调通道不会降级为纯文本图片说明
 
 这类模式适合家庭网络、本地开发机或 NAS 环境。
 
@@ -586,6 +600,7 @@ sqlite3 data/writing/index/metadata.sqlite \"SELECT count(*) FROM documents;\"
 npm run dev
 npm run build
 npm run test:evolution
+node --test --import tsx src/integrations/market-analysis/image_pipeline.test.ts src/integrations/wecom/sender.test.ts
 npx tsc -p tsconfig.json
 ```
 

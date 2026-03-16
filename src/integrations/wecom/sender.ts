@@ -141,16 +141,20 @@ export class WeComSender {
   }
 
   async sendResponse(toUser: string, response: Response): Promise<void> {
+    const images = collectResponseImages(response);
+    if (isImageRequiredResponse(response) && images.length === 0) {
+      throw new Error("wecom response declares image delivery but no image payload is present");
+    }
+
+    for (const image of images) {
+      await this.sendImage(toUser, image.data, image.filename, image.contentType);
+    }
+
     if (response.text) {
       const chunks = splitTextByUtf8Bytes(response.text, WECOM_TEXT_MAX_BYTES);
       for (const chunk of chunks) {
         await this.sendText(toUser, chunk);
       }
-    }
-
-    const images = collectResponseImages(response);
-    for (const image of images) {
-      await this.sendImage(toUser, image.data, image.filename, image.contentType);
     }
   }
 
@@ -309,4 +313,36 @@ function collectResponseImages(response: Response): Array<{ data: string; filena
   }
 
   return out;
+}
+
+function isImageRequiredResponse(response: Response): boolean {
+  const root = response as unknown as Record<string, unknown>;
+  const data = (response.data && typeof response.data === "object")
+    ? response.data as unknown as Record<string, unknown>
+    : undefined;
+  return hasImageRequiredFlag(root) || hasImageRequiredFlag(data);
+}
+
+function hasImageRequiredFlag(payload?: Record<string, unknown>): boolean {
+  if (!payload) {
+    return false;
+  }
+
+  if (
+    payload.requiresImage === true
+    || payload.requireImage === true
+    || payload.imageRequired === true
+    || payload.requiresImages === true
+    || payload.requireImages === true
+  ) {
+    return true;
+  }
+
+  const requiredMediaType = String(payload.requiredMediaType ?? "").trim().toLowerCase();
+  if (requiredMediaType === "image") {
+    return true;
+  }
+
+  const requiredMediaTypes = Array.isArray(payload.requiredMediaTypes) ? payload.requiredMediaTypes : [];
+  return requiredMediaTypes.some((item) => String(item ?? "").trim().toLowerCase() === "image");
 }

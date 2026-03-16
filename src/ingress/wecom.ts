@@ -133,6 +133,15 @@ export class WeComIngressAdapter implements IngressAdapter {
 
       try {
         const response = await sessionManager.enqueue(envelope);
+        if (hasResponseImages(response)) {
+          const unsupportedReply = buildTextReply(
+            fromUser,
+            toUser,
+            "当前通道不支持图片回复，请使用 WeCom bridge 通道。"
+          );
+          res.type("application/xml").send(unsupportedReply);
+          return;
+        }
         const reply = buildTextReply(fromUser, toUser, response.text);
         res.type("application/xml").send(reply);
       } catch {
@@ -161,6 +170,16 @@ function buildTextReply(toUser: string, fromUser: string, content: string): stri
     `<Content><![CDATA[${content}]]></Content>` +
     "</xml>"
   );
+}
+
+function hasResponseImages(response: { data?: { image?: unknown; images?: unknown[] } }): boolean {
+  if (!response || !response.data) {
+    return false;
+  }
+  if (response.data.image) {
+    return true;
+  }
+  return Array.isArray(response.data.images) && response.data.images.length > 0;
 }
 
 function rawXmlMiddleware(req: Request, res: ExResponse, next: () => void): void {
