@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -264,6 +265,14 @@ export function MarketSection(props: MarketSectionProps) {
             <Button type="button" variant="outline" onClick={props.onAddMarketFund}>
               添加持仓
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={props.importingMarketCodes}
+              onClick={props.onImportMarketCodes}
+            >
+              {props.importingMarketCodes ? "导入中..." : "批量导入 code"}
+            </Button>
             <Button type="button" disabled={props.savingMarketPortfolio} onClick={props.onSaveMarketPortfolio}>
               {props.savingMarketPortfolio ? "保存中..." : "保存全部（含现金）"}
             </Button>
@@ -271,6 +280,20 @@ export function MarketSection(props: MarketSectionProps) {
               刷新
             </Button>
           </div>
+        </div>
+
+        <div className="space-y-1.5 rounded-md border border-border p-3">
+          <Label htmlFor="market-batch-codes">批量导入代码（自动补全名称）</Label>
+          <Textarea
+            id="market-batch-codes"
+            rows={3}
+            value={props.marketBatchCodesInput}
+            onChange={(event) => props.onMarketBatchCodesInputChange(event.target.value)}
+            placeholder="输入 code，支持空格/逗号/换行，例如：\n510300,159915\n600519 000001"
+          />
+          <p className="text-xs text-muted-foreground">
+            导入后会写入持仓持久化数据；已有代码会保留数量/成本，只更新名称。
+          </p>
         </div>
 
         <Table>
@@ -357,8 +380,9 @@ export function MarketSection(props: MarketSectionProps) {
                       type="number"
                       min={0}
                       step="0.0001"
-                      value={fund.quantity}
+                      value={fund.quantity ?? ""}
                       onChange={(event) => props.onMarketFundChange(index, "quantity", event.target.value)}
+                      placeholder="可留空"
                     />
                   </TableCell>
                   <TableCell>
@@ -366,8 +390,9 @@ export function MarketSection(props: MarketSectionProps) {
                       type="number"
                       min={0}
                       step="0.0001"
-                      value={fund.avgCost}
+                      value={fund.avgCost ?? ""}
                       onChange={(event) => props.onMarketFundChange(index, "avgCost", event.target.value)}
+                      placeholder="可留空"
                     />
                   </TableCell>
                   <TableCell>

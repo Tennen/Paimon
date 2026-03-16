@@ -21,7 +21,14 @@ export function formatPortfolio(portfolio) {
 
   lines.push("持仓:");
   for (const item of portfolio.funds) {
-    lines.push(`- ${item.code} | quantity=${formatNumber(item.quantity)} | avgCost=${formatNumber(item.avgCost)}`);
+    const metrics = [];
+    if (Number.isFinite(Number(item.quantity)) && Number(item.quantity) > 0) {
+      metrics.push(`quantity=${formatNumber(item.quantity)}`);
+    }
+    if (Number.isFinite(Number(item.avgCost)) && Number(item.avgCost) >= 0) {
+      metrics.push(`avgCost=${formatNumber(item.avgCost)}`);
+    }
+    lines.push(`- ${item.code}${metrics.length > 0 ? ` | ${metrics.join(" | ")}` : ""}`);
   }
   lines.push(`持仓存储键: ${MARKET_PORTFOLIO_STORE}`);
 
@@ -36,8 +43,8 @@ export function formatPortfolioAddResult(result) {
   return [
     actionText,
     `标的: ${holdingLabel}`,
-    `数量: ${formatNumber(holding.quantity)}`,
-    `平均成本: ${formatNumber(holding.avgCost)}`,
+    `数量: ${Number.isFinite(Number(holding.quantity)) && Number(holding.quantity) > 0 ? formatNumber(holding.quantity) : "-"}`,
+    `平均成本: ${Number.isFinite(Number(holding.avgCost)) && Number(holding.avgCost) >= 0 ? formatNumber(holding.avgCost) : "-"}`,
     "",
     formatPortfolio(result.portfolio || { funds: [], cash: 0 })
   ].join("\n");

@@ -33,34 +33,36 @@ export function executeRuleEngine(input) {
 
   const assetSignals = [];
   for (const holding of portfolio.funds) {
+    const quantity = toOptionalPositiveNumber(holding.quantity);
+    const avgCost = toOptionalNonNegativeNumber(holding.avgCost);
     const marketAsset = marketAssets[holding.code] || null;
     const name = normalizeAssetName(holding.name) || normalizeAssetName(marketAsset && marketAsset.name);
     const metrics = featureLayer.assets[holding.code] || null;
     if (!metrics) {
+      const missingMetrics = {
+        ma5: null,
+        ma10: null,
+        ma20: null,
+        pctChange: null,
+        volumeChangeRate: null,
+        price: null,
+        prevClose: null,
+        ...(Number.isFinite(quantity) ? { quantity } : {}),
+        ...(Number.isFinite(avgCost) ? { avgCost } : {})
+      };
       assetSignals.push({
         code: holding.code,
         name,
         signal: "DATA_MISSING",
-        metrics: {
-          ma5: null,
-          ma10: null,
-          ma20: null,
-          pctChange: null,
-          volumeChangeRate: null,
-          price: null,
-          prevClose: null,
-          quantity: holding.quantity,
-          avgCost: holding.avgCost,
-          positionPnLPct: null
-        }
+        metrics: missingMetrics
       });
       continue;
     }
 
     const signal = evaluateAssetSignal(phase, metrics);
-    const positionPnLPct = holding.avgCost > 0
-      ? round(((metrics.price - holding.avgCost) / holding.avgCost) * 100, 4)
-      : 0;
+    const positionPnLPct = Number.isFinite(avgCost) && avgCost > 0
+      ? round(((metrics.price - avgCost) / avgCost) * 100, 4)
+      : undefined;
 
     assetSignals.push({
       code: holding.code,
@@ -74,9 +76,9 @@ export function executeRuleEngine(input) {
         volumeChangeRate: metrics.volumeChangeRate,
         price: metrics.price,
         prevClose: metrics.prevClose,
-        quantity: holding.quantity,
-        avgCost: holding.avgCost,
-        positionPnLPct
+        ...(Number.isFinite(quantity) ? { quantity } : {}),
+        ...(Number.isFinite(avgCost) ? { avgCost } : {}),
+        ...(Number.isFinite(positionPnLPct) ? { positionPnLPct } : {})
       }
     });
   }
@@ -174,4 +176,17 @@ function evaluateAssetSignal(phase, metrics) {
   }
 
   return "TREND_NEUTRAL";
+}
+
+function toOptionalPositiveNumber(value) {
+  const numeric = safeNumber(value);
+  return numeric > 0 ? numeric : undefined;
+}
+
+function toOptionalNonNegativeNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
+  return numeric;
 }

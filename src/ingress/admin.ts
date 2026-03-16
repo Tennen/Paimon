@@ -69,8 +69,8 @@ type MarketPhase = "midday" | "close";
 type MarketPortfolioFund = {
   code: string;
   name: string;
-  quantity: number;
-  avgCost: number;
+  quantity?: number;
+  avgCost?: number;
 };
 
 type MarketPortfolio = {
@@ -151,6 +151,17 @@ type RunMarketOncePayloadParseResult =
   | { payload: RunMarketOncePayload; error?: undefined }
   | { payload?: undefined; error: string };
 
+type ImportMarketPortfolioCodesPayload = {
+  codes: string[];
+};
+
+type ImportMarketPortfolioCodesResult = {
+  code: string;
+  name?: string;
+  status: "added" | "updated" | "exists" | "not_found" | "error";
+  message?: string;
+};
+
 type TopicSummaryProfileCreatePayload = {
   name: string;
   id?: string;
@@ -178,6 +189,7 @@ const TOPIC_SUMMARY_CONFIG_STORE = DATA_STORE.TOPIC_SUMMARY_CONFIG;
 const TOPIC_SUMMARY_STATE_STORE = DATA_STORE.TOPIC_SUMMARY_STATE;
 const WRITING_ORGANIZER_INDEX_STORE = DATA_STORE.WRITING_ORGANIZER_INDEX;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
+const MARKET_PORTFOLIO_IMPORT_MAX_CODES = 120;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
 
 const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
@@ -1197,6 +1209,81 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
+    app.post("/admin/api/market/portfolio/import-codes", async (req: Request, res: ExResponse) => {
+      const parsed = parseImportMarketPortfolioCodesPayload(req.body);
+      if (!parsed || parsed.codes.length === 0) {
+        res.status(400).json({ error: "codes is required" });
+        return;
+      }
+
+      const portfolio = readMarketPortfolio();
+      const byCode = new Map<string, MarketPortfolioFund>();
+      for (const holding of portfolio.funds) {
+        byCode.set(holding.code, holding);
+      }
+
+      const results = await Promise.all(parsed.codes.map(async (code): Promise<ImportMarketPortfolioCodesResult> => {
+        try {
+          const matched = await resolveMarketSecurityByCode(code);
+          if (!matched) {
+            return {
+              code,
+              status: "not_found",
+              message: "未查询到证券名称"
+            };
+          }
+
+          const existing = byCode.get(code);
+          const name = matched.name || existing?.name || code;
+          const nextHolding: MarketPortfolioFund = {
+            code,
+            name,
+            ...(isPositiveNumber(existing?.quantity) ? { quantity: roundTo(existing.quantity, 4) } : {}),
+            ...(isNonNegativeNumber(existing?.avgCost) ? { avgCost: roundTo(existing.avgCost, 4) } : {})
+          };
+          byCode.set(code, nextHolding);
+
+          if (!existing) {
+            return { code, name, status: "added" };
+          }
+          if ((existing.name || "") !== name) {
+            return { code, name, status: "updated" };
+          }
+          return { code, name, status: "exists" };
+        } catch (error) {
+          return {
+            code,
+            status: "error",
+            message: (error as Error).message ?? "failed to resolve code"
+          };
+        }
+      }));
+
+      const nextPortfolio = normalizeMarketPortfolio({
+        ...portfolio,
+        funds: Array.from(byCode.values())
+      });
+      writeMarketPortfolio(nextPortfolio);
+
+      const summary = results.reduce((acc, item) => {
+        acc[item.status] += 1;
+        return acc;
+      }, {
+        added: 0,
+        updated: 0,
+        exists: 0,
+        not_found: 0,
+        error: 0
+      });
+
+      res.json({
+        ok: true,
+        portfolio: nextPortfolio,
+        results,
+        summary
+      });
+    });
+
     app.get("/admin/api/market/runs", (req: Request, res: ExResponse) => {
       const limit = normalizeLimit(req.query.limit, 10, 1, 80);
       const phaseRaw = req.query.phase;
@@ -1724,6 +1811,37 @@ function parseMarketPortfolioInput(rawBody: unknown): MarketPortfolio | null {
   return normalizeMarketPortfolio(payload);
 }
 
+function parseImportMarketPortfolioCodesPayload(rawBody: unknown): ImportMarketPortfolioCodesPayload | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  const rawCodes = body.codes;
+  let codes: string[] = [];
+
+  if (typeof rawCodes === "string") {
+    codes = parseMarketCodeList(rawCodes);
+  } else if (Array.isArray(rawCodes)) {
+    const joined = rawCodes
+      .map((item) => (typeof item === "string" ? item : ""))
+      .join(" ");
+    codes = parseMarketCodeList(joined);
+  } else {
+    return null;
+  }
+
+  if (codes.length === 0) {
+    return null;
+  }
+
+  if (codes.length > MARKET_PORTFOLIO_IMPORT_MAX_CODES) {
+    codes = codes.slice(0, MARKET_PORTFOLIO_IMPORT_MAX_CODES);
+  }
+
+  return { codes };
+}
+
 function parseMarketAnalysisConfigInput(rawBody: unknown): MarketAnalysisConfig | null {
   if (!rawBody || typeof rawBody !== "object") {
     return null;
@@ -2228,17 +2346,26 @@ function normalizeMarketPortfolio(input: unknown): MarketPortfolio {
     const value = item as Record<string, unknown>;
     const code = normalizeMarketCode(value.code);
     const name = typeof value.name === "string" ? value.name.trim() : "";
-    const quantity = Number(value.quantity);
-    const avgCost = Number(value.avgCost);
-    if (!code || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(avgCost) || avgCost < 0) {
+    if (!code) {
       continue;
     }
-    funds.push({
+
+    const holding: MarketPortfolioFund = {
       code,
-      name,
-      quantity: roundTo(quantity, 4),
-      avgCost: roundTo(avgCost, 4)
-    });
+      name
+    };
+
+    const quantity = Number(value.quantity);
+    if (Number.isFinite(quantity) && quantity > 0) {
+      holding.quantity = roundTo(quantity, 4);
+    }
+
+    const avgCost = Number(value.avgCost);
+    if (Number.isFinite(avgCost) && avgCost >= 0) {
+      holding.avgCost = roundTo(avgCost, 4);
+    }
+
+    funds.push(holding);
   }
 
   const dedupMap = new Map<string, MarketPortfolioFund>();
@@ -2262,6 +2389,37 @@ function normalizeMarketCode(raw: unknown): string {
     return digits.slice(-6);
   }
   return digits.padStart(6, "0");
+}
+
+function parseMarketCodeList(raw: string): string[] {
+  const text = String(raw ?? "").trim();
+  if (!text) {
+    return [];
+  }
+
+  const tokenized = text
+    .split(/[\s,，;；|]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const values = tokenized.length > 0 ? tokenized : [text];
+
+  const dedup = new Set<string>();
+  for (const item of values) {
+    const extracted = extractSixDigitCode(item);
+    const code = normalizeMarketCode(extracted);
+    if (code) {
+      dedup.add(code);
+    }
+  }
+  return Array.from(dedup);
+}
+
+function isPositiveNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function normalizeMarketAnalysisEngine(raw: unknown): string {
@@ -2320,6 +2478,23 @@ function parseMarketPhase(raw: unknown): MarketPhase | null {
   }
   if (value === "close") {
     return "close";
+  }
+  return null;
+}
+
+async function resolveMarketSecurityByCode(code: string): Promise<MarketSecuritySearchItem | null> {
+  const items = await searchMarketSecurities(code, 12);
+  const normalizedCode = normalizeMarketCode(code);
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const exact = items.find((item) => normalizeMarketCode(item.code) === normalizedCode);
+  if (exact) {
+    return {
+      ...exact,
+      code: normalizedCode
+    };
   }
   return null;
 }

@@ -94,6 +94,17 @@ data/              # Runtime data files
   - `POST /admin/api/llm/providers/default`
   - `DELETE /admin/api/llm/providers/:id`
 
+## Market Admin API Entry Points
+
+- Market admin APIs are owned by `src/ingress/admin.ts` and must keep transport/input normalization concerns in ingress.
+- Current market endpoints include:
+  - `GET /admin/api/market/config`
+  - `PUT /admin/api/market/config`
+  - `GET /admin/api/market/securities/search`
+  - `POST /admin/api/market/portfolio/import-codes`
+  - `GET /admin/api/market/runs`
+  - `POST /admin/api/market/run-once`
+
 ## Structural Change Checklist
 
 1. Move directories/files.

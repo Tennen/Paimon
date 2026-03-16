@@ -241,8 +241,8 @@ export async function runFundAnalysis(input: RunFundAnalysisInput): Promise<RunF
 function buildFundIdentity(holding: {
   code: string;
   name: string;
-  quantity: number;
-  avgCost: number;
+  quantity?: number;
+  avgCost?: number;
 }): FundIdentity {
   const fundCode = normalizeCode(holding.code);
   const fundName = String(holding.name || "").trim();
@@ -258,8 +258,8 @@ function buildFundIdentity(holding: {
     market,
     currency: "CNY",
     account_position: {
-      quantity: normalizeNumber(holding.quantity, 0),
-      avg_cost: normalizeNumber(holding.avgCost, 0)
+      quantity: normalizeOptionalNonNegativeNumber(holding.quantity),
+      avg_cost: normalizeOptionalNonNegativeNumber(holding.avgCost)
     },
     fund_type: fundType,
     strategy_type: strategyType,
@@ -1249,6 +1249,14 @@ function normalizeVolume(value: unknown): number {
 function normalizeNumber(value: unknown, fallback: number): number {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function normalizeOptionalNonNegativeNumber(value: unknown): number | undefined {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
+  return numeric;
 }
 
 function dedupStrings(values: string[]): string[] {

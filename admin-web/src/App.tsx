@@ -31,6 +31,7 @@ import {
   MarketFundHolding,
   MarketPhase,
   MarketPortfolio,
+  MarketPortfolioImportResponse,
   MarketRunOnceResponse,
   MarketRunSummary,
   MarketSecuritySearchItem,
@@ -133,6 +134,8 @@ export default function App() {
   const [marketTaskUserId, setMarketTaskUserId] = useState("");
   const [marketMiddayTime, setMarketMiddayTime] = useState("13:30");
   const [marketCloseTime, setMarketCloseTime] = useState("15:15");
+  const [marketBatchCodesInput, setMarketBatchCodesInput] = useState("");
+  const [importingMarketCodes, setImportingMarketCodes] = useState(false);
   const [marketSearchInputs, setMarketSearchInputs] = useState<string[]>([]);
   const [marketSearchResults, setMarketSearchResults] = useState<MarketSecuritySearchItem[][]>([]);
   const [searchingMarketFundIndex, setSearchingMarketFundIndex] = useState<number | null>(null);
@@ -900,7 +903,7 @@ export default function App() {
   function handleAddMarketFund(): void {
     setMarketPortfolio((prev) => ({
       ...prev,
-      funds: prev.funds.concat([{ code: "", name: "", quantity: 0, avgCost: 0 }])
+      funds: prev.funds.concat([{ code: "", name: "" }])
     }));
     setMarketSavedFundsByRow((prev) => prev.concat(null));
     setMarketSearchInputs((prev) => prev.concat(""));
@@ -1041,17 +1044,25 @@ export default function App() {
           return { ...fund, name: value };
         }
 
-        const numeric = Number(value);
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return {
+            ...fund,
+            ...(key === "quantity" ? { quantity: undefined } : { avgCost: undefined })
+          };
+        }
+
+        const numeric = Number(trimmed);
         if (key === "quantity") {
           return {
             ...fund,
-            quantity: Number.isFinite(numeric) ? numeric : 0
+            quantity: Number.isFinite(numeric) && numeric > 0 ? numeric : undefined
           };
         }
 
         return {
           ...fund,
-          avgCost: Number.isFinite(numeric) ? numeric : 0
+          avgCost: Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined
         };
       })
     }));
@@ -1138,7 +1149,7 @@ export default function App() {
     }
     const target = normalizeMarketFund(fund);
     if (!isValidMarketFund(target)) {
-      setNotice({ type: "error", title: "请完善该行持仓后再保存（代码/数量/成本）" });
+      setNotice({ type: "error", title: "请先填写合法代码后再保存该行" });
       return;
     }
 
@@ -1216,6 +1227,63 @@ export default function App() {
       notifyError("保存 Market 配置失败", error);
     } finally {
       setSavingMarketPortfolio(false);
+    }
+  }
+
+  async function handleImportMarketCodes(): Promise<void> {
+    if (savingMarketPortfolio || savingMarketFundIndex !== null || savingMarketAnalysisConfig || importingMarketCodes) {
+      return;
+    }
+
+    const rawCodes = marketBatchCodesInput.trim();
+    if (!rawCodes) {
+      setNotice({ type: "error", title: "请先输入 code 列表" });
+      return;
+    }
+
+    setImportingMarketCodes(true);
+    try {
+      const payload = await request<MarketPortfolioImportResponse>("/admin/api/market/portfolio/import-codes", {
+        method: "POST",
+        body: JSON.stringify({ codes: rawCodes })
+      });
+      const nextPortfolio = normalizeMarketPortfolio(payload.portfolio ?? DEFAULT_MARKET_PORTFOLIO);
+      setMarketPortfolio(nextPortfolio);
+      setMarketSavedFundsByRow(nextPortfolio.funds.map((item) => ({ ...item })));
+      setMarketSavedCash(nextPortfolio.cash);
+
+      const summary = payload.summary ?? {
+        added: 0,
+        updated: 0,
+        exists: 0,
+        not_found: 0,
+        error: 0
+      };
+      const summaryText = [
+        `新增 ${summary.added}`,
+        `更新 ${summary.updated}`,
+        `已存在 ${summary.exists}`,
+        `未命中 ${summary.not_found}`,
+        `失败 ${summary.error}`
+      ].join("，");
+
+      const issueCodes = (payload.results ?? [])
+        .filter((item) => item.status === "not_found" || item.status === "error")
+        .map((item) => item.code)
+        .filter(Boolean)
+        .slice(0, 8);
+
+      setNotice({
+        type: summary.error > 0 ? "error" : "success",
+        title: "批量导入持仓完成",
+        text: issueCodes.length > 0
+          ? `${summaryText}。异常 code: ${issueCodes.join(", ")}`
+          : summaryText
+      });
+    } catch (error) {
+      notifyError("批量导入 market code 失败", error);
+    } finally {
+      setImportingMarketCodes(false);
     }
   }
 
@@ -1860,6 +1928,8 @@ export default function App() {
               marketTaskUserId={marketTaskUserId}
               marketMiddayTime={marketMiddayTime}
               marketCloseTime={marketCloseTime}
+              marketBatchCodesInput={marketBatchCodesInput}
+              importingMarketCodes={importingMarketCodes}
               marketSearchInputs={marketSearchInputs}
               marketSearchResults={marketSearchResults}
               searchingMarketFundIndex={searchingMarketFundIndex}
@@ -1876,6 +1946,7 @@ export default function App() {
               onMarketTaskUserIdChange={setMarketTaskUserId}
               onMarketMiddayTimeChange={setMarketMiddayTime}
               onMarketCloseTimeChange={setMarketCloseTime}
+              onMarketBatchCodesInputChange={setMarketBatchCodesInput}
               onAddMarketFund={handleAddMarketFund}
               onRemoveMarketFund={handleRemoveMarketFund}
               onMarketFundChange={handleMarketFundChange}
@@ -1885,6 +1956,7 @@ export default function App() {
               onSaveMarketFund={(index) => void handleSaveMarketFund(index)}
               onSaveMarketPortfolio={() => void handleSaveMarketPortfolio()}
               onSaveMarketAnalysisConfig={() => void handleSaveMarketAnalysisConfig()}
+              onImportMarketCodes={() => void handleImportMarketCodes()}
               onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
               onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
               onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
@@ -2011,11 +2083,13 @@ function resizeSavedFundsArray(values: Array<MarketFundHolding | null>, targetLe
 
 function normalizeMarketFund(fund: Partial<MarketFundHolding> | null | undefined): MarketFundHolding {
   const digits = String(fund?.code ?? "").replace(/\D/g, "");
+  const quantity = Number(fund?.quantity);
+  const avgCost = Number(fund?.avgCost);
   return {
     code: digits ? digits.slice(-6).padStart(6, "0") : "",
     name: String(fund?.name ?? "").trim(),
-    quantity: Number.isFinite(Number(fund?.quantity)) ? Number(fund?.quantity) : 0,
-    avgCost: Number.isFinite(Number(fund?.avgCost)) ? Number(fund?.avgCost) : 0
+    ...(Number.isFinite(quantity) && quantity > 0 ? { quantity } : {}),
+    ...(Number.isFinite(avgCost) && avgCost >= 0 ? { avgCost } : {})
   };
 }
 
@@ -2458,14 +2532,18 @@ function clampFloatValue(raw: unknown, fallback: number, min: number, max: numbe
 }
 
 function isValidMarketFund(fund: MarketFundHolding): boolean {
-  return Boolean(fund.code) && Number.isFinite(fund.quantity) && fund.quantity > 0 && Number.isFinite(fund.avgCost) && fund.avgCost >= 0;
+  return Boolean(fund.code);
 }
 
 function isSameMarketFund(left: MarketFundHolding, right: MarketFundHolding): boolean {
+  const leftQuantity = typeof left.quantity === "number" ? left.quantity : null;
+  const rightQuantity = typeof right.quantity === "number" ? right.quantity : null;
+  const leftAvgCost = typeof left.avgCost === "number" ? left.avgCost : null;
+  const rightAvgCost = typeof right.avgCost === "number" ? right.avgCost : null;
   return left.code === right.code
     && left.name === right.name
-    && left.quantity === right.quantity
-    && left.avgCost === right.avgCost;
+    && leftQuantity === rightQuantity
+    && leftAvgCost === rightAvgCost;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

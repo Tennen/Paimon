@@ -19,7 +19,7 @@ export function buildFundSystemPrompt(): string {
 }
 
 export function buildFundUserPrompt(input: FundPromptInput): string {
-  const payload = {
+  const payload = prunePromptPayload({
     section_order: [
       "basic_info",
       "raw_context_summary",
@@ -67,11 +67,11 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
       "若关键序列缺失，decision_type 应偏向 watch/hold"
     ],
     schema: buildFundDashboardSchemaHint()
-  };
+  });
 
   return [
     "# 基金决策仪表盘分析请求",
-    JSON.stringify(payload, null, 2)
+    JSON.stringify(payload || {}, null, 2)
   ].join("\n");
 }
 
@@ -110,4 +110,43 @@ function buildFundDashboardSchemaHint(): Record<string, unknown> {
       missing_fields: ["string"]
     }
   };
+}
+
+function prunePromptPayload(input: unknown): unknown {
+  if (input === null || input === undefined) {
+    return undefined;
+  }
+
+  if (typeof input === "number") {
+    return Number.isFinite(input) ? input : undefined;
+  }
+
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  if (typeof input === "boolean") {
+    return input;
+  }
+
+  if (Array.isArray(input)) {
+    const nextArray = input
+      .map((item) => prunePromptPayload(item))
+      .filter((item) => item !== undefined);
+    return nextArray.length > 0 ? nextArray : undefined;
+  }
+
+  if (typeof input === "object") {
+    const source = input as Record<string, unknown>;
+    const entries = Object.entries(source)
+      .map(([key, value]) => [key, prunePromptPayload(value)] as const)
+      .filter(([, value]) => value !== undefined);
+    if (entries.length === 0) {
+      return undefined;
+    }
+    return Object.fromEntries(entries);
+  }
+
+  return undefined;
 }

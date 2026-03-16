@@ -161,7 +161,10 @@ function exceedsRiskBudget(features: FundFeatureContext, riskLevel: FundRiskLeve
 
 function estimateCostPenalty(raw: FundRawContext, features: FundFeatureContext): number {
   const latest = raw.price_or_nav_series[raw.price_or_nav_series.length - 1]?.value;
-  const avgCost = raw.account_context.avg_cost;
+  const avgCostValue = raw.account_context.avg_cost;
+  const avgCost = typeof avgCostValue === "number" && Number.isFinite(avgCostValue)
+    ? avgCostValue
+    : NaN;
   if (!Number.isFinite(latest) || latest <= 0 || !Number.isFinite(avgCost) || avgCost <= 0) {
     return 0;
   }

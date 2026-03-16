@@ -117,8 +117,14 @@ export function addPortfolioHolding(holdingInput) {
 
   if (index >= 0) {
     const existing = funds[index];
-    const existingQuantity = Math.max(0, toNumber(existing.quantity));
-    const existingAvgCost = Math.max(0, toNumber(existing.avgCost));
+    const existingQuantityValue = toNumber(existing.quantity);
+    const existingAvgCostValue = toNumber(existing.avgCost);
+    const existingQuantity = Number.isFinite(existingQuantityValue) && existingQuantityValue > 0
+      ? existingQuantityValue
+      : 0;
+    const existingAvgCost = Number.isFinite(existingAvgCostValue) && existingAvgCostValue >= 0
+      ? existingAvgCostValue
+      : 0;
     const nextQuantity = round(existingQuantity + quantity, 4);
     const nextAvgCost = nextQuantity > 0
       ? round(((existingQuantity * existingAvgCost) + (quantity * avgCost)) / nextQuantity, 4)
@@ -227,16 +233,22 @@ export function normalizePortfolio(input) {
     const quantity = toNumber(item.quantity);
     const avgCost = toNumber(item.avgCost);
 
-    if (!code || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(avgCost) || avgCost < 0) {
+    if (!code) {
       continue;
     }
 
-    funds.push({
+    const normalized = {
       code,
-      name,
-      quantity: round(quantity, 4),
-      avgCost: round(avgCost, 4)
-    });
+      name
+    };
+    if (Number.isFinite(quantity) && quantity > 0) {
+      normalized.quantity = round(quantity, 4);
+    }
+    if (Number.isFinite(avgCost) && avgCost >= 0) {
+      normalized.avgCost = round(avgCost, 4);
+    }
+
+    funds.push(normalized);
   }
 
   const dedup = new Map();

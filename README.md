@@ -93,7 +93,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 定时任务和推送用户管理
 - Topic Summary 配置管理
 - Writing Organizer 主题列表/详情查看与整理操作
-- Market Analysis 配置与运行记录查看
+- Market Analysis 配置、持仓批量导入与运行记录查看
 - Evolution 队列与状态管理
 - 审计日志与本地数据持久化
 
@@ -252,6 +252,28 @@ STT_FAST_WHISPER_MODEL=small
 - `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM -> JSON）
 
 基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
+
+持仓字段说明（Admin 与持久化一致）：
+
+- `code` 必填
+- `name` 可选（推荐填写，或通过 admin 批量导入自动补全）
+- `quantity` 可选
+- `avgCost` 可选
+
+当 `quantity/avgCost` 未填写时，分析流程会保留该持仓代码参与行情拉取，但不会把未填写字段注入解释 prompt。
+
+Admin 批量导入代码接口：
+
+```http
+POST /admin/api/market/portfolio/import-codes
+Content-Type: application/json
+
+{
+  "codes": "510300, 159915\n600519 000001"
+}
+```
+
+接口会逐个查询证券名称并写入持仓持久化数据（已存在代码保留原数量/成本，仅更新名称）。
 
 可选环境变量（示例）：
 

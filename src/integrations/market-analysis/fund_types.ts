@@ -28,8 +28,8 @@ export type MarketPhase = "midday" | "close";
 export type PortfolioHolding = {
   code: string;
   name: string;
-  quantity: number;
-  avgCost: number;
+  quantity?: number;
+  avgCost?: number;
 };
 
 export type MarketPortfolio = {
@@ -57,8 +57,8 @@ export type FundIdentity = {
   market: string;
   currency: string;
   account_position: {
-    quantity: number;
-    avg_cost: number;
+    quantity?: number;
+    avg_cost?: number;
   };
   fund_type: FundType;
   strategy_type: StrategyType;
@@ -101,8 +101,8 @@ export type FundRawContext = {
     market_news: FundNewsItem[];
   };
   account_context: {
-    current_position: number;
-    avg_cost: number;
+    current_position?: number;
+    avg_cost?: number;
     budget: number;
     risk_preference: string;
     holding_horizon: string;

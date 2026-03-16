@@ -87,7 +87,7 @@ async function generateExplanationViaConfiguredLlm(signalResult, optionalNewsCon
           "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
           "写作风格要求：自然、具体、克制；禁止套话和机器人口吻，例如“根据以上分析”“综合来看”“仅供参考请谨慎”等空泛词。",
           "必须覆盖每个 assetSignals 持仓项，并且逐项给出：1) 股票名称与代码 2) 输入关键数据 3) 短期建议 4) 长期建议。",
-          "输入关键数据至少包含可用字段：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段必须写“数据缺失”。",
+          "输入关键数据优先引用可用字段：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；未提供的字段不要编造，也不必强行出现。",
           "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议必须明确为“增持/减持/持有(或观望)”之一，并附一句理由。",
           "允许额外给出 1-3 条组合层面的“参考建议”，且不能与既有 signalResult 冲突。",
           "请只输出 JSON，不要 markdown，不要额外说明，格式如下：",
@@ -96,10 +96,7 @@ async function generateExplanationViaConfiguredLlm(signalResult, optionalNewsCon
       },
       {
         role: "user",
-        content: JSON.stringify({
-          signalResult,
-          optionalNewsContext: optionalNewsContext || null
-        })
+        content: JSON.stringify(buildExplanationPromptPayload(signalResult, optionalNewsContext))
       }
     ]
   });
@@ -194,10 +191,7 @@ async function generateExplanationViaGeminiModel(signalResult, optionalNewsConte
           role: "user",
           parts: [
             {
-              text: JSON.stringify({
-                signalResult,
-                optionalNewsContext: optionalNewsContext || null
-              })
+              text: JSON.stringify(buildExplanationPromptPayload(signalResult, optionalNewsContext))
             }
           ]
         }
@@ -244,15 +238,58 @@ function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {
     "1) 整体信号结论：1-2句，明确提及 benchmark 与市场状态。",
     "2) 持仓逐项解读：必须覆盖每个 assetSignals 项。每项都要写：股票名称+代码、输入关键数据、短期建议、长期建议。",
     "3) 参考建议：1-3条组合层面的补充建议（可选），不得与既有 signalResult 冲突。",
-    "输入关键数据必须优先引用：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；缺失字段写“数据缺失”。",
+    "输入关键数据优先引用：price/pctChange/ma5/ma10/ma20/volumeChangeRate/quantity/avgCost/positionPnLPct；未提供字段不必强行写出。",
     "短期建议定义为1-5个交易日，长期建议定义为1-3个月；建议动作用词必须明确为“增持/减持/持有(或观望)”并给出一句理由。",
     "文案不得编造任何输入中不存在的指标、数值或结论。",
     "输入数据(JSON):",
-    JSON.stringify({
-      signalResult: signalResult || null,
-      optionalNewsContext: optionalNewsContext || null
-    })
+    JSON.stringify(buildExplanationPromptPayload(signalResult, optionalNewsContext))
   ].join("");
+}
+
+function buildExplanationPromptPayload(signalResult, optionalNewsContext) {
+  return prunePromptPayload({
+    signalResult: signalResult || null,
+    optionalNewsContext: optionalNewsContext || null
+  }) || {};
+}
+
+function prunePromptPayload(input) {
+  if (input === null || input === undefined) {
+    return undefined;
+  }
+
+  if (typeof input === "number") {
+    return Number.isFinite(input) ? input : undefined;
+  }
+
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  if (typeof input === "boolean") {
+    return input;
+  }
+
+  if (Array.isArray(input)) {
+    const nextArray = input
+      .map((item) => prunePromptPayload(item))
+      .filter((item) => item !== undefined);
+    return nextArray.length > 0 ? nextArray : undefined;
+  }
+
+  if (typeof input === "object") {
+    const source = input;
+    const nextEntries = Object.entries(source)
+      .map(([key, value]) => [key, prunePromptPayload(value)] as const)
+      .filter(([, value]) => value !== undefined);
+    if (nextEntries.length === 0) {
+      return undefined;
+    }
+    return Object.fromEntries(nextEntries);
+  }
+
+  return undefined;
 }
 
 function extractTextFromBridgeResponse(response) {

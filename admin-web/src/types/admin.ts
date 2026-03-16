@@ -182,8 +182,8 @@ export type ScheduledTask = {
 export type MarketFundHolding = {
   code: string;
   name: string;
-  quantity: number;
-  avgCost: number;
+  quantity?: number;
+  avgCost?: number;
 };
 
 export type MarketPortfolio = {
@@ -246,6 +246,26 @@ export type MarketRunOnceResponse = {
   imageCount?: number;
 };
 
+export type MarketPortfolioImportResultItem = {
+  code: string;
+  name?: string;
+  status: "added" | "updated" | "exists" | "not_found" | "error";
+  message?: string;
+};
+
+export type MarketPortfolioImportResponse = {
+  ok: boolean;
+  portfolio: MarketPortfolio;
+  results: MarketPortfolioImportResultItem[];
+  summary: {
+    added: number;
+    updated: number;
+    exists: number;
+    not_found: number;
+    error: number;
+  };
+};
+
 export type MarketSectionProps = {
   marketConfig: MarketConfig | null;
   marketPortfolio: MarketPortfolio;
@@ -263,6 +283,8 @@ export type MarketSectionProps = {
   marketTaskUserId: string;
   marketMiddayTime: string;
   marketCloseTime: string;
+  marketBatchCodesInput: string;
+  importingMarketCodes: boolean;
   marketSearchInputs: string[];
   marketSearchResults: MarketSecuritySearchItem[][];
   searchingMarketFundIndex: number | null;
@@ -279,6 +301,7 @@ export type MarketSectionProps = {
   onMarketTaskUserIdChange: (value: string) => void;
   onMarketMiddayTimeChange: (value: string) => void;
   onMarketCloseTimeChange: (value: string) => void;
+  onMarketBatchCodesInputChange: (value: string) => void;
   onAddMarketFund: () => void;
   onRemoveMarketFund: (index: number) => void;
   onMarketFundChange: (index: number, key: keyof MarketFundHolding, value: string) => void;
@@ -288,6 +311,7 @@ export type MarketSectionProps = {
   onSaveMarketFund: (index: number) => void;
   onSaveMarketPortfolio: () => void;
   onSaveMarketAnalysisConfig: () => void;
+  onImportMarketCodes: () => void;
   onRefresh: () => void;
   onBootstrapMarketTasks: () => void;
   onMarketRunOnceWithExplanationChange: (value: boolean) => void;
