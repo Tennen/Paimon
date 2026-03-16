@@ -67,6 +67,8 @@ type SystemProviderDraft = {
   chatCompletionsPath: string;
   model: string;
   planningModel: string;
+  reasoningEffort: string;
+  planningReasoningEffort: string;
   timeoutMs: string;
   planningTimeoutMs: string;
   maxRetries: string;
@@ -167,6 +169,8 @@ const EMPTY_PROVIDER_DRAFT: SystemProviderDraft = {
   chatCompletionsPath: "",
   model: "",
   planningModel: "",
+  reasoningEffort: "",
+  planningReasoningEffort: "",
   timeoutMs: "",
   planningTimeoutMs: "",
   maxRetries: "",
@@ -507,7 +511,7 @@ export function SystemSection(props: SystemSectionProps) {
           <Card>
             <CardHeader>
               <CardTitle>Provider 列表</CardTitle>
-              <CardDescription>支持多条 OpenAI-like / Gemini-like / Ollama / llama-server，gpt-plugin 仅允许一条</CardDescription>
+              <CardDescription>支持多条 OpenAI-like / Gemini-like / Ollama / llama-server / codex，gpt-plugin 仅允许一条</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {providerItems.length === 0 ? (
@@ -606,6 +610,7 @@ export function SystemSection(props: SystemSectionProps) {
                       <SelectItem value="openai">openai-like</SelectItem>
                       <SelectItem value="gemini">gemini-like</SelectItem>
                       <SelectItem value="llama-server">llama-server</SelectItem>
+                      <SelectItem value="codex">codex-cli</SelectItem>
                       <SelectItem value="gpt-plugin">gpt-plugin</SelectItem>
                     </SelectContent>
                   </Select>
@@ -623,7 +628,7 @@ export function SystemSection(props: SystemSectionProps) {
               <Separator />
 
               <div className="grid gap-3 md:grid-cols-2">
-                {providerDraft.type !== "gpt-plugin" ? (
+                {providerDraft.type === "ollama" || providerDraft.type === "openai" || providerDraft.type === "llama-server" || providerDraft.type === "gemini" ? (
                   <div className="space-y-2">
                     <Label>baseUrl</Label>
                     <Input
@@ -673,6 +678,28 @@ export function SystemSection(props: SystemSectionProps) {
                     placeholder="留空则跟随 model"
                   />
                 </div>
+
+                {providerDraft.type === "codex" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>reasoningEffort（可选）</Label>
+                      <Input
+                        value={providerDraft.reasoningEffort}
+                        onChange={(event) => updateProviderDraft("reasoningEffort", event.target.value)}
+                        placeholder="minimal / low / medium / high / xhigh"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>planningReasoningEffort（可选）</Label>
+                      <Input
+                        value={providerDraft.planningReasoningEffort}
+                        onChange={(event) => updateProviderDraft("planningReasoningEffort", event.target.value)}
+                        placeholder="留空则跟随 reasoningEffort"
+                      />
+                    </div>
+                  </>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label>timeoutMs（可选）</Label>
                   <Input
@@ -1159,7 +1186,7 @@ export function SystemSection(props: SystemSectionProps) {
 }
 
 function normalizeProviderType(raw: string): LLMProviderType {
-  if (raw === "openai" || raw === "gemini" || raw === "llama-server" || raw === "gpt-plugin") {
+  if (raw === "openai" || raw === "gemini" || raw === "llama-server" || raw === "gpt-plugin" || raw === "codex") {
     return raw;
   }
   return "ollama";
@@ -1194,6 +1221,8 @@ function convertProviderToDraft(profile: LLMProviderProfile): SystemProviderDraf
     chatCompletionsPath: toText(config.chatCompletionsPath),
     model: toText(config.model),
     planningModel: toText(config.planningModel),
+    reasoningEffort: toText(config.reasoningEffort),
+    planningReasoningEffort: toText(config.planningReasoningEffort),
     timeoutMs: toNumberText(config.timeoutMs),
     planningTimeoutMs: toNumberText(config.planningTimeoutMs),
     maxRetries: toNumberText(config.maxRetries),
@@ -1305,6 +1334,17 @@ function buildProviderProfileFromDraft(
   if (thinkingMaxNewTokens.error) {
     return thinkingMaxNewTokens;
   }
+  const reasoningEffort = parseOptionalReasoningEffort(draft.reasoningEffort, "reasoningEffort");
+  if (reasoningEffort.error) {
+    return reasoningEffort;
+  }
+  const planningReasoningEffort = parseOptionalReasoningEffort(
+    draft.planningReasoningEffort,
+    "planningReasoningEffort"
+  );
+  if (planningReasoningEffort.error) {
+    return planningReasoningEffort;
+  }
 
   const type = normalizeProviderType(draft.type);
   const model = normalizeOptionalText(draft.model);
@@ -1412,13 +1452,45 @@ function buildProviderProfileFromDraft(
     };
   }
 
+  if (type === "codex") {
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig,
+          reasoningEffort: reasoningEffort.value,
+          planningReasoningEffort: planningReasoningEffort.value
+        }
+      }
+    };
+  }
+
+  if (type === "gpt-plugin") {
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig
+        }
+      }
+    };
+  }
+
   return {
     provider: {
       id,
       name,
-      type: "gpt-plugin",
+      type: "ollama",
       config: {
-        ...commonConfig
+        ...commonConfig,
+        baseUrl,
+        thinkingBudgetEnabled: draft.thinkingBudgetEnabled,
+        thinkingBudget: thinkingBudget.value,
+        thinkingMaxNewTokens: thinkingMaxNewTokens.value
       }
     }
   };
@@ -1446,6 +1518,17 @@ function parseOptionalPositiveNumber(raw: string, fieldName: string): { value?: 
     return { error: `${fieldName} 必须是正数` };
   }
   return { value: parsed };
+}
+
+function parseOptionalReasoningEffort(raw: string, fieldName: string): { value?: string; error?: string } {
+  const text = raw.trim().toLowerCase();
+  if (!text) {
+    return {};
+  }
+  if (!["minimal", "low", "medium", "high", "xhigh"].includes(text)) {
+    return { error: `${fieldName} 仅支持 minimal / low / medium / high / xhigh` };
+  }
+  return { value: text };
 }
 
 function parseOptionalJSONObject(

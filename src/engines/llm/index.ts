@@ -24,3 +24,4 @@ export { LlamaServerLLMEngine } from "./llama-server";
 export { OpenAILLMEngine } from "./openai";
 export { GeminiLLMEngine } from "./gemini";
 export { GPTPluginLLMEngine } from "./gpt-plugin";
+export { CodexLLMEngine } from "./codex";

@@ -1,7 +1,7 @@
 import { OpenAIQuotaPolicy, readOpenAIQuotaPolicyFromEnv } from "../../integrations/openai/quotaManager";
 import { DATA_STORE, getStore, registerStore, setStore } from "../../storage/persistence";
 
-export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gemini" | "gpt-plugin";
+export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gemini" | "gpt-plugin" | "codex";
 
 export type OllamaProviderConfig = {
   baseUrl?: string;
@@ -76,6 +76,17 @@ export type GptPluginProviderConfig = {
   strictJson?: boolean;
 };
 
+export type CodexProviderConfig = {
+  model?: string;
+  planningModel?: string;
+  reasoningEffort?: string;
+  planningReasoningEffort?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+};
+
 export type OllamaProviderProfile = {
   id: string;
   name: string;
@@ -111,12 +122,20 @@ export type GptPluginProviderProfile = {
   config: GptPluginProviderConfig;
 };
 
+export type CodexProviderProfile = {
+  id: string;
+  name: string;
+  type: "codex";
+  config: CodexProviderConfig;
+};
+
 export type LLMProviderProfile =
   | OllamaProviderProfile
   | LlamaServerProviderProfile
   | OpenAIProviderProfile
   | GeminiProviderProfile
-  | GptPluginProviderProfile;
+  | GptPluginProviderProfile
+  | CodexProviderProfile;
 
 export type LLMProviderStore = {
   version: 2;
@@ -137,6 +156,7 @@ const DEFAULT_PROVIDER_ID = "default-ollama";
 const DEFAULT_PROVIDER_NAME = "Default Ollama";
 const DEFAULT_GEMINI_PROVIDER_ID = "default-gemini";
 const DEFAULT_GPT_PLUGIN_PROVIDER_ID = "default-gpt-plugin";
+const DEFAULT_CODEX_PROVIDER_ID = "default-codex";
 let providerStoreRegistered = false;
 
 export function ensureLLMProviderStore(): void {
@@ -277,6 +297,9 @@ export function normalizeProviderType(raw: unknown): LLMProviderType {
   if (["gpt-plugin", "gpt_plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt-plugin";
   }
+  if (["codex", "codex-cli", "codex_cli"].includes(value)) {
+    return "codex";
+  }
   return "ollama";
 }
 
@@ -305,6 +328,9 @@ export function resolveLegacyEngineSelector(selector: unknown): {
   }
   if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(lower)) {
     return { isDefault: false, providerType: "gpt-plugin" };
+  }
+  if (["codex", "codex-cli", "codex_cli"].includes(lower)) {
+    return { isDefault: false, providerType: "codex" };
   }
   if (["openai", "openai-like", "openai_like", "openai-api", "chatgpt", "gpt"].includes(lower)) {
     return { isDefault: false, providerType: "openai" };
@@ -438,6 +464,37 @@ function createDefaultProviderProfileFromEnv(): LLMProviderProfile {
     };
   }
 
+  if (providerType === "codex") {
+    const codexModel = normalizeText(
+      process.env.LLM_CODEX_MODEL
+      ?? process.env.CODEX_MODEL
+      ?? process.env.EVOLUTION_CODEX_MODEL
+      ?? process.env.LLM_MODEL
+    );
+    const codexReasoning = parseReasoningEffort(
+      process.env.LLM_CODEX_REASONING_EFFORT
+      ?? process.env.CODEX_MODEL_REASONING_EFFORT
+      ?? process.env.CODEX_REASONING_EFFORT
+      ?? process.env.EVOLUTION_CODEX_REASONING_EFFORT
+    );
+
+    return {
+      id: DEFAULT_CODEX_PROVIDER_ID,
+      name: "Default Codex CLI",
+      type: "codex",
+      config: {
+        model: codexModel,
+        planningModel: normalizeText(process.env.LLM_CODEX_PLANNING_MODEL) ?? codexModel,
+        reasoningEffort: codexReasoning,
+        planningReasoningEffort: parseReasoningEffort(process.env.LLM_CODEX_PLANNING_REASONING_EFFORT) ?? codexReasoning,
+        timeoutMs: parsePositiveInteger(process.env.LLM_TIMEOUT_MS),
+        planningTimeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS),
+        maxRetries: parsePositiveInteger(process.env.LLM_MAX_RETRIES),
+        strictJson: parseBoolean(process.env.LLM_STRICT_JSON)
+      }
+    };
+  }
+
   const defaultModel = normalizeText(process.env.OLLAMA_MODEL) || "qwen3:4b";
   return {
     id: DEFAULT_PROVIDER_ID,
@@ -565,6 +622,15 @@ function normalizeProviderProfile(input: unknown, index: number): LLMProviderPro
     };
   }
 
+  if (type === "codex") {
+    return {
+      id,
+      name,
+      type,
+      config: normalizeCodexConfig(configSource)
+    };
+  }
+
   return {
     id,
     name,
@@ -663,6 +729,20 @@ function normalizeGptPluginConfig(source: Record<string, unknown>): GptPluginPro
   };
 }
 
+function normalizeCodexConfig(source: Record<string, unknown>): CodexProviderConfig {
+  const reasoningEffort = parseReasoningEffort(source.reasoningEffort);
+  return {
+    model: normalizeText(source.model),
+    planningModel: normalizeText(source.planningModel),
+    reasoningEffort,
+    planningReasoningEffort: parseReasoningEffort(source.planningReasoningEffort) ?? reasoningEffort,
+    timeoutMs: parsePositiveInteger(source.timeoutMs),
+    planningTimeoutMs: parsePositiveInteger(source.planningTimeoutMs),
+    maxRetries: parsePositiveInteger(source.maxRetries),
+    strictJson: parseBoolean(source.strictJson)
+  };
+}
+
 function parseEnvObject(raw: unknown): Record<string, unknown> | undefined {
   if (typeof raw !== "string" || raw.trim().length === 0) {
     return undefined;
@@ -720,6 +800,20 @@ function parseBoolean(raw: unknown): boolean | undefined {
     return false;
   }
   return undefined;
+}
+
+function parseReasoningEffort(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const value = raw.trim().toLowerCase();
+  if (!value) {
+    return undefined;
+  }
+  if (!["minimal", "low", "medium", "high", "xhigh"].includes(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 function normalizeText(raw: unknown): string | undefined {

@@ -18,7 +18,7 @@ src/
   core/            # Orchestrator and runtime flow
     re-agent/      # /re sub-agent runtime (ReAct loop + module contracts)
   engines/         # Provider runtimes
-    llm/           # LLM provider adapters (ollama/llama-server/openai/gemini/gpt-plugin) + provider store/factory
+    llm/           # LLM provider adapters (ollama/llama-server/openai/gemini/gpt-plugin/codex) + provider store/factory
     stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # Outbound adapters and domain runtimes (flat by domain)

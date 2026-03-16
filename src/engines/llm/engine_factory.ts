@@ -1,4 +1,5 @@
 import { OpenAIQuotaManager, readOpenAIQuotaPolicyFromEnv } from "../../integrations/openai/quotaManager";
+import { CodexLLMEngine, CodexLLMOptions } from "./codex";
 import { GeminiLLMEngine, GeminiLLMOptions } from "./gemini";
 import { GPTPluginLLMEngine, GPTPluginLLMOptions } from "./gpt-plugin";
 import { LlamaServerLLMEngine, LlamaServerLLMOptions } from "./llama-server";
@@ -57,6 +58,10 @@ export function createLLMEngineFromProfile(profile: LLMProviderProfile): LLMEngi
     return new GPTPluginLLMEngine(profile.config as Partial<GPTPluginLLMOptions>);
   }
 
+  if (profile.type === "codex") {
+    return new CodexLLMEngine(profile.config as Partial<CodexLLMOptions>);
+  }
+
   return new OllamaLLMEngine(profile.config as Partial<OllamaLLMOptions>);
 }
 
@@ -74,6 +79,9 @@ export function createLLMEngineFromProviderType(provider: LLMProvider): LLMEngin
   }
   if (provider === "gpt-plugin") {
     return new GPTPluginLLMEngine();
+  }
+  if (provider === "codex") {
+    return new CodexLLMEngine();
   }
   return new OllamaLLMEngine();
 }
@@ -94,6 +102,9 @@ export function normalizeProvider(providerRaw: string | undefined): LLMProvider 
   }
   if (["gpt-plugin", "gpt_plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt-plugin";
+  }
+  if (["codex", "codex-cli", "codex_cli"].includes(value)) {
+    return "codex";
   }
   if (value !== "ollama") {
     console.warn(`[LLM] unknown provider '${providerRaw}', fallback to ollama`);

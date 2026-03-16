@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { CodexLLMEngine } from "./codex";
 import { createLLMEngine, normalizeProvider } from "./engine_factory";
 import { GeminiLLMEngine } from "./gemini";
 import { GPTPluginLLMEngine } from "./gpt-plugin";
@@ -30,4 +31,11 @@ test("createLLMEngine creates GPTPluginLLMEngine for gpt-plugin aliases", () => 
   assert.ok(engine instanceof GPTPluginLLMEngine);
   assert.equal(engine.getProviderName(), "gpt-plugin");
   assert.equal(normalizeProvider("chatgpt-bridge"), "gpt-plugin");
+});
+
+test("createLLMEngine creates CodexLLMEngine for codex aliases", () => {
+  const engine = createLLMEngine("codex");
+  assert.ok(engine instanceof CodexLLMEngine);
+  assert.equal(engine.getProviderName(), "codex");
+  assert.equal(normalizeProvider("codex-cli"), "codex");
 });

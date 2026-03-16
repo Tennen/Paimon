@@ -67,8 +67,8 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 ### 2. LLM 与智能体编排
 
-- 支持 `Ollama`、`llama-server` 和 `OpenAI(ChatGPT API)`
-- 支持多 Provider Profile（多条 `openai-like` / `ollama`，单条 `gpt-plugin`），并可按场景独立选择
+- 支持 `Ollama`、`llama-server`、`OpenAI(ChatGPT API)`、`Gemini`、`gpt-plugin`、`codex-cli`
+- 支持多 Provider Profile（多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` / `codex`，单条 `gpt-plugin`），并可按场景独立选择
 - 支持技能发现、技能规划、工具调用的分步式执行
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
@@ -107,7 +107,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 按场景可选：
 
-- `Ollama`、`llama-server` 或 OpenAI API，作为 LLM provider
+- `Ollama`、`llama-server`、OpenAI API 或 Codex CLI，作为 LLM provider
 - `Python 3`，如果要启用 `fast-whisper` 语音转写
 - `Home Assistant`，如果要启用智能家居能力
 - 企业微信应用配置，若要通过 WeCom 收发消息
@@ -207,10 +207,30 @@ GEMINI_MODEL=gemini-2.0-flash
 GEMINI_PLANNING_MODEL=gemini-2.0-flash
 ```
 
+#### 使用 Codex CLI（codex provider）
+
+```env
+PORT=3000
+
+LLM_PROVIDER=codex
+LLM_CODEX_MODEL=gpt-5-codex
+LLM_CODEX_PLANNING_MODEL=gpt-5-codex
+LLM_CODEX_REASONING_EFFORT=medium
+LLM_CODEX_PLANNING_REASONING_EFFORT=high
+LLM_CODEX_APPROVAL_POLICY=never
+LLM_CODEX_SANDBOX=read-only
+```
+
+说明：
+
+- `codex` provider 通过本地 `codex exec` 调用，运行机需要安装可执行命令 `codex`。
+- 默认使用非交互审批策略（`never`）与 `read-only` sandbox，避免主流程路由/规划被审批提示阻塞。
+- `reasoningEffort` 支持：`minimal | low | medium | high | xhigh`。
+
 #### 多 Provider Profile（推荐）
 
 - Provider Profile 使用 storage key `llm.providers` 持久化（`json-file` 驱动下对应 `data/llm/providers.json`）
-- 支持创建多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` profile；`gpt-plugin` 仅允许一条
+- 支持创建多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` / `codex` profile；`gpt-plugin` 仅允许一条
 - 每条 profile 可配置对应 engine 的常用参数（baseUrl/model/planningModel/timeout/options 等）
 
 可用 Admin API：
