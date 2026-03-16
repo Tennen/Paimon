@@ -339,12 +339,26 @@ SERPAPI_ENDPOINT=https://serpapi.com/search.json
 
 # 基金分析默认跟随 market provider（可在 admin 的 Market Analysis 中直接选择 provider-id）
 MARKET_ANALYSIS_FUND_LOCAL_MODEL=
+# Market Analysis LLM timeout（最高优先级；codex 建议 >=60000）
+MARKET_ANALYSIS_LLM_TIMEOUT_MS=60000
 # legacy selector=gemini 的兼容项（推荐改为 provider-id）
 MARKET_ANALYSIS_GEMINI_MODEL=gemini-2.0-flash
 MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 ```
 
 `SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置（优先使用 Provider 配置页统一管理）。
+
+Market Analysis timeout 优先级：
+
+- `MARKET_ANALYSIS_LLM_TIMEOUT_MS`
+- LLM provider profile `config.timeoutMs`
+- `LLM_TIMEOUT_MS`
+- 内置默认值 `60000`
+
+说明：
+
+- 使用 codex 建议 `MARKET_ANALYSIS_LLM_TIMEOUT_MS>=60000`，避免常见 `codex timeout after 15000ms`。
+- `fund.llmRetryMax` 在 Admin 的 `Market Analysis` 配置中维护，值越大总执行时长越长，近似为 `(llmRetryMax + 1) * timeoutMs`。
 
 当 `SERPAPI_KEY` 未配置时，基金流程不会中断，会在审计链路中标记 `serpapi:disabled_no_key` 并继续走回退新闻源（若已配置 `MARKET_ANALYSIS_NEWS_API`）。
 

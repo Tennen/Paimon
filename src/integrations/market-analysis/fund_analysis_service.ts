@@ -9,6 +9,7 @@ import {
   validateFundDecisionDashboard
 } from "./fund_schema";
 import { fetchFundNews } from "./search_adapter";
+import { resolveMarketAnalysisLlmTimeoutMs } from "./llm_timeout";
 import {
   FundAnalysisOutput,
   FundAuditStep,
@@ -414,7 +415,15 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
         errors
       };
     } catch (error) {
-      errors.push(`attempt_${attempt + 1}: ${error instanceof Error ? error.message : String(error)}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      errors.push(`attempt_${attempt + 1}: ${errorMessage}`);
+
+      if (!isTimeoutLikeError(errorMessage)) {
+        continue;
+      }
+
+      errors.push(`attempt_${attempt + 1}: timeout_retry_strategy=stop_after_timeout`);
+      break;
     }
   }
 
@@ -447,6 +456,15 @@ function buildDashboardRepairUserPrompt(basePrompt: string, previousOutput: stri
   ].join("\n");
 }
 
+function isTimeoutLikeError(message: string): boolean {
+  const normalized = String(message || "").toLowerCase();
+  return normalized.includes("timeout")
+    || normalized.includes("timed out")
+    || normalized.includes("abort")
+    || normalized.includes("stream disconnected before completion")
+    || normalized.includes("reconnecting...");
+}
+
 async function generateWithConfiguredProvider(
   systemPrompt: string,
   userPrompt: string,
@@ -465,7 +483,7 @@ async function generateWithConfiguredProvider(
     throw new Error("missing local model for fund analysis");
   }
 
-  const timeoutMs = clampInt(Number(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS), 5000, 60000, 15000);
+  const timeoutMs = resolveMarketAnalysisLlmTimeoutMs({ engineSelector: selector });
   const text = await llmEngine.chat({
     step: "general",
     model,

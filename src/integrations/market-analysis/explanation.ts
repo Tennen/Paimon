@@ -2,6 +2,7 @@
 import { createLLMEngine } from "../../engines/llm";
 import { executeInNewChat } from "../chatgpt-bridge/service";
 import { DEFAULT_ANALYSIS_CONFIG, DEFAULT_TIMEOUT_MS } from "./defaults";
+import { resolveMarketAnalysisLlmTimeoutMs } from "./llm_timeout";
 import { normalizeAnalysisConfig } from "./storage";
 import { fetchJson, parsePositiveInteger } from "./utils";
 
@@ -57,7 +58,7 @@ async function generateExplanationViaConfiguredLlm(signalResult, optionalNewsCon
     || llmEngine.getModelForStep("routing")
     || ""
   ).trim();
-  const timeoutMs = parsePositiveInteger(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS, 15000);
+  const timeoutMs = resolveMarketAnalysisLlmTimeoutMs({ engineSelector: selector });
 
   if (!model) {
     throw new Error("missing model for explanation");

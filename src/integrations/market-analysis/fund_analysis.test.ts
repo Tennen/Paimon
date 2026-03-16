@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { buildFundFeatureContext } from "./fund_feature_engine";
 import { evaluateFundRules } from "./fund_rule_engine";
 import { buildFallbackFundDashboard, validateFundDecisionDashboard } from "./fund_schema";
+import { CodexLLMEngine } from "../../engines/llm/codex";
+import { runFundAnalysis } from "./fund_analysis_service";
 import { FundRawContext, MarketAnalysisConfig } from "./fund_types";
 
 const baseConfig: MarketAnalysisConfig = {
@@ -162,3 +164,77 @@ test("dashboard validation should fallback missing required fields", () => {
   assert.equal(result.dashboard.fund_code, "510300");
   assert.equal(result.dashboard.decision_type, "add");
 });
+
+test("runFundAnalysis should stop LLM retries after timeout-like error", { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch;
+  const originalNewsContext = process.env.MARKET_ANALYSIS_NEWS_CONTEXT;
+  const originalModel = process.env.MARKET_ANALYSIS_LLM_MODEL;
+  const originalChat = CodexLLMEngine.prototype.chat;
+
+  let llmCalls = 0;
+
+  try {
+    process.env.MARKET_ANALYSIS_NEWS_CONTEXT = "unit test static news";
+    process.env.MARKET_ANALYSIS_LLM_MODEL = "gpt-5-codex";
+
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("push2.eastmoney.com/api/qt/stock/get")) return createJsonResponse({ data: { f43: 4.36, f47: 1234567 } });
+      if (url.includes("push2his.eastmoney.com/api/qt/stock/kline/get")) return createJsonResponse({ data: { klines: buildMockKlines() } });
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    }) as typeof fetch;
+
+    (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
+      llmCalls += 1;
+      throw new Error("codex timeout after 15000ms");
+    };
+
+    const result = await runFundAnalysis({
+      phase: "close",
+      withExplanation: true,
+      portfolio: {
+        funds: [{ code: "510300", name: "沪深300ETF", quantity: 100, avgCost: 4 }],
+        cash: 1000
+      },
+      analysisConfig: {
+        ...baseConfig,
+        analysisEngine: "codex",
+        fund: { ...baseConfig.fund, llmRetryMax: 3 }
+      }
+    });
+
+    const errors = result.marketData.funds[0]?.llm_errors || [];
+    assert.equal(llmCalls, 1);
+    assert.equal(errors.includes("attempt_1: timeout_retry_strategy=stop_after_timeout"), true);
+    assert.equal(errors.some((item) => item.toLowerCase().includes("codex timeout after 15000ms")), true);
+    assert.equal(errors.some((item) => item.startsWith("attempt_2:")), false);
+
+    const llmStep = result.signalResult.audit.steps.find((step) => step.step === "llm:510300");
+    assert.equal(Boolean(llmStep), true);
+    assert.equal((llmStep?.errors || []).some((item) => item.startsWith("attempt_2:")), false);
+  } finally {
+    CodexLLMEngine.prototype.chat = originalChat;
+    globalThis.fetch = originalFetch;
+    if (originalNewsContext === undefined) {
+      delete process.env.MARKET_ANALYSIS_NEWS_CONTEXT;
+    } else {
+      process.env.MARKET_ANALYSIS_NEWS_CONTEXT = originalNewsContext;
+    }
+    if (originalModel === undefined) {
+      delete process.env.MARKET_ANALYSIS_LLM_MODEL;
+    } else {
+      process.env.MARKET_ANALYSIS_LLM_MODEL = originalModel;
+    }
+  }
+});
+
+function buildMockKlines(): string[] {
+  return Array.from({ length: 40 }, (_, index) => {
+    const day = index + 1;
+    return `2026-02-${String(day).padStart(2, "0")},0,${(4 + day * 0.01).toFixed(4)},0,0,${1_000_000 + day * 10_000}`;
+  });
+}
+
+function createJsonResponse(payload: unknown): Response {
+  return { ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) } as Response;
+}
