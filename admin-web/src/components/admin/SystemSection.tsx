@@ -31,12 +31,18 @@ import {
 } from "@/types/admin";
 
 export type SystemMemoryDraft = {
+  llmMemoryContextEnabled: boolean;
   memoryCompactEveryRounds: string;
   memoryCompactMaxBatchSize: string;
   memorySummaryTopK: string;
   memoryRawRefLimit: string;
   memoryRawRecordLimit: string;
   memoryRagSummaryTopK: string;
+};
+
+export type SystemRuntimeDraft = {
+  storageDriver: "json-file" | "sqlite";
+  storageSqlitePath: string;
 };
 
 export type SystemOperationState = {
@@ -94,9 +100,12 @@ type SystemSectionProps = {
   deletingSearchEngineId: string;
   updatingMainFlowProviders: boolean;
   memoryDraft: SystemMemoryDraft;
+  runtimeDraft: SystemRuntimeDraft;
   operationState: SystemOperationState;
   savingMemoryConfig: boolean;
+  savingRuntimeConfig: boolean;
   onMemoryDraftChange: <K extends keyof SystemMemoryDraft>(key: K, value: SystemMemoryDraft[K]) => void;
+  onRuntimeDraftChange: <K extends keyof SystemRuntimeDraft>(key: K, value: SystemRuntimeDraft[K]) => void;
   onRefreshModels: () => void;
   onRefreshConfig: () => void;
   onRefreshLLMProviders: () => void;
@@ -108,6 +117,7 @@ type SystemSectionProps = {
   onSetDefaultSearchEngine: (engineId: string) => void;
   onSetMainFlowProviders: (selection: MainFlowProviderSelectionDraft) => void;
   onSaveMemoryConfig: () => void;
+  onSaveRuntimeConfig: () => void;
   onRestartPm2: () => void;
   onPullRepo: () => void;
   onBuildRepo: () => void;
@@ -1042,6 +1052,7 @@ export function SystemSection(props: SystemSectionProps) {
       {activeModule === "memory" ? (
         <MemorySection
           config={props.config}
+          llmMemoryContextEnabledDraft={props.memoryDraft.llmMemoryContextEnabled}
           memoryCompactEveryRoundsDraft={props.memoryDraft.memoryCompactEveryRounds}
           memoryCompactMaxBatchSizeDraft={props.memoryDraft.memoryCompactMaxBatchSize}
           memorySummaryTopKDraft={props.memoryDraft.memorySummaryTopK}
@@ -1049,6 +1060,7 @@ export function SystemSection(props: SystemSectionProps) {
           memoryRawRecordLimitDraft={props.memoryDraft.memoryRawRecordLimit}
           memoryRagSummaryTopKDraft={props.memoryDraft.memoryRagSummaryTopK}
           savingMemoryConfig={props.savingMemoryConfig}
+          onLlmMemoryContextEnabledDraftChange={(value) => props.onMemoryDraftChange("llmMemoryContextEnabled", value)}
           onMemoryCompactEveryRoundsDraftChange={(value) => props.onMemoryDraftChange("memoryCompactEveryRounds", value)}
           onMemoryCompactMaxBatchSizeDraftChange={(value) => props.onMemoryDraftChange("memoryCompactMaxBatchSize", value)}
           onMemorySummaryTopKDraftChange={(value) => props.onMemoryDraftChange("memorySummaryTopK", value)}
@@ -1061,32 +1073,86 @@ export function SystemSection(props: SystemSectionProps) {
       ) : null}
 
       {activeModule === "runtime" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>运行时信息</CardTitle>
-            <CardDescription>当前生效配置快照</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Separator />
-            <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
-              <div className="mono">env: {props.config?.envPath ?? "-"}</div>
-              <div className="mono">timezone: {props.config?.timezone ?? "-"}</div>
-              <div className="mono">defaultProvider: {mainFlowDraft.defaultProviderId || "-"}</div>
-              <div className="mono">routingProvider: {mainFlowDraft.routingProviderId || "-"}</div>
-              <div className="mono">planningProvider: {mainFlowDraft.planningProviderId || "-"}</div>
-              <div className="mono">routingProviderName: {selectedRoutingLabel}</div>
-              <div className="mono">planningProviderName: {selectedPlanningLabel}</div>
-              <div className="mono">providerCount: {providerItems.length}</div>
-              <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
-              <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
-              <div className="mono">taskStore: {props.config?.taskStore?.name ?? "-"}</div>
-              <div className="mono">tickMs: {props.config?.tickMs ?? "-"}</div>
-              <div className="mono md:col-span-2">
-                userStore: {props.config?.userStore?.name ?? "-"} ({props.config?.userStore?.driver ?? "-"})
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>运行时配置</CardTitle>
+              <CardDescription>修改后会写入 .env，需重启进程后完全生效</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>STORAGE_DRIVER</Label>
+                  <Select
+                    value={props.runtimeDraft.storageDriver}
+                    onValueChange={(value) => props.onRuntimeDraftChange("storageDriver", normalizeStorageDriver(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="json-file">json-file</SelectItem>
+                      <SelectItem value="sqlite">sqlite</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>STORAGE_SQLITE_PATH</Label>
+                  <Input
+                    value={props.runtimeDraft.storageSqlitePath}
+                    onChange={(event) => props.onRuntimeDraftChange("storageSqlitePath", event.target.value)}
+                    placeholder="data/storage/metadata.sqlite"
+                  />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" onClick={props.onSaveRuntimeConfig} disabled={props.savingRuntimeConfig}>
+                  {props.savingRuntimeConfig ? "保存中..." : "保存运行时配置"}
+                </Button>
+                <Button type="button" variant="outline" onClick={props.onRefreshConfig}>
+                  刷新
+                </Button>
+              </div>
+              <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+                <div className="mono">STORAGE_DRIVER(raw): {props.config?.storageDriver || "(default json-file)"}</div>
+                <div className="mono">
+                  STORAGE_DRIVER(effective): {props.config?.storageDriverEffective ?? props.config?.storageDriver ?? "json-file"}
+                </div>
+                <div className="mono md:col-span-2">
+                  STORAGE_SQLITE_PATH: {props.config?.storageSqlitePath || "(default data/storage/metadata.sqlite)"}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>运行时信息</CardTitle>
+              <CardDescription>当前生效配置快照</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Separator />
+              <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+                <div className="mono">env: {props.config?.envPath ?? "-"}</div>
+                <div className="mono">timezone: {props.config?.timezone ?? "-"}</div>
+                <div className="mono">defaultProvider: {mainFlowDraft.defaultProviderId || "-"}</div>
+                <div className="mono">routingProvider: {mainFlowDraft.routingProviderId || "-"}</div>
+                <div className="mono">planningProvider: {mainFlowDraft.planningProviderId || "-"}</div>
+                <div className="mono">routingProviderName: {selectedRoutingLabel}</div>
+                <div className="mono">planningProviderName: {selectedPlanningLabel}</div>
+                <div className="mono">providerCount: {providerItems.length}</div>
+                <div className="mono">llmMemoryContextEnabled: {String(props.config?.llmMemoryContextEnabled ?? true)}</div>
+                <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
+                <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
+                <div className="mono">taskStore: {props.config?.taskStore?.name ?? "-"}</div>
+                <div className="mono">tickMs: {props.config?.tickMs ?? "-"}</div>
+                <div className="mono md:col-span-2">
+                  userStore: {props.config?.userStore?.name ?? "-"} ({props.config?.userStore?.driver ?? "-"})
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
     </div>
   );
@@ -1097,6 +1163,13 @@ function normalizeProviderType(raw: string): LLMProviderType {
     return raw;
   }
   return "ollama";
+}
+
+function normalizeStorageDriver(raw: string): "json-file" | "sqlite" {
+  if (raw === "sqlite") {
+    return "sqlite";
+  }
+  return "json-file";
 }
 
 function normalizeSearchEngineId(raw: string): string {

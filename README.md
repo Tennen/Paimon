@@ -134,6 +134,8 @@ STORAGE_SQLITE_PATH=data/storage/metadata.sqlite
 
 当 `STORAGE_DRIVER=sqlite` 时，业务模块仍然通过 `registerStore/getStore/setStore/appendStore` 访问存储，不需要感知底层介质。
 
+也可以在 Admin 后台 `System -> 运行时` 中直接修改 `STORAGE_DRIVER` / `STORAGE_SQLITE_PATH`（写入 `.env`，重启后完全生效）。
+
 #### 使用 Ollama
 
 ```env
@@ -348,6 +350,7 @@ Admin 侧新增全局 `Search Engine Profiles`（System 模块）：
 #### Memory 检索与压缩（可选）
 
 ```env
+LLM_MEMORY_CONTEXT_ENABLED=true
 MEMORY_COMPACT_EVERY_ROUNDS=4
 MEMORY_COMPACT_MAX_BATCH_SIZE=8
 MEMORY_SUMMARY_TOP_K=4
@@ -358,6 +361,7 @@ MEMORY_RAG_SUMMARY_TOP_K=4
 
 说明：
 
+- `LLM_MEMORY_CONTEXT_ENABLED`：是否在主对话 routing/planning 阶段检索 memory 并注入 prompt（默认 `true`）
 - `MEMORY_COMPACT_EVERY_ROUNDS`：触发一次 summary compact 的最小 raw 轮次阈值
 - `MEMORY_COMPACT_MAX_BATCH_SIZE`：单次 compact 最大处理 raw 条数
 - `MEMORY_SUMMARY_TOP_K`：主 orchestrator / `/re` runtime 的 summary 命中条数上限

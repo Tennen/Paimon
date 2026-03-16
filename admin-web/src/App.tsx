@@ -8,7 +8,8 @@ import { SystemSection } from "@/components/admin/SystemSection";
 import type {
   MainFlowProviderSelectionDraft,
   SystemMemoryDraft,
-  SystemOperationState
+  SystemOperationState,
+  SystemRuntimeDraft
 } from "@/components/admin/SystemSection";
 import { TopicSummarySection } from "@/components/admin/TopicSummarySection";
 import { WritingOrganizerSection } from "@/components/admin/WritingOrganizerSection";
@@ -71,12 +72,18 @@ const EMPTY_CODEX_DRAFT: CodexDraft = {
 };
 
 const EMPTY_MEMORY_DRAFT: SystemMemoryDraft = {
+  llmMemoryContextEnabled: true,
   memoryCompactEveryRounds: "",
   memoryCompactMaxBatchSize: "",
   memorySummaryTopK: "",
   memoryRawRefLimit: "",
   memoryRawRecordLimit: "",
   memoryRagSummaryTopK: ""
+};
+
+const EMPTY_RUNTIME_DRAFT: SystemRuntimeDraft = {
+  storageDriver: "json-file",
+  storageSqlitePath: "data/storage/metadata.sqlite"
 };
 
 const DEFAULT_SYSTEM_OPERATION_STATE: SystemOperationState = {
@@ -106,12 +113,14 @@ export default function App() {
   const [updatingMainFlowProviders, setUpdatingMainFlowProviders] = useState(false);
   const [codexDraft, setCodexDraft] = useState<CodexDraft>(EMPTY_CODEX_DRAFT);
   const [memoryDraft, setMemoryDraft] = useState<SystemMemoryDraft>(EMPTY_MEMORY_DRAFT);
+  const [runtimeDraft, setRuntimeDraft] = useState<SystemRuntimeDraft>(EMPTY_RUNTIME_DRAFT);
 
   const [notice, setNotice] = useState<Notice>(null);
 
   const [systemOperationState, setSystemOperationState] = useState<SystemOperationState>(DEFAULT_SYSTEM_OPERATION_STATE);
   const [savingCodexConfig, setSavingCodexConfig] = useState(false);
   const [savingMemoryConfig, setSavingMemoryConfig] = useState(false);
+  const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
 
   const [editingUserId, setEditingUserId] = useState("");
   const [savingUser, setSavingUser] = useState(false);
@@ -218,6 +227,10 @@ export default function App() {
     setMemoryDraft((prev) => ({ ...prev, [key]: value }));
   }
 
+  function updateRuntimeDraft<K extends keyof SystemRuntimeDraft>(key: K, value: SystemRuntimeDraft[K]): void {
+    setRuntimeDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
   function updateSystemOperationState<K extends keyof SystemOperationState>(key: K, value: SystemOperationState[K]): void {
     setSystemOperationState((prev) => ({ ...prev, [key]: value }));
   }
@@ -312,12 +325,17 @@ export default function App() {
       reasoningEffort: payload.codexReasoningEffort || ""
     });
     setMemoryDraft({
+      llmMemoryContextEnabled: payload.llmMemoryContextEnabled ?? true,
       memoryCompactEveryRounds: payload.memoryCompactEveryRounds || "",
       memoryCompactMaxBatchSize: payload.memoryCompactMaxBatchSize || "",
       memorySummaryTopK: payload.memorySummaryTopK || "",
       memoryRawRefLimit: payload.memoryRawRefLimit || "",
       memoryRawRecordLimit: payload.memoryRawRecordLimit || "",
       memoryRagSummaryTopK: payload.memoryRagSummaryTopK || ""
+    });
+    setRuntimeDraft({
+      storageDriver: payload.storageDriver === "sqlite" ? "sqlite" : "json-file",
+      storageSqlitePath: payload.storageSqlitePath || "data/storage/metadata.sqlite"
     });
   }
 
@@ -744,6 +762,7 @@ export default function App() {
       await request<{ ok: boolean }>("/admin/api/config/memory", {
         method: "POST",
         body: JSON.stringify({
+          llmMemoryContextEnabled: memoryDraft.llmMemoryContextEnabled,
           memoryCompactEveryRounds: memoryDraft.memoryCompactEveryRounds.trim(),
           memoryCompactMaxBatchSize: memoryDraft.memoryCompactMaxBatchSize.trim(),
           memorySummaryTopK: memoryDraft.memorySummaryTopK.trim(),
@@ -761,6 +780,28 @@ export default function App() {
       notifyError("保存 Memory 配置失败", error);
     } finally {
       setSavingMemoryConfig(false);
+    }
+  }
+
+  async function handleSaveRuntimeConfig(): Promise<void> {
+    setSavingRuntimeConfig(true);
+    try {
+      await request<{ ok: boolean }>("/admin/api/config/runtime", {
+        method: "POST",
+        body: JSON.stringify({
+          storageDriver: runtimeDraft.storageDriver,
+          storageSqlitePath: runtimeDraft.storageSqlitePath.trim()
+        })
+      });
+      await loadConfig();
+      setNotice({
+        type: "success",
+        title: "运行时配置已保存"
+      });
+    } catch (error) {
+      notifyError("保存运行时配置失败", error);
+    } finally {
+      setSavingRuntimeConfig(false);
     }
   }
 
@@ -2015,9 +2056,12 @@ export default function App() {
               deletingSearchEngineId={deletingMarketSearchEngineId}
               updatingMainFlowProviders={updatingMainFlowProviders}
               memoryDraft={memoryDraft}
+              runtimeDraft={runtimeDraft}
               operationState={systemOperationState}
               savingMemoryConfig={savingMemoryConfig}
+              savingRuntimeConfig={savingRuntimeConfig}
               onMemoryDraftChange={updateMemoryDraft}
+              onRuntimeDraftChange={updateRuntimeDraft}
               onRefreshModels={() => void loadModels()}
               onRefreshConfig={() => void loadConfig()}
               onRefreshLLMProviders={() => void loadLLMProviders()}
@@ -2029,6 +2073,7 @@ export default function App() {
               onSetDefaultSearchEngine={(engineId) => void handleSetDefaultMarketSearchEngine(engineId)}
               onSetMainFlowProviders={(selection) => void handleSetMainFlowProviders(selection)}
               onSaveMemoryConfig={() => void handleSaveMemoryConfig()}
+              onSaveRuntimeConfig={() => void handleSaveRuntimeConfig()}
               onRestartPm2={() => void handleRestartPm2()}
               onPullRepo={() => void handlePullRepo()}
               onBuildRepo={() => void handleBuildRepo()}

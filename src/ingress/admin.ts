@@ -10,6 +10,8 @@ import { EnvConfigStore } from "../config/envConfigStore";
 import {
   DATA_STORE,
   describeStore,
+  getStorageDriver,
+  getStorageSqlitePath,
   getStore,
   registerStore,
   setStore
@@ -299,6 +301,10 @@ export class AdminIngressAdapter implements IngressAdapter {
         serpApiKey: getEnvValue(envPath, "SERPAPI_KEY"),
         codexModel: codexConfig.codexModel,
         codexReasoningEffort: codexConfig.codexReasoningEffort,
+        storageDriver: getEnvValue(envPath, "STORAGE_DRIVER") || getStorageDriver(),
+        storageDriverEffective: getStorageDriver(),
+        storageSqlitePath: getEnvValue(envPath, "STORAGE_SQLITE_PATH") || getStorageSqlitePath(),
+        llmMemoryContextEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_MEMORY_CONTEXT_ENABLED")) ?? true,
         memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
         memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
         memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
@@ -992,6 +998,7 @@ export class AdminIngressAdapter implements IngressAdapter {
 
     app.post("/admin/api/config/memory", async (req: Request, res: ExResponse) => {
       const body = (req.body ?? {}) as {
+        llmMemoryContextEnabled?: unknown;
         memoryCompactEveryRounds?: unknown;
         memoryCompactMaxBatchSize?: unknown;
         memorySummaryTopK?: unknown;
@@ -1016,6 +1023,12 @@ export class AdminIngressAdapter implements IngressAdapter {
         return;
       }
 
+      const llmMemoryContextEnabled = parseOptionalBoolean(body.llmMemoryContextEnabled);
+      if (body.llmMemoryContextEnabled !== undefined && llmMemoryContextEnabled === undefined) {
+        res.status(400).json({ error: "llmMemoryContextEnabled must be boolean" });
+        return;
+      }
+
       try {
         for (const update of updates) {
           if (update.value) {
@@ -1024,6 +1037,14 @@ export class AdminIngressAdapter implements IngressAdapter {
             unsetEnvValue(envPath, update.envKey);
           }
         }
+
+        if (llmMemoryContextEnabled !== undefined) {
+          setEnvValue(
+            envPath,
+            "LLM_MEMORY_CONTEXT_ENABLED",
+            llmMemoryContextEnabled ? "true" : "false"
+          );
+        }
       } catch (error) {
         res.status(500).json({ error: (error as Error).message ?? "failed to save memory config" });
         return;
@@ -1031,12 +1052,62 @@ export class AdminIngressAdapter implements IngressAdapter {
 
       res.json({
         ok: true,
+        llmMemoryContextEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_MEMORY_CONTEXT_ENABLED")) ?? true,
         memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
         memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
         memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
         memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
         memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
         memoryRagSummaryTopK: getEnvValue(envPath, "MEMORY_RAG_SUMMARY_TOP_K")
+      });
+    });
+
+    app.post("/admin/api/config/runtime", async (req: Request, res: ExResponse) => {
+      const body = (req.body ?? {}) as {
+        storageDriver?: unknown;
+        storageSqlitePath?: unknown;
+      };
+
+      if (body.storageDriver !== undefined && typeof body.storageDriver !== "string") {
+        res.status(400).json({ error: "storageDriver must be string" });
+        return;
+      }
+      if (body.storageSqlitePath !== undefined && typeof body.storageSqlitePath !== "string") {
+        res.status(400).json({ error: "storageSqlitePath must be string" });
+        return;
+      }
+
+      const envPath = this.envStore.getPath();
+      const storageDriver = normalizeOptionalString(body.storageDriver).toLowerCase();
+      const storageSqlitePath = normalizeOptionalString(body.storageSqlitePath);
+
+      if (storageDriver && !["json-file", "sqlite"].includes(storageDriver)) {
+        res.status(400).json({ error: "STORAGE_DRIVER must be json-file or sqlite" });
+        return;
+      }
+
+      try {
+        if (storageDriver) {
+          setEnvValue(envPath, "STORAGE_DRIVER", storageDriver);
+        } else if (body.storageDriver !== undefined) {
+          unsetEnvValue(envPath, "STORAGE_DRIVER");
+        }
+
+        if (storageSqlitePath) {
+          setEnvValue(envPath, "STORAGE_SQLITE_PATH", storageSqlitePath);
+        } else if (body.storageSqlitePath !== undefined) {
+          unsetEnvValue(envPath, "STORAGE_SQLITE_PATH");
+        }
+      } catch (error) {
+        res.status(500).json({ error: (error as Error).message ?? "failed to save runtime config" });
+        return;
+      }
+
+      res.json({
+        ok: true,
+        storageDriver: getEnvValue(envPath, "STORAGE_DRIVER") || getStorageDriver(),
+        storageDriverEffective: getStorageDriver(),
+        storageSqlitePath: getEnvValue(envPath, "STORAGE_SQLITE_PATH") || getStorageSqlitePath()
       });
     });
 

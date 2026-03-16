@@ -9,10 +9,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { AdminConfig } from "@/types/admin";
 
 type MemorySectionProps = {
   config: AdminConfig | null;
+  llmMemoryContextEnabledDraft: boolean;
   memoryCompactEveryRoundsDraft: string;
   memoryCompactMaxBatchSizeDraft: string;
   memorySummaryTopKDraft: string;
@@ -20,6 +22,7 @@ type MemorySectionProps = {
   memoryRawRecordLimitDraft: string;
   memoryRagSummaryTopKDraft: string;
   savingMemoryConfig: boolean;
+  onLlmMemoryContextEnabledDraftChange: (value: boolean) => void;
   onMemoryCompactEveryRoundsDraftChange: (value: string) => void;
   onMemoryCompactMaxBatchSizeDraftChange: (value: string) => void;
   onMemorySummaryTopKDraftChange: (value: string) => void;
@@ -39,6 +42,16 @@ export function MemorySection(props: MemorySectionProps) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-2 md:col-span-2">
+            <Label>LLM_MEMORY_CONTEXT_ENABLED</Label>
+            <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+              <span className="text-sm text-muted-foreground">是否让主对话在 routing/planning 阶段检索 memory 并注入 prompt</span>
+              <Switch
+                checked={props.llmMemoryContextEnabledDraft}
+                onCheckedChange={props.onLlmMemoryContextEnabledDraftChange}
+              />
+            </div>
+          </div>
           <div className="space-y-2">
             <Label>MEMORY_COMPACT_EVERY_ROUNDS</Label>
             <Input
@@ -114,6 +127,7 @@ export function MemorySection(props: MemorySectionProps) {
 
         <div className="grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
           <div className="mono">env: {props.config?.envPath ?? "-"}</div>
+          <div className="mono">LLM_MEMORY_CONTEXT_ENABLED: {String(props.config?.llmMemoryContextEnabled ?? true)}</div>
           <div className="mono">MEMORY_COMPACT_EVERY_ROUNDS: {props.config?.memoryCompactEveryRounds || "(default 4)"}</div>
           <div className="mono">MEMORY_COMPACT_MAX_BATCH_SIZE: {props.config?.memoryCompactMaxBatchSize || "(default 8)"}</div>
           <div className="mono">MEMORY_SUMMARY_TOP_K: {props.config?.memorySummaryTopK || "(default 4)"}</div>

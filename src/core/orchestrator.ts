@@ -385,7 +385,8 @@ export class Orchestrator {
 
     const result = await llmEngine.route(text, runtimeContext);
     const memoryDecision = resolveMemoryDecision(result, text);
-    const memory = memoryDecision.enabled
+    const memoryContextEnabled = isLlmMemoryContextEnabled();
+    const memory = memoryContextEnabled && memoryDecision.enabled
       ? this.loadMemoryForNextStep(envelope.sessionId, memoryDecision.query, readSessionMemory)
       : "";
 
@@ -731,6 +732,25 @@ function resolveMemoryDecision(
     ? result.memory_query.trim()
     : text;
   return { enabled, query };
+}
+
+function isLlmMemoryContextEnabled(): boolean {
+  const raw = process.env.LLM_MEMORY_CONTEXT_ENABLED;
+  if (raw === undefined || raw === null) {
+    return true;
+  }
+
+  const normalized = String(raw).trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  if (["true", "1", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return true;
 }
 
 function sanitizeToolResult(input: unknown): unknown {

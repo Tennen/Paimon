@@ -196,6 +196,10 @@ export type AdminConfig = {
   serpApiKey: string;
   codexModel: string;
   codexReasoningEffort: string;
+  storageDriver: string;
+  storageDriverEffective?: string;
+  storageSqlitePath: string;
+  llmMemoryContextEnabled: boolean;
   memoryCompactEveryRounds: string;
   memoryCompactMaxBatchSize: string;
   memorySummaryTopK: string;
