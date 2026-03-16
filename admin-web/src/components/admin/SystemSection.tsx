@@ -760,7 +760,7 @@ export function SystemSection(props: SystemSectionProps) {
                   </>
                 ) : null}
 
-                {providerDraft.type === "llama-server" ? (
+                {providerDraft.type === "openai" || providerDraft.type === "llama-server" ? (
                   <>
                     <div className="space-y-2 md:col-span-2">
                       <Label>chatTemplateKwargs（JSON，可选）</Label>
@@ -776,6 +776,11 @@ export function SystemSection(props: SystemSectionProps) {
                         onChange={(event) => updateProviderDraft("planningChatTemplateKwargs", event.target.value)}
                       />
                     </div>
+                  </>
+                ) : null}
+
+                {providerDraft.type === "llama-server" ? (
+                  <>
                     <div className="space-y-2 md:col-span-2">
                       <Label>extraBody（JSON，可选）</Label>
                       <Textarea
@@ -1299,6 +1304,8 @@ function buildProviderProfileFromDraft(
           chatCompletionsPath,
           selectionOptions: selectionOptions.value,
           planningOptions: planningOptions.value,
+          chatTemplateKwargs: chatTemplateKwargs.value,
+          planningChatTemplateKwargs: planningChatTemplateKwargs.value,
           fallbackToChatgptBridge: draft.fallbackToChatgptBridge,
           forceBridge: draft.forceBridge,
           costInputPer1M: costInputPer1M.value,

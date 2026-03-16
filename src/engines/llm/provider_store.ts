@@ -45,6 +45,8 @@ export type OpenAILikeProviderConfig = {
   strictJson?: boolean;
   selectionOptions?: Record<string, unknown>;
   planningOptions?: Record<string, unknown>;
+  chatTemplateKwargs?: Record<string, unknown>;
+  planningChatTemplateKwargs?: Record<string, unknown>;
   fallbackToChatgptBridge?: boolean;
   forceBridge?: boolean;
   costInputPer1M?: number | null;
@@ -619,6 +621,8 @@ function normalizeOpenAIConfig(source: Record<string, unknown>): OpenAILikeProvi
     strictJson: parseBoolean(source.strictJson),
     selectionOptions: asRecord(source.selectionOptions) ?? undefined,
     planningOptions: asRecord(source.planningOptions) ?? undefined,
+    chatTemplateKwargs: asRecord(source.chatTemplateKwargs ?? source.chat_template_kwargs) ?? undefined,
+    planningChatTemplateKwargs: asRecord(source.planningChatTemplateKwargs ?? source.planning_chat_template_kwargs) ?? undefined,
     fallbackToChatgptBridge: parseBoolean(source.fallbackToChatgptBridge),
     forceBridge: parseBoolean(source.forceBridge),
     costInputPer1M: parseNullablePositiveNumber(source.costInputPer1M),

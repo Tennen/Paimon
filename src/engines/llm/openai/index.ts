@@ -32,6 +32,7 @@ export type OpenAIChatRequest = {
   messages: OpenAIMessage[];
   timeoutMs: number;
   options?: Record<string, unknown>;
+  chatTemplateKwargs?: Record<string, unknown> | null;
 };
 
 type OpenAIChatResponse = {
@@ -78,6 +79,8 @@ export type OpenAILLMOptions = {
   strictJson: boolean;
   selectionOptions?: Record<string, unknown>;
   planningOptions?: Record<string, unknown>;
+  chatTemplateKwargs?: Record<string, unknown>;
+  planningChatTemplateKwargs?: Record<string, unknown>;
   fallbackToChatgptBridge: boolean;
   forceBridge: boolean;
   costInputPer1M: number | null;
@@ -131,6 +134,8 @@ export class OpenAILLMEngine extends LLMChatEngine {
         ?? parseEnvObject(process.env.OPENAI_CHAT_OPTIONS, "OPENAI_CHAT_OPTIONS"),
       planningOptions: options?.planningOptions
         ?? parseEnvObject(process.env.OPENAI_PLANNING_CHAT_OPTIONS, "OPENAI_PLANNING_CHAT_OPTIONS"),
+      chatTemplateKwargs: options?.chatTemplateKwargs,
+      planningChatTemplateKwargs: options?.planningChatTemplateKwargs,
       fallbackToChatgptBridge: options?.fallbackToChatgptBridge
         ?? parseBoolean(process.env.OPENAI_FALLBACK_TO_CHATGPT_BRIDGE, true),
       forceBridge: options?.forceBridge ?? parseBoolean(process.env.OPENAI_FORCE_BRIDGE, false),
@@ -167,6 +172,9 @@ export class OpenAILLMEngine extends LLMChatEngine {
     const isSelection = request.step === "routing";
     const requestOptions = request.options
       ?? (isPlanning ? this.options.planningOptions : isSelection ? this.options.selectionOptions : undefined);
+    const requestChatTemplateKwargs = isPlanning
+      ? (this.options.planningChatTemplateKwargs ?? this.options.chatTemplateKwargs)
+      : this.options.chatTemplateKwargs;
 
     try {
       const result = await this.executeOpenAIChat({
@@ -176,6 +184,7 @@ export class OpenAILLMEngine extends LLMChatEngine {
         model: request.model,
         timeoutMs: request.timeoutMs ?? (isPlanning ? this.options.planningTimeoutMs : this.options.timeoutMs),
         options: requestOptions,
+        chatTemplateKwargs: requestChatTemplateKwargs,
         messages: request.messages.map(toOpenAIMessage)
       });
       this.quotaManager.recordApiSuccess(this.options.quotaPolicy, {
@@ -239,18 +248,23 @@ export async function openAIChat(request: OpenAIChatRequest): Promise<OpenAIChat
   const url = `${baseUrl}${path}`;
 
   try {
+    const requestPayload: Record<string, unknown> = {
+      model: request.model,
+      stream: false,
+      messages: request.messages,
+      ...(request.options ?? {})
+    };
+    if (request.chatTemplateKwargs && Object.keys(request.chatTemplateKwargs).length > 0) {
+      requestPayload.chat_template_kwargs = request.chatTemplateKwargs;
+    }
+
     const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${request.apiKey}`
       },
-      body: JSON.stringify({
-        model: request.model,
-        stream: false,
-        messages: request.messages,
-        ...(request.options ?? {})
-      }),
+      body: JSON.stringify(requestPayload),
       signal: controller.signal
     });
 

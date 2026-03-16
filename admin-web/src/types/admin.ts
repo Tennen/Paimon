@@ -54,6 +54,8 @@ export type OpenAILikeProviderConfig = {
   strictJson?: boolean;
   selectionOptions?: Record<string, unknown>;
   planningOptions?: Record<string, unknown>;
+  chatTemplateKwargs?: Record<string, unknown>;
+  planningChatTemplateKwargs?: Record<string, unknown>;
   fallbackToChatgptBridge?: boolean;
   forceBridge?: boolean;
   costInputPer1M?: number | null;
