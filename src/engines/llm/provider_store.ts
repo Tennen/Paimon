@@ -1,7 +1,7 @@
 import { OpenAIQuotaPolicy, readOpenAIQuotaPolicyFromEnv } from "../../integrations/openai/quotaManager";
 import { DATA_STORE, getStore, registerStore, setStore } from "../../storage/persistence";
 
-export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gpt-plugin";
+export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gemini" | "gpt-plugin";
 
 export type OllamaProviderConfig = {
   baseUrl?: string;
@@ -52,6 +52,19 @@ export type OpenAILikeProviderConfig = {
   quotaPolicy?: OpenAIQuotaPolicy;
 };
 
+export type GeminiLikeProviderConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+  selectionOptions?: Record<string, unknown>;
+  planningOptions?: Record<string, unknown>;
+};
+
 export type GptPluginProviderConfig = {
   model?: string;
   planningModel?: string;
@@ -82,6 +95,13 @@ export type OpenAIProviderProfile = {
   config: OpenAILikeProviderConfig;
 };
 
+export type GeminiProviderProfile = {
+  id: string;
+  name: string;
+  type: "gemini";
+  config: GeminiLikeProviderConfig;
+};
+
 export type GptPluginProviderProfile = {
   id: string;
   name: string;
@@ -93,6 +113,7 @@ export type LLMProviderProfile =
   | OllamaProviderProfile
   | LlamaServerProviderProfile
   | OpenAIProviderProfile
+  | GeminiProviderProfile
   | GptPluginProviderProfile;
 
 export type LLMProviderStore = {
@@ -112,6 +133,7 @@ export type LLMProviderSelectionPatch = {
 const LLM_PROVIDER_STORE = DATA_STORE.LLM_PROVIDERS;
 const DEFAULT_PROVIDER_ID = "default-ollama";
 const DEFAULT_PROVIDER_NAME = "Default Ollama";
+const DEFAULT_GEMINI_PROVIDER_ID = "default-gemini";
 const DEFAULT_GPT_PLUGIN_PROVIDER_ID = "default-gpt-plugin";
 let providerStoreRegistered = false;
 
@@ -247,6 +269,9 @@ export function normalizeProviderType(raw: unknown): LLMProviderType {
   if (["openai", "openai-like", "openai_like", "openai-api", "chatgpt", "gpt"].includes(value)) {
     return "openai";
   }
+  if (["gemini", "gemini-like", "gemini_like", "google", "google-genai", "google-genai-api"].includes(value)) {
+    return "gemini";
+  }
   if (["gpt-plugin", "gpt_plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt-plugin";
   }
@@ -281,6 +306,9 @@ export function resolveLegacyEngineSelector(selector: unknown): {
   }
   if (["openai", "openai-like", "openai_like", "openai-api", "chatgpt", "gpt"].includes(lower)) {
     return { isDefault: false, providerType: "openai" };
+  }
+  if (["gemini", "gemini-like", "gemini_like", "google", "google-genai", "google-genai-api"].includes(lower)) {
+    return { isDefault: false, providerType: "gemini" };
   }
   if (["ollama"].includes(lower)) {
     return { isDefault: false, providerType: "ollama" };
@@ -344,6 +372,26 @@ function createDefaultProviderProfileFromEnv(): LLMProviderProfile {
         costInputPer1M: parseNullablePositiveNumber(process.env.OPENAI_COST_INPUT_PER_1M),
         costOutputPer1M: parseNullablePositiveNumber(process.env.OPENAI_COST_OUTPUT_PER_1M),
         quotaPolicy: readOpenAIQuotaPolicyFromEnv()
+      }
+    };
+  }
+
+  if (providerType === "gemini") {
+    return {
+      id: DEFAULT_GEMINI_PROVIDER_ID,
+      name: "Default Gemini-Like",
+      type: "gemini",
+      config: {
+        baseUrl: normalizeText(process.env.GEMINI_BASE_URL),
+        apiKey: normalizeText(process.env.GEMINI_API_KEY),
+        model: normalizeText(process.env.GEMINI_MODEL ?? process.env.MARKET_ANALYSIS_GEMINI_MODEL),
+        planningModel: normalizeText(process.env.GEMINI_PLANNING_MODEL),
+        timeoutMs: parsePositiveInteger(process.env.LLM_TIMEOUT_MS ?? process.env.MARKET_ANALYSIS_GEMINI_TIMEOUT_MS),
+        planningTimeoutMs: parsePositiveInteger(process.env.LLM_PLANNING_TIMEOUT_MS),
+        maxRetries: parsePositiveInteger(process.env.LLM_MAX_RETRIES),
+        strictJson: parseBoolean(process.env.LLM_STRICT_JSON),
+        selectionOptions: parseEnvObject(process.env.GEMINI_CHAT_OPTIONS),
+        planningOptions: parseEnvObject(process.env.GEMINI_PLANNING_CHAT_OPTIONS)
       }
     };
   }
@@ -497,6 +545,15 @@ function normalizeProviderProfile(input: unknown, index: number): LLMProviderPro
     };
   }
 
+  if (type === "gemini") {
+    return {
+      id,
+      name,
+      type,
+      config: normalizeGeminiConfig(configSource)
+    };
+  }
+
   if (type === "gpt-plugin") {
     return {
       id,
@@ -573,6 +630,21 @@ function normalizeOpenAIConfig(source: Record<string, unknown>): OpenAILikeProvi
           monthlyBudgetUsdLimit: parseNullablePositiveNumber(quotaSource.monthlyBudgetUsdLimit)
         }
       : undefined
+  };
+}
+
+function normalizeGeminiConfig(source: Record<string, unknown>): GeminiLikeProviderConfig {
+  return {
+    baseUrl: normalizeText(source.baseUrl),
+    apiKey: normalizeText(source.apiKey),
+    model: normalizeText(source.model),
+    planningModel: normalizeText(source.planningModel),
+    timeoutMs: parsePositiveInteger(source.timeoutMs),
+    planningTimeoutMs: parsePositiveInteger(source.planningTimeoutMs),
+    maxRetries: parsePositiveInteger(source.maxRetries),
+    strictJson: parseBoolean(source.strictJson),
+    selectionOptions: asRecord(source.selectionOptions) ?? undefined,
+    planningOptions: asRecord(source.planningOptions) ?? undefined
   };
 }
 

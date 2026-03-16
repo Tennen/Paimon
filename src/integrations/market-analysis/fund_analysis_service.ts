@@ -376,9 +376,7 @@ async function generateDashboardWithRetry(input: LlmRetryInput): Promise<{
     };
 
     try {
-      const llmResponse = providerSelection.useGemini
-        ? await generateWithGemini(prompt.system, prompt.user)
-        : await generateWithConfiguredProvider(prompt.system, prompt.user, providerSelection.selector);
+      const llmResponse = await generateWithConfiguredProvider(prompt.system, prompt.user, providerSelection.selector);
 
       lastRawText = llmResponse.text;
       const parsed = parseDashboardFromText(lastRawText);
@@ -465,67 +463,6 @@ async function generateWithConfiguredProvider(
   return {
     text,
     provider
-  };
-}
-
-async function generateWithGemini(systemPrompt: string, userPrompt: string): Promise<{ text: string; provider: string }> {
-  const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
-  if (!apiKey) {
-    throw new Error("missing GEMINI_API_KEY");
-  }
-
-  const model = String(process.env.MARKET_ANALYSIS_GEMINI_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash").trim();
-  const timeoutMs = clampInt(Number(process.env.MARKET_ANALYSIS_GEMINI_TIMEOUT_MS), 5000, 60000, 15000);
-
-  const url = new URL(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`);
-  url.searchParams.set("key", apiKey);
-
-  const payload = await postJsonWithTimeout(url.toString(), timeoutMs, {
-    systemInstruction: {
-      parts: [{ text: systemPrompt }]
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: userPrompt }]
-      }
-    ],
-    generationConfig: {
-      temperature: 0.2,
-      responseMimeType: "application/json"
-    }
-  });
-
-  if (!payload || typeof payload !== "object") {
-    throw new Error("gemini returned empty payload");
-  }
-
-  const source = payload as Record<string, unknown>;
-  const candidates = Array.isArray(source.candidates)
-    ? source.candidates
-    : [];
-  const first = candidates[0] && typeof candidates[0] === "object"
-    ? (candidates[0] as Record<string, unknown>)
-    : null;
-  const content = first?.content && typeof first.content === "object"
-    ? (first.content as Record<string, unknown>)
-    : null;
-  const parts = content?.parts && Array.isArray(content.parts)
-    ? content.parts
-    : [];
-  const text = parts
-    .map((part) => (part && typeof part === "object" ? (part as Record<string, unknown>).text : ""))
-    .filter((item): item is string => typeof item === "string")
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error("gemini returned empty text");
-  }
-
-  return {
-    text,
-    provider: "gemini"
   };
 }
 
@@ -1010,27 +947,18 @@ async function fetchHistoryKline(secid: string, lookbackDays: number, timeoutMs:
 }
 
 function normalizeFundLlmProvider(engine: string): {
-  useGemini: boolean;
   selector?: string;
   providerLabel: string;
 } {
   const value = String(engine || "").trim().toLowerCase();
-  if (value === "gemini") {
-    return {
-      useGemini: true,
-      providerLabel: "gemini"
-    };
-  }
   if (!value || value === "local" || value === "default" || value === "auto") {
     return {
-      useGemini: false,
       selector: undefined,
       providerLabel: "local"
     };
   }
   if (["gpt_plugin", "gpt-plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return {
-      useGemini: false,
       selector: "gpt-plugin",
       providerLabel: "gpt-plugin"
     };
@@ -1038,7 +966,6 @@ function normalizeFundLlmProvider(engine: string): {
 
   const selector = value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
   return {
-    useGemini: false,
     ...(selector ? { selector } : {}),
     providerLabel: selector || "local"
   };
@@ -1313,31 +1240,6 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
   }
 }
 
-async function postJsonWithTimeout(url: string, timeoutMs: number, payload: unknown): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      const text = await safeReadText(response);
-      throw new Error(`HTTP ${response.status} for ${url}${text ? `: ${text.slice(0, 240)}` : ""}`);
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1355,13 +1257,5 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<str
     return await response.text();
   } finally {
     clearTimeout(timer);
-  }
-}
-
-async function safeReadText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
   }
 }

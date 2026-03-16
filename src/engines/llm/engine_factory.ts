@@ -1,4 +1,5 @@
 import { OpenAIQuotaManager, readOpenAIQuotaPolicyFromEnv } from "../../integrations/openai/quotaManager";
+import { GeminiLLMEngine, GeminiLLMOptions } from "./gemini";
 import { GPTPluginLLMEngine, GPTPluginLLMOptions } from "./gpt-plugin";
 import { LlamaServerLLMEngine, LlamaServerLLMOptions } from "./llama-server";
 import { LLMEngine, LLMProvider } from "./llm";
@@ -48,6 +49,10 @@ export function createLLMEngineFromProfile(profile: LLMProviderProfile): LLMEngi
     });
   }
 
+  if (profile.type === "gemini") {
+    return new GeminiLLMEngine(profile.config as Partial<GeminiLLMOptions>);
+  }
+
   if (profile.type === "gpt-plugin") {
     return new GPTPluginLLMEngine(profile.config as Partial<GPTPluginLLMOptions>);
   }
@@ -63,6 +68,9 @@ export function createLLMEngineFromProviderType(provider: LLMProvider): LLMEngin
     return new OpenAILLMEngine({
       quotaManager: new OpenAIQuotaManager({ namespace: "default" })
     });
+  }
+  if (provider === "gemini") {
+    return new GeminiLLMEngine();
   }
   if (provider === "gpt-plugin") {
     return new GPTPluginLLMEngine();
@@ -80,6 +88,9 @@ export function normalizeProvider(providerRaw: string | undefined): LLMProvider 
   }
   if (["openai", "openai-api", "openai-like", "openai_like", "chatgpt", "gpt"].includes(value)) {
     return "openai";
+  }
+  if (["gemini", "gemini-like", "gemini_like", "google", "google-genai", "google-genai-api"].includes(value)) {
+    return "gemini";
   }
   if (["gpt-plugin", "gpt_plugin", "gptplugin", "chatgpt-bridge", "chatgpt_bridge", "bridge"].includes(value)) {
     return "gpt-plugin";

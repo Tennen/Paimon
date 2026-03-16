@@ -4,7 +4,7 @@ export type DataStoreDescriptor = {
   codec?: "json" | "text";
 };
 
-export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gpt-plugin";
+export type LLMProviderType = "ollama" | "llama-server" | "openai" | "gemini" | "gpt-plugin";
 
 export type LLMProviderOpenAIQuotaPolicy = {
   resetDay: number;
@@ -61,6 +61,19 @@ export type OpenAILikeProviderConfig = {
   quotaPolicy?: LLMProviderOpenAIQuotaPolicy;
 };
 
+export type GeminiLikeProviderConfig = {
+  baseUrl?: string;
+  apiKey?: string;
+  model?: string;
+  planningModel?: string;
+  timeoutMs?: number;
+  planningTimeoutMs?: number;
+  maxRetries?: number;
+  strictJson?: boolean;
+  selectionOptions?: Record<string, unknown>;
+  planningOptions?: Record<string, unknown>;
+};
+
 export type GptPluginProviderConfig = {
   model?: string;
   planningModel?: string;
@@ -91,6 +104,13 @@ export type OpenAIProviderProfile = {
   config: OpenAILikeProviderConfig;
 };
 
+export type GeminiProviderProfile = {
+  id: string;
+  name: string;
+  type: "gemini";
+  config: GeminiLikeProviderConfig;
+};
+
 export type GptPluginProviderProfile = {
   id: string;
   name: string;
@@ -102,6 +122,7 @@ export type LLMProviderProfile =
   | OllamaProviderProfile
   | LlamaServerProviderProfile
   | OpenAIProviderProfile
+  | GeminiProviderProfile
   | GptPluginProviderProfile;
 
 export type LLMProviderStore = {

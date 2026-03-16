@@ -377,7 +377,7 @@ export function SystemSection(props: SystemSectionProps) {
           <Card>
             <CardHeader>
               <CardTitle>Provider 列表</CardTitle>
-              <CardDescription>支持多条 OpenAI-like / Ollama / llama-server，gpt-plugin 仅允许一条</CardDescription>
+              <CardDescription>支持多条 OpenAI-like / Gemini-like / Ollama / llama-server，gpt-plugin 仅允许一条</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {providerItems.length === 0 ? (
@@ -474,6 +474,7 @@ export function SystemSection(props: SystemSectionProps) {
                     <SelectContent>
                       <SelectItem value="ollama">ollama</SelectItem>
                       <SelectItem value="openai">openai-like</SelectItem>
+                      <SelectItem value="gemini">gemini-like</SelectItem>
                       <SelectItem value="llama-server">llama-server</SelectItem>
                       <SelectItem value="gpt-plugin">gpt-plugin</SelectItem>
                     </SelectContent>
@@ -503,7 +504,7 @@ export function SystemSection(props: SystemSectionProps) {
                   </div>
                 ) : null}
 
-                {providerDraft.type === "openai" || providerDraft.type === "llama-server" ? (
+                {providerDraft.type === "openai" || providerDraft.type === "llama-server" || providerDraft.type === "gemini" ? (
                   <div className="space-y-2">
                     <Label>apiKey</Label>
                     <Input
@@ -618,7 +619,7 @@ export function SystemSection(props: SystemSectionProps) {
                   </>
                 ) : null}
 
-                {providerDraft.type === "openai" || providerDraft.type === "llama-server" ? (
+                {providerDraft.type === "openai" || providerDraft.type === "llama-server" || providerDraft.type === "gemini" ? (
                   <>
                     <div className="space-y-2 md:col-span-2">
                       <Label>selectionOptions（JSON，可选）</Label>
@@ -807,7 +808,7 @@ export function SystemSection(props: SystemSectionProps) {
 }
 
 function normalizeProviderType(raw: string): LLMProviderType {
-  if (raw === "openai" || raw === "llama-server" || raw === "gpt-plugin") {
+  if (raw === "openai" || raw === "gemini" || raw === "llama-server" || raw === "gpt-plugin") {
     return raw;
   }
   return "ollama";
@@ -1020,6 +1021,23 @@ function buildProviderProfileFromDraft(
                 monthlyBudgetUsdLimit: quotaMonthlyBudgetUsdLimit.value ?? null
               }
             : undefined
+        }
+      }
+    };
+  }
+
+  if (type === "gemini") {
+    return {
+      provider: {
+        id,
+        name,
+        type,
+        config: {
+          ...commonConfig,
+          baseUrl,
+          apiKey,
+          selectionOptions: selectionOptions.value,
+          planningOptions: planningOptions.value
         }
       }
     };

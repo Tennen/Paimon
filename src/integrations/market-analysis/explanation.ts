@@ -37,9 +37,6 @@ export function isExplanationEnabled() {
 
 export async function generateExplanationByProvider(signalResult, optionalNewsContext, analysisConfig) {
   const config = normalizeAnalysisConfig(analysisConfig);
-  if (config.analysisEngine === "gemini") {
-    return generateExplanationViaGeminiModel(signalResult, optionalNewsContext);
-  }
   if (config.analysisEngine === "gpt_plugin") {
     return generateExplanationViaGptPlugin(signalResult, optionalNewsContext, config);
   }
@@ -157,75 +154,6 @@ async function generateExplanationViaGptPlugin(_signalResult, _optionalNewsConte
       fallbackReason: `gpt_plugin failed: ${detail}`
     };
   }
-}
-
-async function generateExplanationViaGeminiModel(signalResult, optionalNewsContext) {
-  const apiKey = String(process.env.GEMINI_API_KEY || "").trim();
-  if (!apiKey) {
-    throw new Error("missing GEMINI_API_KEY");
-  }
-
-  const model = String(process.env.MARKET_ANALYSIS_GEMINI_MODEL || process.env.GEMINI_MODEL || "gemini-2.0-flash").trim();
-  const timeoutMs = parsePositiveInteger(process.env.MARKET_ANALYSIS_GEMINI_TIMEOUT_MS, 15000);
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-  const payload = await fetchJson(endpoint, timeoutMs, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [
-          {
-            text: [
-              "你是A股持仓分析助手，给用户直接可执行的中文建议。",
-              "必须严格保持给定 signalResult 原样，不得更改任何信号，不得新增/删除决策，不得改变风险等级。",
-              "请只输出 JSON，不要 markdown，不要额外说明。"
-            ].join("\n")
-          }
-        ]
-      },
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: JSON.stringify(buildExplanationPromptPayload(signalResult, optionalNewsContext))
-            }
-          ]
-        }
-      ],
-      generationConfig: {
-        temperature: 0.2,
-        responseMimeType: "application/json"
-      }
-    })
-  });
-
-  const candidates = payload && Array.isArray(payload.candidates) ? payload.candidates : [];
-  const first = candidates[0] && typeof candidates[0] === "object" ? candidates[0] : null;
-  const content = first && first.content && typeof first.content === "object" ? first.content : null;
-  const parts = content && Array.isArray(content.parts) ? content.parts : [];
-  const text = parts
-    .map((item) => (item && typeof item === "object" && typeof item.text === "string") ? item.text : "")
-    .join("\n")
-    .trim();
-
-  if (!text) {
-    throw new Error("gemini returned empty response");
-  }
-
-  const parsed = normalizeExplanationOutput(text);
-
-  return {
-    summary: parsed.summary,
-    suggestions: parsed.suggestions,
-    holdings: parsed.holdings,
-    model,
-    generatedAt: new Date().toISOString(),
-    provider: "gemini"
-  };
 }
 
 function buildGptPluginExplanationPrompt(signalResult, optionalNewsContext) {

@@ -182,10 +182,22 @@ HA_TOKEN=your_home_assistant_token
   - `GET /admin/api/llm/openai/quota`
   - `POST /admin/api/llm/openai/quota`（`action=unblock|exhaust|reset`）
 
+#### 使用 Gemini / Google GenAI API（gemini-like）
+
+```env
+PORT=3000
+
+LLM_PROVIDER=gemini
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.0-flash
+GEMINI_PLANNING_MODEL=gemini-2.0-flash
+```
+
 #### 多 Provider Profile（推荐）
 
 - Provider Profile 持久化存储在 `data/llm/providers.json`（storage key: `llm.providers`）
-- 支持创建多条 `openai-like` / `ollama` / `llama-server` profile；`gpt-plugin` 仅允许一条
+- 支持创建多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` profile；`gpt-plugin` 仅允许一条
 - 每条 profile 可配置对应 engine 的常用参数（baseUrl/model/planningModel/timeout/options 等）
 
 可用 Admin API：
@@ -199,7 +211,7 @@ HA_TOKEN=your_home_assistant_token
 
 - 主编排（Orchestrator）支持独立配置 `routing` 与 `planning` provider（未单独设置时回退到 default）
 - `topic-summary` 的 `summaryEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin` 仍兼容旧配置）
-- `market-analysis` 的 `analysisEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin/gemini` 仍兼容旧配置）
+- `market-analysis` 的 `analysisEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin/gemini` 仍兼容旧配置，其中 `gemini` 为 legacy selector）
 - `/re` 子 agent 可通过 `RE_AGENT_LLM_PROVIDER` 独立指定 provider
 
 #### 启用企业微信
@@ -284,14 +296,14 @@ ENABLE_FUND_ANALYSIS=true
 SERPAPI_KEY=
 SERPAPI_ENDPOINT=https://serpapi.com/search.json
 
-# 基金分析 LLM 可选 local 或 gemini（通过 admin 的 Market Analysis 配置切换）
+# 基金分析默认跟随 market provider（可在 admin 的 Market Analysis 中直接选择 provider-id）
 MARKET_ANALYSIS_FUND_LOCAL_MODEL=
-GEMINI_API_KEY=
+# legacy selector=gemini 的兼容项（推荐改为 provider-id）
 MARKET_ANALYSIS_GEMINI_MODEL=gemini-2.0-flash
 MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 ```
 
-`SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置。
+`SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置（优先使用 Provider 配置页统一管理）。
 
 如果只是先把服务跑起来，核心是先保证：
 
