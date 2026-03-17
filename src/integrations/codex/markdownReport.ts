@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { createLLMEngine } from "../../engines/llm";
+import { LLMEngineSystemPromptMode } from "../../engines/llm/llm";
 import { ensureDir, resolveDataPath } from "../../storage/persistence";
 
 export type CodexMarkdownReportInput = {
@@ -12,6 +13,8 @@ export type CodexMarkdownReportInput = {
   outputDir?: string;
   modelOverride?: string;
   timeoutMs?: number;
+  engineSystemPrompt?: string;
+  engineSystemPromptMode?: LLMEngineSystemPromptMode;
 };
 
 export type CodexMarkdownReportResult = {
@@ -61,6 +64,12 @@ export async function runCodexMarkdownReport(input: CodexMarkdownReportInput): P
     step: "general",
     model,
     ...(Number.isFinite(input.timeoutMs) && Number(input.timeoutMs) > 0 ? { timeoutMs: Math.floor(Number(input.timeoutMs)) } : {}),
+    ...(normalizeText(input.engineSystemPrompt)
+      ? {
+          engineSystemPrompt: normalizeText(input.engineSystemPrompt),
+          engineSystemPromptMode: input.engineSystemPromptMode
+        }
+      : {}),
     messages: [
       {
         role: "system",

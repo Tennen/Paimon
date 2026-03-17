@@ -315,6 +315,8 @@ STT_FAST_WHISPER_MODEL=small
 
 当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染长图用于推送。
 
+解释模式下不再额外发送旧链路长文本，避免“图片 + 文本”双发；旧文本里的关键字段（动作/评分/关键指标/数据完整性/新闻检索状态/组合摘要）会在 markdown 上下文中强制补齐，并整合到长图报告。
+
 该链路为强制模式，不再向下兼容纯文本解释回退：
 
 - `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
@@ -322,7 +324,7 @@ STT_FAST_WHISPER_MODEL=small
 - 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls satori @resvg/resvg-js remark`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 
-基金路径的微信文本输出会按单基金展示：
+旧链路文本输出（例如 `--no-llm`）会按单基金展示：
 
 - 决策动作、评分、置信度
 - 核心结论、执行建议与仓位调整提示

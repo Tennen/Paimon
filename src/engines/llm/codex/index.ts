@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
-import { InternalChatRequest, LLMChatEngine } from "../chat_engine";
+import { InternalChatRequest, LLMChatEngine, resolveEngineSystemPrompt } from "../chat_engine";
 import { LLMExecutionStep } from "../llm";
 import { ensureDir, resolveDataPath } from "../../../storage/persistence";
 
@@ -155,13 +155,20 @@ function buildCodexPrompt(request: InternalChatRequest): string {
   const messageText = request.messages
     .map((message, index) => formatMessageForPrompt(index + 1, message))
     .join("\n\n");
+  const systemPrompt = resolveEngineSystemPrompt({
+    defaultPrompt: [
+      "You are acting as an LLM backend for an automation runtime.",
+      "Read the provided conversation messages and output only the assistant reply body.",
+      "Do not execute side-effectful operations and do not modify workspace files.",
+      "If the messages require strict JSON, output strict JSON only.",
+      "Do not output markdown fences."
+    ].join("\n"),
+    customPrompt: request.engineSystemPrompt,
+    mode: request.engineSystemPromptMode
+  });
 
   return [
-    "You are acting as an LLM backend for an automation runtime.",
-    "Read the provided conversation messages and output only the assistant reply body.",
-    "Do not execute side-effectful operations and do not modify workspace files.",
-    "If the messages require strict JSON, output strict JSON only.",
-    "Do not output markdown fences.",
+    systemPrompt,
     `step: ${request.step}`,
     `model_hint: ${request.model}`,
     "",

@@ -6,7 +6,7 @@ import {
   OpenAIUsageDelta,
   readOpenAIQuotaPolicyFromEnv
 } from "../../../integrations/openai/quotaManager";
-import { InternalChatRequest, LLMChatEngine } from "../chat_engine";
+import { InternalChatRequest, LLMChatEngine, resolveEngineSystemPrompt } from "../chat_engine";
 import { LLMExecutionStep } from "../llm";
 
 export type OpenAIMessage = {
@@ -456,11 +456,18 @@ function buildBridgeFallbackPrompt(request: InternalChatRequest, reason: string)
   const messageText = request.messages
     .map((message, index) => formatBridgeMessage(message, index + 1))
     .join("\n\n");
+  const systemPrompt = resolveEngineSystemPrompt({
+    defaultPrompt: [
+      "You are acting as a fallback model for an automation runtime.",
+      "Read the message list and answer exactly as the assistant.",
+      "If the prompt asks for strict JSON, output strict JSON only."
+    ].join("\n"),
+    customPrompt: request.engineSystemPrompt,
+    mode: request.engineSystemPromptMode
+  });
 
   return [
-    "You are acting as a fallback model for an automation runtime.",
-    "Read the message list and answer exactly as the assistant.",
-    "If the prompt asks for strict JSON, output strict JSON only.",
+    systemPrompt,
     `fallback_reason: ${reason}`,
     `step: ${request.step}`,
     `model_hint: ${request.model}`,

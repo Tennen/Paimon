@@ -797,8 +797,15 @@ function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?
   }
   if (output && typeof output === "object") {
     const text = output.text;
-    if (typeof text === "string" && text.trim().length > 0) {
+    const hasTextField = Object.prototype.hasOwnProperty.call(output, "text");
+    if (hasTextField && typeof text === "string") {
       return { text: text.trim() };
+    }
+
+    const hasImageField = Object.prototype.hasOwnProperty.call(output, "image")
+      || Object.prototype.hasOwnProperty.call(output, "images");
+    if (hasImageField) {
+      return { text: "" };
     }
   }
   const sanitized = sanitizeToolResult(output);

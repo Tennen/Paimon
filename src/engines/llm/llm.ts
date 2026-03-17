@@ -35,11 +35,15 @@ export type LLMChatMessage = {
   images?: string[];
 };
 
+export type LLMEngineSystemPromptMode = "replace" | "append";
+
 export type LLMChatRequest = {
   messages: LLMChatMessage[];
   step?: LLMChatStep;
   model?: string;
   timeoutMs?: number;
+  engineSystemPrompt?: string;
+  engineSystemPromptMode?: LLMEngineSystemPromptMode;
   options?: Record<string, unknown>;
   keepAlive?: number;
   planningOptions?: LLMPlanningOptions;

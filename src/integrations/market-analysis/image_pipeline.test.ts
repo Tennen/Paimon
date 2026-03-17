@@ -190,3 +190,39 @@ test("service execute should not fallback to pure text when markdown image rende
     restoreSpawnSync();
   }
 });
+
+test("service execute should return image-only response when explanation is enabled", { concurrency: false }, async () => {
+  const originalChat = CodexLLMEngine.prototype.chat;
+  (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
+    return [
+      "# 今日结论",
+      "建议维持当前仓位。",
+      "## 市场状态",
+      "- 市场状态：震荡",
+      "## 持仓逐项建议",
+      "- 暂无持仓",
+      "## 风险与观察点",
+      "> 关注量能变化",
+      "## 执行清单（短期/中期）",
+      "- 暂不调仓"
+    ].join("\n");
+  };
+
+  try {
+    await withIsolatedMarketState(async () => {
+      const response = await execute("/market close");
+      const typedResponse = response as {
+        text: string;
+        image?: { data?: string };
+        result?: { markdownReport?: string };
+      };
+
+      assert.equal(typedResponse.text, "");
+      assert.equal(typeof typedResponse.image?.data, "string");
+      assert.equal((typedResponse.image?.data || "").length > 0, true);
+      assert.match(String(typedResponse.result?.markdownReport || ""), /今日结论/);
+    });
+  } finally {
+    CodexLLMEngine.prototype.chat = originalChat;
+  }
+});

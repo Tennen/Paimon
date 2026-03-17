@@ -45,7 +45,7 @@ export async function execute(input) {
     assetType
   });
 
-  let text = buildRunResponseText(result);
+  const text = withExplanation ? "" : buildRunResponseText(result);
   let image = null;
   const markdownReport = String(result.explanation && result.explanation.markdown || "").trim();
   if (withExplanation && !markdownReport) {

@@ -4,6 +4,7 @@ import {
   LLMChatMessage,
   LLMChatRequest,
   LLMChatStep,
+  LLMEngineSystemPromptMode,
   LLMEngine,
   LLMExecutionStep,
   LLMPlanningOptions,
@@ -24,10 +25,28 @@ export type InternalChatRequest = {
   model: string;
   messages: LLMChatMessage[];
   timeoutMs?: number;
+  engineSystemPrompt?: string;
+  engineSystemPromptMode?: LLMEngineSystemPromptMode;
   options?: Record<string, unknown>;
   keepAlive?: number;
   planningOptions?: LLMPlanningOptions;
 };
+
+export function resolveEngineSystemPrompt(input: {
+  defaultPrompt: string;
+  customPrompt?: string;
+  mode?: LLMEngineSystemPromptMode;
+}): string {
+  const defaultPrompt = normalizePromptText(input.defaultPrompt);
+  const customPrompt = normalizePromptText(input.customPrompt);
+  if (!customPrompt) {
+    return defaultPrompt;
+  }
+  if (input.mode === "append") {
+    return [defaultPrompt, customPrompt].filter(Boolean).join("\n");
+  }
+  return customPrompt;
+}
 
 export abstract class LLMChatEngine implements LLMEngine {
   private readonly maxRetries: number;
@@ -63,6 +82,8 @@ export abstract class LLMChatEngine implements LLMEngine {
         model,
         messages: request.messages,
         timeoutMs: request.timeoutMs,
+        engineSystemPrompt: request.engineSystemPrompt,
+        engineSystemPromptMode: request.engineSystemPromptMode,
         options: request.options,
         keepAlive: request.keepAlive,
         planningOptions: request.planningOptions
@@ -173,4 +194,8 @@ export abstract class LLMChatEngine implements LLMEngine {
     }
     return this.getModelForStep("routing");
   }
+}
+
+function normalizePromptText(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim() : "";
 }

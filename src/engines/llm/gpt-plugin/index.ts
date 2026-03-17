@@ -1,5 +1,5 @@
 import { executeInNewChat } from "../../../integrations/chatgpt-bridge/service";
-import { InternalChatRequest, LLMChatEngine } from "../chat_engine";
+import { InternalChatRequest, LLMChatEngine, resolveEngineSystemPrompt } from "../chat_engine";
 import { LLMExecutionStep } from "../llm";
 
 export type GPTPluginLLMOptions = {
@@ -71,12 +71,19 @@ function buildBridgePrompt(request: InternalChatRequest): string {
   const messageText = request.messages
     .map((message, index) => formatBridgeMessage(message, index + 1))
     .join("\n\n");
+  const systemPrompt = resolveEngineSystemPrompt({
+    defaultPrompt: [
+      "You are acting as an LLM backend for an automation runtime.",
+      "Read the provided conversation messages and output only the assistant reply body.",
+      "If the messages demand strict JSON, output strict JSON only.",
+      "Do not output markdown fences."
+    ].join("\n"),
+    customPrompt: request.engineSystemPrompt,
+    mode: request.engineSystemPromptMode
+  });
 
   return [
-    "You are acting as an LLM backend for an automation runtime.",
-    "Read the provided conversation messages and output only the assistant reply body.",
-    "If the messages demand strict JSON, output strict JSON only.",
-    "Do not output markdown fences.",
+    systemPrompt,
     `step: ${request.step}`,
     `model_hint: ${request.model}`,
     "",
