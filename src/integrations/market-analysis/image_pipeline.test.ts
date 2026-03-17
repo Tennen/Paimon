@@ -14,6 +14,10 @@ import { runAnalysis } from "./runtime";
 import { execute } from "./service";
 import { ensureStorage } from "./storage";
 
+const childProcess = require("node:child_process") as {
+  spawnSync: typeof import("node:child_process").spawnSync;
+};
+
 const ENV_KEYS = [
   "MARKET_ANALYSIS_LLM_ENABLED",
   "ENABLE_FUND_ANALYSIS",
@@ -22,6 +26,29 @@ const ENV_KEYS = [
 
 function cloneJson<T>(input: T): T {
   return JSON.parse(JSON.stringify(input)) as T;
+}
+
+function createModuleNotFoundError(moduleName: string): NodeJS.ErrnoException {
+  const error = new Error(`Cannot find module '${moduleName}'`) as NodeJS.ErrnoException;
+  error.code = "MODULE_NOT_FOUND";
+  return error;
+}
+
+function mockSpawnSyncFailure(): () => void {
+  const originalSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (() =>
+    ({
+      pid: 0,
+      output: [],
+      stdout: null,
+      stderr: null,
+      status: 1,
+      signal: null,
+      error: new Error("auto-install disabled in unit test")
+    }) as unknown as ReturnType<typeof childProcess.spawnSync>) as typeof childProcess.spawnSync;
+  return () => {
+    childProcess.spawnSync = originalSpawnSync;
+  };
 }
 
 async function withIsolatedMarketState(run: () => Promise<void>): Promise<void> {
@@ -82,9 +109,10 @@ async function withIsolatedMarketState(run: () => Promise<void>): Promise<void> 
 
 test("renderMarkdownAsLongImage should throw missing dependency error when remark is unavailable", { concurrency: false }, async () => {
   const originalRequire = Module.prototype.require;
+  const restoreSpawnSync = mockSpawnSyncFailure();
   Module.prototype.require = function patchedRequire(id: string): unknown {
     if (id === "remark") {
-      throw new Error("MODULE_NOT_FOUND");
+      throw createModuleNotFoundError(id);
     }
     return originalRequire.call(this, id);
   };
@@ -96,6 +124,7 @@ test("renderMarkdownAsLongImage should throw missing dependency error when remar
     );
   } finally {
     Module.prototype.require = originalRequire;
+    restoreSpawnSync();
   }
 });
 
@@ -127,13 +156,14 @@ test("runAnalysis should fail when codex markdown generation fails", { concurren
 test("service execute should not fallback to pure text when markdown image render fails", { concurrency: false }, async () => {
   const originalChat = CodexLLMEngine.prototype.chat;
   const originalRequire = Module.prototype.require;
+  const restoreSpawnSync = mockSpawnSyncFailure();
 
   (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
     return "# 今日结论\n- 测试报告";
   };
   Module.prototype.require = function patchedRequire(id: string): unknown {
     if (id === "remark") {
-      throw new Error("MODULE_NOT_FOUND");
+      throw createModuleNotFoundError(id);
     }
     return originalRequire.call(this, id);
   };
@@ -154,5 +184,6 @@ test("service execute should not fallback to pure text when markdown image rende
   } finally {
     CodexLLMEngine.prototype.chat = originalChat;
     Module.prototype.require = originalRequire;
+    restoreSpawnSync();
   }
 });

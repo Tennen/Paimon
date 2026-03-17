@@ -126,6 +126,12 @@ npm install
 npm install satori @resvg/resvg-js remark
 ```
 
+排障时可检查依赖是否被当前项目正确识别：
+
+```bash
+npm ls satori @resvg/resvg-js remark
+```
+
 ### 2. 配置环境变量
 
 项目启动时会读取根目录 `.env`。可参考仓库内的 `.env.example` 作为模板，下面保留最小可用配置示例。
@@ -311,6 +317,7 @@ STT_FAST_WHISPER_MODEL=small
 
 - `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
 - 运行环境缺少 `satori`、`@resvg/resvg-js` 或 `remark` 依赖时，会直接报错（不会发送纯文本兜底）
+- 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls satori @resvg/resvg-js remark`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 
 基金路径的微信文本输出会按单基金展示：

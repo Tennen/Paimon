@@ -117,7 +117,7 @@ data/              # Runtime data files
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
 - 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责，基金输出包含动作、关键指标、风险与新闻检索状态。
-- markdown 长图渲染适配器位于 `src/integrations/user-message/markdownImageAdapter.ts`，由各业务集成按需调用（例如 market/topic-summary）。
+- markdown 长图渲染适配器位于 `src/integrations/user-message/markdownImageAdapter.ts`，由各业务集成按需调用（例如 market/topic-summary）；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
 
 ## Structural Change Checklist
 

@@ -1,6 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { spawnSync } from "child_process";
+import { createRequire } from "module";
+import { pathToFileURL } from "url";
 import { Image } from "../../types";
 
 type RenderMarkdownImageInput = {
@@ -70,6 +72,11 @@ const FONT_CANDIDATES = [
   "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 ];
 const AUTO_INSTALL_ATTEMPTED = new Set<string>();
+const ADAPTER_PACKAGE_ROOT = resolvePackageRoot(__dirname);
+const dynamicImport = new Function(
+  "specifier",
+  "return import(specifier);"
+) as (specifier: string) => Promise<unknown>;
 
 export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput): Promise<Image> {
   const markdown = String(input.markdown || "").trim();
@@ -82,8 +89,8 @@ export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput)
   const blocks = await parseMarkdownBlocks(markdown);
   const height = estimateHeight(blocks, width);
 
-  const satori = loadSatori();
-  const Resvg = loadResvgCtor();
+  const satori = await loadSatori();
+  const Resvg = await loadResvgCtor();
   const fontData = loadFontData();
 
   const element = buildCardElement(title, blocks, width, height);
@@ -114,7 +121,7 @@ export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput)
 }
 
 async function parseMarkdownBlocks(markdown: string): Promise<RenderBlock[]> {
-  const remark = loadRemark();
+  const remark = await loadRemark();
   const tree = remark().parse(markdown) as MarkdownAstNode;
   const blocks: RenderBlock[] = [];
   visitNodeAsBlocks(tree, blocks);
@@ -528,22 +535,181 @@ function normalizeFileStem(raw: string | undefined): string {
     .toLowerCase();
 }
 
-function loadModuleWithAutoInstall<T>(moduleName: string): T {
+type ModuleRequireCandidate = {
+  requireFn: NodeRequire;
+};
+
+async function loadModuleWithAutoInstall<T>(moduleName: string): Promise<T> {
+  const installCwd = resolveInstallCwd();
   try {
-    return require(moduleName) as T;
+    return await loadModuleFromCandidates<T>(moduleName);
   } catch (error) {
+    const resolvePath = resolvePathFromError(error);
     if (!isMissingTopLevelModuleError(error, moduleName)) {
-      throw error;
+      throw buildModuleLoadError(
+        `Failed to load dependency ${moduleName}`,
+        moduleName,
+        installCwd,
+        resolvePath,
+        error
+      );
     }
-    installDependencyOnce(moduleName);
+
+    installDependencyOnce(moduleName, installCwd);
+
     try {
-      return require(moduleName) as T;
-    } catch {
-      throw new Error(
-        `Missing dependency ${moduleName}. Auto-install attempted but module is still unavailable. Run: npm install ${moduleName} --no-save`
+      return await loadModuleFromCandidates<T>(moduleName);
+    } catch (retryError) {
+      throw buildModuleLoadError(
+        `Missing dependency ${moduleName}. Auto-install attempted but module is still unavailable. Run: npm install ${moduleName} --no-save`,
+        moduleName,
+        installCwd,
+        resolvePathFromError(retryError),
+        retryError
       );
     }
   }
+}
+
+async function loadModuleFromCandidates<T>(moduleName: string): Promise<T> {
+  const candidates = buildRequireCandidates();
+  let lastMissingError: unknown = null;
+  let lastResolvePath: string | null = null;
+
+  for (const candidate of candidates) {
+    const resolvePath = resolveWithRequire(candidate.requireFn, moduleName);
+    if (resolvePath) {
+      lastResolvePath = resolvePath;
+    }
+
+    try {
+      return candidate.requireFn(moduleName) as T;
+    } catch (error) {
+      if (isRequireEsmError(error)) {
+        try {
+          return (await importModule(moduleName, resolvePath)) as T;
+        } catch (importError) {
+          throw attachModuleErrorContext(importError, moduleName, resolvePath);
+        }
+      }
+
+      if (isMissingTopLevelModuleError(error, moduleName)) {
+        lastMissingError = attachModuleErrorContext(error, moduleName, resolvePath);
+        continue;
+      }
+
+      throw attachModuleErrorContext(error, moduleName, resolvePath);
+    }
+  }
+
+  if (lastMissingError) {
+    throw attachModuleErrorContext(lastMissingError, moduleName, lastResolvePath);
+  }
+
+  throw attachModuleErrorContext(new Error(`Unable to load dependency ${moduleName}`), moduleName, lastResolvePath);
+}
+
+function buildRequireCandidates(): ModuleRequireCandidate[] {
+  const candidates: ModuleRequireCandidate[] = [];
+  const seen = new Set<string>();
+  const cwdPackageRoot = resolvePackageRoot(process.cwd());
+  const dirs = [ADAPTER_PACKAGE_ROOT, cwdPackageRoot, process.cwd()];
+
+  for (const dir of dirs) {
+    if (!dir || seen.has(dir)) {
+      continue;
+    }
+    seen.add(dir);
+    try {
+      candidates.push({
+        requireFn: createRequire(path.join(dir, "package.json"))
+      });
+    } catch {
+      // ignore invalid base dir and continue with next candidate
+    }
+  }
+
+  if (!seen.has(__dirname)) {
+    candidates.push({ requireFn: require });
+  }
+
+  return candidates;
+}
+
+function resolveInstallCwd(): string {
+  return ADAPTER_PACKAGE_ROOT || process.cwd();
+}
+
+function resolveWithRequire(requireFn: NodeRequire, moduleName: string): string | null {
+  try {
+    return requireFn.resolve(moduleName);
+  } catch {
+    return null;
+  }
+}
+
+function attachModuleErrorContext(error: unknown, moduleName: string, resolvePath: string | null): Error {
+  const normalized = error instanceof Error ? error : new Error(String(error));
+  const detail = normalized as Error & { moduleName?: string; resolvePath?: string | null };
+  detail.moduleName = moduleName;
+  detail.resolvePath = resolvePath;
+  return normalized;
+}
+
+function resolvePathFromError(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const resolvePath = (error as { resolvePath?: unknown }).resolvePath;
+  if (typeof resolvePath === "string") {
+    return resolvePath;
+  }
+  return null;
+}
+
+function buildModuleLoadError(
+  message: string,
+  moduleName: string,
+  installCwd: string,
+  resolvePath: string | null,
+  cause?: unknown
+): Error {
+  const suffix = formatModuleContext(moduleName, installCwd, resolvePath);
+  const causeMessage = formatCauseMessage(cause);
+  return new Error(causeMessage ? `${message} (${suffix}) cause=${causeMessage}` : `${message} (${suffix})`);
+}
+
+function formatModuleContext(moduleName: string, installCwd: string, resolvePath: string | null): string {
+  return `moduleName=${moduleName} installCwd=${installCwd} resolvePath=${resolvePath || "unresolved"}`;
+}
+
+function formatCauseMessage(error: unknown): string {
+  if (!error) {
+    return "";
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function isRequireEsmError(error: unknown): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const maybeError = error as NodeJS.ErrnoException;
+  return maybeError.code === "ERR_REQUIRE_ESM";
+}
+
+async function importModule(moduleName: string, resolvePath: string | null): Promise<unknown> {
+  if (resolvePath) {
+    try {
+      return await dynamicImport(pathToFileURL(resolvePath).href);
+    } catch {
+      // fallback to bare specifier import below
+    }
+  }
+  return dynamicImport(moduleName);
 }
 
 function isMissingTopLevelModuleError(error: unknown, moduleName: string): boolean {
@@ -558,14 +724,14 @@ function isMissingTopLevelModuleError(error: unknown, moduleName: string): boole
   return message.includes(`'${moduleName}'`) || message.includes(`"${moduleName}"`);
 }
 
-function installDependencyOnce(moduleName: string): void {
-  if (AUTO_INSTALL_ATTEMPTED.has(moduleName)) {
+function installDependencyOnce(moduleName: string, installCwd: string): void {
+  const installKey = `${moduleName}@${installCwd}`;
+  if (AUTO_INSTALL_ATTEMPTED.has(installKey)) {
     return;
   }
-  AUTO_INSTALL_ATTEMPTED.add(moduleName);
+  AUTO_INSTALL_ATTEMPTED.add(installKey);
 
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  const installCwd = resolvePackageRoot(process.cwd()) || resolvePackageRoot(__dirname) || process.cwd();
   const result = spawnSync(npmCommand, ["install", moduleName, "--no-save"], {
     cwd: installCwd,
     env: process.env,
@@ -573,13 +739,20 @@ function installDependencyOnce(moduleName: string): void {
   });
 
   if (result.error) {
-    throw new Error(
-      `Missing dependency ${moduleName}. Auto-install failed (${result.error.message}). Run: npm install ${moduleName} --no-save`
+    throw buildModuleLoadError(
+      `Missing dependency ${moduleName}. Auto-install failed. Run: npm install ${moduleName} --no-save`,
+      moduleName,
+      installCwd,
+      null,
+      result.error
     );
   }
   if (typeof result.status === "number" && result.status !== 0) {
-    throw new Error(
-      `Missing dependency ${moduleName}. Auto-install failed with exit code ${result.status}. Run: npm install ${moduleName} --no-save`
+    throw buildModuleLoadError(
+      `Missing dependency ${moduleName}. Auto-install failed with exit code ${result.status}. Run: npm install ${moduleName} --no-save`,
+      moduleName,
+      installCwd,
+      null
     );
   }
 }
@@ -598,8 +771,8 @@ function resolvePackageRoot(startDir: string): string | null {
   }
 }
 
-function loadSatori(): SatoriLike {
-  const mod = loadModuleWithAutoInstall<{ default?: SatoriLike } | SatoriLike>("satori");
+async function loadSatori(): Promise<SatoriLike> {
+  const mod = await loadModuleWithAutoInstall<{ default?: SatoriLike } | SatoriLike>("satori");
   const fn = (typeof mod === "function" ? mod : mod.default) as SatoriLike | undefined;
   if (!fn) {
     throw new Error("invalid satori export");
@@ -607,20 +780,32 @@ function loadSatori(): SatoriLike {
   return fn;
 }
 
-function loadResvgCtor(): ResvgCtor {
-  const mod = loadModuleWithAutoInstall<{ Resvg?: ResvgCtor }>("@resvg/resvg-js");
-  if (!mod.Resvg) {
+async function loadResvgCtor(): Promise<ResvgCtor> {
+  const mod = await loadModuleWithAutoInstall<{
+    Resvg?: ResvgCtor;
+    default?: {
+      Resvg?: ResvgCtor;
+    };
+  }>("@resvg/resvg-js");
+  const ctor = mod.Resvg || mod.default?.Resvg;
+  if (!ctor) {
     throw new Error("invalid @resvg/resvg-js export");
   }
-  return mod.Resvg;
+  return ctor;
 }
 
-function loadRemark(): () => { parse: (markdown: string) => unknown } {
-  const mod = loadModuleWithAutoInstall<{ remark?: () => { parse: (markdown: string) => unknown } }>("remark");
-  if (!mod.remark) {
+async function loadRemark(): Promise<() => { parse: (markdown: string) => unknown }> {
+  const mod = await loadModuleWithAutoInstall<{
+    remark?: () => { parse: (markdown: string) => unknown };
+    default?: {
+      remark?: () => { parse: (markdown: string) => unknown };
+    };
+  }>("remark");
+  const remarkFn = mod.remark || mod.default?.remark;
+  if (!remarkFn) {
     throw new Error("invalid remark export");
   }
-  return mod.remark;
+  return remarkFn;
 }
 
 function loadFontData(): Buffer {
