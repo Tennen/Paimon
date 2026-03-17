@@ -249,6 +249,8 @@ function buildCardElement(
           background: "#ffffff",
           border: "1px solid #dbeafe",
           borderRadius: 18,
+          display: "flex",
+          flexDirection: "column",
           boxSizing: "border-box",
           paddingLeft: CARD_HORIZONTAL_PADDING,
           paddingRight: CARD_HORIZONTAL_PADDING,
