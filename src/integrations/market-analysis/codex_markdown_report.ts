@@ -48,9 +48,12 @@ export function buildCodexMarketReportSystemPrompt(): string {
     "你是市场策略分析助理，请只输出中文 markdown 报告。",
     "不要输出 JSON，不要输出代码块围栏，不要额外解释。",
     "报告必须可直接发给投资者阅读，语言自然、克制、可执行。",
+    "正文优先使用自然语言，不要堆砌字段名、枚举值或变量名。",
+    "持仓逐项建议中，先给每个标的的人类可读分析（动作+理由+风险），再补充结构化表格。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
     "输入中会出现“旧链路补充信息（必须吸收）”章节，这些字段必须在报告里覆盖，不能遗漏。",
-    "对于基金这种结构化数据，优先在“持仓逐项建议”中使用 markdown 表格呈现（基金/动作/评分/置信度/关键指标/数据完整性/新闻检索）。",
+    "对于结构化数据，请在“持仓逐项建议”中补充 markdown 表格，列名使用中文。",
+    "除专有名词（如 ETF、LOF、SerpAPI）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
     "请按以下结构输出：",
     "# 今日结论",
@@ -78,11 +81,11 @@ export function buildCodexMarketReportSourceMarkdown(input: MarketRunPayload): s
   const optionalNews = asRecord(input.optionalNewsContext);
 
   const lines: string[] = [
-    "# Market Analysis Context",
+    "# 市场分析上下文",
     "",
-    `- 运行阶段: ${normalizeText(input.phase) || "-"}`,
-    `- 资产类型: ${normalizeText(signalResult.assetType) || normalizeText(marketData.assetType) || "-"}`,
-    `- 市场状态: ${normalizeText(signalResult.marketState) || "-"}`,
+    `- 运行阶段: ${formatPhaseLabel(normalizeText(input.phase))}`,
+    `- 资产类型: ${formatAssetTypeLabel(normalizeText(signalResult.assetType) || normalizeText(marketData.assetType))}`,
+    `- 市场状态: ${formatMarketStateLabel(normalizeText(signalResult.marketState))}`,
     `- 基准: ${normalizeText(signalResult.benchmark) || "-"}`,
     `- 生成时间: ${normalizeText(signalResult.generatedAt) || new Date().toISOString()}`,
     ""
@@ -116,7 +119,7 @@ function appendPortfolioSection(lines: string[], portfolio: Record<string, unkno
     const quantity = toFiniteNumber(holding.quantity);
     const avgCost = toFiniteNumber(holding.avgCost);
     lines.push(
-      `- ${name ? `${name}(${code})` : code} | quantity=${quantity === null ? "-" : quantity} | avgCost=${avgCost === null ? "-" : avgCost}`
+      `- ${name ? `${name}(${code})` : code} | 持仓数量: ${quantity === null ? "-" : quantity} | 持仓成本: ${avgCost === null ? "-" : avgCost}`
     );
   }
   lines.push("");
@@ -133,7 +136,7 @@ function appendSignalSection(lines: string[], signalResult: Record<string, unkno
 
   for (const item of signals) {
     const signal = asRecord(item);
-    lines.push(`- ${normalizeText(signal.code) || "-"}: ${normalizeText(signal.signal) || "WATCH"}`);
+    lines.push(`- ${normalizeText(signal.code) || "-"}: ${formatSignalLabel(normalizeText(signal.signal) || "WATCH")}`);
   }
   lines.push("");
 }
@@ -149,36 +152,41 @@ function appendFundDashboardSection(
   }
   const fundRecordMap = buildFundRecordMap(marketData);
 
-  lines.push("## 基金分析要点");
+  lines.push("## 基金分析要点（自然语言）");
   for (const item of dashboards) {
     const dashboard = asRecord(item);
     const code = normalizeText(dashboard.fund_code) || "-";
     const name = normalizeText(dashboard.fund_name) || "-";
-    const decision = normalizeText(dashboard.decision_type) || "watch";
+    const decision = formatDecisionLabel(normalizeText(dashboard.decision_type) || "watch");
     const score = toFiniteNumber(dashboard.sentiment_score);
     const confidence = toFiniteNumber(dashboard.confidence);
     const conclusion = normalizeText(asRecord(dashboard.core_conclusion).one_sentence) || "未提供";
-    lines.push(`- ${name}(${code}) | decision=${decision} | score=${score ?? "-"} | confidence=${confidence ?? "-"}`);
-    lines.push(`  - 结论: ${conclusion}`);
+    const label = name ? `${name}(${code})` : code;
+
+    lines.push(`- ${label}`);
+    lines.push(`  - 当前建议: ${decision}。${conclusion}`);
+    lines.push(`  - 信号强度: ${formatSignalStrength(score, confidence)}`);
 
     const riskAlerts = asArray(dashboard.risk_alerts)
       .map((risk) => normalizeText(risk))
       .filter((risk): risk is string => Boolean(risk))
       .slice(0, 4);
     if (riskAlerts.length > 0) {
-      lines.push(`  - 风险: ${riskAlerts.join(" | ")}`);
+      lines.push(`  - 风险提示: ${riskAlerts.join("；")}`);
+    } else {
+      lines.push("  - 风险提示: 暂无新增重点风险。");
     }
 
     const action = asRecord(dashboard.action_plan);
     const suggestion = normalizeText(action.suggestion);
     const positionChange = normalizeText(action.position_change);
     if (suggestion || positionChange) {
-      lines.push(`  - 执行: ${suggestion || "未提供"}${positionChange ? ` | 仓位: ${positionChange}` : ""}`);
+      lines.push(`  - 执行计划: ${suggestion || "未提供"}${positionChange ? `（仓位建议: ${positionChange}）` : ""}`);
     }
 
     const metricSummary = buildFundMetricSummary(dashboard);
     if (metricSummary.length > 0) {
-      lines.push(`  - 关键指标: ${metricSummary.join(" | ")}`);
+      lines.push(`  - 关键数据: ${metricSummary.join("；")}`);
     }
 
     const insufficientData = asRecord(dashboard.insufficient_data);
@@ -188,9 +196,9 @@ function appendFundDashboardSection(
         .map((field) => normalizeText(field))
         .filter((field): field is string => Boolean(field))
         .slice(0, 6);
-      lines.push(`  - 数据完整性: 不足${missingFields.length > 0 ? ` (missing=${missingFields.join(", ")})` : ""}`);
+      lines.push(`  - 数据完整性: 数据不足${missingFields.length > 0 ? `（缺失: ${missingFields.join("、")}）` : ""}`);
     } else {
-      lines.push("  - 数据完整性: 完整");
+      lines.push("  - 数据完整性: 数据较完整。");
     }
 
     const record = fundRecordMap.get(code);
@@ -200,7 +208,7 @@ function appendFundDashboardSection(
       const newsHeadline = pickTopNewsHeadline(rawContext);
       lines.push(`  - 新闻检索: ${newsStatus}`);
       if (newsHeadline) {
-        lines.push(`  - 新闻样本: ${newsHeadline}`);
+        lines.push(`  - 关注新闻: ${newsHeadline}`);
       }
     }
   }
@@ -242,22 +250,23 @@ function appendLegacyFundCoverageSection(
   }
 
   const fundRecordMap = buildFundRecordMap(marketData);
-  lines.push("## 旧链路补充信息（必须吸收）");
-  lines.push("> 以下字段来自旧文字链路，最终 markdown 报告必须覆盖这些信息，不得遗漏。");
+  lines.push("## 结构化数据附录（来自旧链路）");
+  lines.push("> 建议保留上文自然语言分析，下表用于快速查阅结构化数据。");
   lines.push("");
-  lines.push("### 基金逐项速览（结构化）");
-  lines.push("| 基金 | 动作 | score | confidence | 关键指标 | 数据完整性 | 新闻检索 |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("### 基金速览表");
+  lines.push("| 基金 | 建议动作 | 信号强度 | 关键数据速览 | 数据完整性 | 新闻检索 |");
+  lines.push("| --- | --- | --- | --- | --- | --- |");
 
   for (const item of dashboards) {
     const dashboard = asRecord(item);
     const code = normalizeText(dashboard.fund_code) || "-";
     const name = normalizeText(dashboard.fund_name) || "-";
     const label = sanitizeMarkdownTableCell(`${name}(${code})`);
-    const decision = sanitizeMarkdownTableCell(normalizeText(dashboard.decision_type) || "watch");
+    const decision = sanitizeMarkdownTableCell(formatDecisionLabel(normalizeText(dashboard.decision_type) || "watch"));
     const score = toFiniteNumber(dashboard.sentiment_score);
     const confidence = toFiniteNumber(dashboard.confidence);
-    const metricSummary = sanitizeMarkdownTableCell(buildFundMetricSummary(dashboard).join(" / ") || "-");
+    const strength = sanitizeMarkdownTableCell(formatSignalStrength(score, confidence));
+    const metricSummary = sanitizeMarkdownTableCell(buildFundMetricSummary(dashboard).join("；") || "-");
 
     const insufficientData = asRecord(dashboard.insufficient_data);
     const isInsufficient = Boolean(insufficientData.is_insufficient);
@@ -267,8 +276,8 @@ function appendLegacyFundCoverageSection(
       .slice(0, 4);
     const dataIntegrity = sanitizeMarkdownTableCell(
       isInsufficient
-        ? `不足${missingFields.length > 0 ? `(${missingFields.join(", ")})` : ""}`
-        : "完整"
+        ? `不足${missingFields.length > 0 ? `(${missingFields.join("、")})` : ""}`
+        : "较完整"
     );
 
     const record = fundRecordMap.get(code);
@@ -276,11 +285,11 @@ function appendLegacyFundCoverageSection(
     const newsStatus = sanitizeMarkdownTableCell(describeNewsStatus(rawContext));
 
     lines.push(
-      `| ${label} | ${decision} | ${score ?? "-"} | ${confidence ?? "-"} | ${metricSummary} | ${dataIntegrity} | ${newsStatus} |`
+      `| ${label} | ${decision} | ${strength} | ${metricSummary} | ${dataIntegrity} | ${newsStatus} |`
     );
   }
   lines.push("");
-  lines.push("### 逐项补充字段");
+  lines.push("### 附录补充字段（结构化）");
   for (const item of dashboards) {
     const dashboard = asRecord(item);
     const code = normalizeText(dashboard.fund_code) || "-";
@@ -297,7 +306,7 @@ function appendLegacyFundCoverageSection(
     const suggestion = normalizeText(action.suggestion);
     const positionChange = normalizeText(action.position_change);
     if (suggestion || positionChange) {
-      lines.push(`  - 执行: ${suggestion || "未提供"}${positionChange ? ` | 仓位: ${positionChange}` : ""}`);
+      lines.push(`  - 执行: ${suggestion || "未提供"}${positionChange ? `（仓位建议: ${positionChange}）` : ""}`);
     }
 
     const riskAlerts = asArray(dashboard.risk_alerts)
@@ -305,7 +314,7 @@ function appendLegacyFundCoverageSection(
       .filter((risk): risk is string => Boolean(risk))
       .slice(0, 4);
     if (riskAlerts.length > 0) {
-      lines.push(`  - 风险: ${riskAlerts.join(" | ")}`);
+      lines.push(`  - 风险: ${riskAlerts.join("；")}`);
     }
 
     const record = fundRecordMap.get(code);
@@ -367,9 +376,9 @@ function appendNewsSection(lines: string[], optionalNewsContext: Record<string, 
       const source = normalizeText(row.source);
       const published = normalizeText(row.published_at);
       const snippet = normalizeText(row.snippet);
-      const text = [title || "未命名新闻", source ? `source=${source}` : "", published ? `published=${published}` : "", snippet || ""]
+      const text = [title || "未命名新闻", source ? `来源=${source}` : "", published ? `发布时间=${published}` : "", snippet || ""]
         .filter(Boolean)
-        .join(" | ");
+        .join("；");
       lines.push(`  - ${text}`);
     }
   }
@@ -397,30 +406,30 @@ function buildFundMetricSummary(dashboard: Record<string, unknown>): string[] {
   const returns = asRecord(dataPerspective.return_metrics);
   const risks = asRecord(dataPerspective.risk_metrics);
   const relative = asRecord(dataPerspective.relative_metrics);
-  const coverage = normalizeText(dataPerspective.feature_coverage);
+  const coverage = formatCoverageLabel(normalizeText(dataPerspective.feature_coverage));
   if (coverage) {
-    metrics.push(`coverage=${coverage}`);
+    metrics.push(`特征覆盖: ${coverage}`);
   }
 
   const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
   if (ret20d) {
-    metrics.push(`ret20d=${ret20d}`);
+    metrics.push(`近20日收益: ${ret20d}`);
   }
   const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
   if (ret60d) {
-    metrics.push(`ret60d=${ret60d}`);
+    metrics.push(`近60日收益: ${ret60d}`);
   }
   const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
   if (drawdown) {
-    metrics.push(`maxDD=${drawdown}`);
+    metrics.push(`最大回撤: ${drawdown}`);
   }
   const volatility = formatMetricValue(risks.volatility_annualized, 2, "%", false);
   if (volatility) {
-    metrics.push(`vol=${volatility}`);
+    metrics.push(`年化波动: ${volatility}`);
   }
   const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
   if (excess20d) {
-    metrics.push(`excess20d=${excess20d}`);
+    metrics.push(`近20日超额: ${excess20d}`);
   }
 
   return metrics.slice(0, 6);
@@ -449,11 +458,11 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   const disabledSearchEngine = sourceChain.find((item) => /search_engine:.+:disabled$/.test(item));
   if (disabledSearchEngine) {
     const engineId = disabledSearchEngine.replace(/^search_engine:/, "").replace(/:disabled$/, "");
-    return `Search Engine 已禁用（${engineId || "unknown"}）`;
+    return `新闻检索已禁用（${engineId || "unknown"}）`;
   }
   const missingSearchEngine = sourceChain.find((item) => /search_engine:missing:/.test(item));
   if (missingSearchEngine) {
-    return `Search Engine 缺失（${missingSearchEngine.replace(/^search_engine:missing:/, "")}）`;
+    return `新闻检索配置缺失（${missingSearchEngine.replace(/^search_engine:missing:/, "")}）`;
   }
 
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
@@ -504,6 +513,64 @@ function pickTopNewsHeadline(rawContext: Record<string, unknown>): string {
 function sanitizeMarkdownTableCell(input: string): string {
   const text = normalizeText(input) || "-";
   return text.replace(/\|/g, "/");
+}
+
+function formatDecisionLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "buy") return "买入";
+  if (value === "add") return "加仓";
+  if (value === "hold") return "持有";
+  if (value === "reduce") return "减仓";
+  if (value === "redeem") return "赎回";
+  if (value === "watch") return "观察";
+  return raw || "观察";
+}
+
+function formatSignalLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "buy") return "买入";
+  if (value === "add") return "加仓";
+  if (value === "hold") return "持有";
+  if (value === "reduce") return "减仓";
+  if (value === "redeem") return "赎回";
+  if (value === "watch") return "观察";
+  return raw || "观察";
+}
+
+function formatCoverageLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "ok") return "完整";
+  if (value === "partial") return "部分可用";
+  if (value === "insufficient") return "不足";
+  return raw || "";
+}
+
+function formatMarketStateLabel(raw: string): string {
+  const value = raw.trim().toUpperCase();
+  if (value === "MARKET_STRONG") return "偏强";
+  if (value === "MARKET_WEAK") return "偏弱";
+  if (value === "MARKET_NEUTRAL") return "中性";
+  return raw || "-";
+}
+
+function formatAssetTypeLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "fund") return "基金";
+  if (value === "equity") return "股票";
+  return raw || "-";
+}
+
+function formatPhaseLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "midday") return "盘中";
+  if (value === "close") return "收盘";
+  return raw || "-";
+}
+
+function formatSignalStrength(score: number | null, confidence: number | null): string {
+  const scoreText = score === null ? "评分未知" : `评分 ${Math.round(score)} 分`;
+  const confidenceText = confidence === null ? "置信度未知" : `置信度 ${confidence.toFixed(2)}`;
+  return `${scoreText}，${confidenceText}`;
 }
 
 function resolveTimeoutOverride(raw: unknown): number | undefined {

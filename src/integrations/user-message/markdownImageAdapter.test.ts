@@ -244,11 +244,77 @@ test("renderMarkdownAsLongImage should resolve modules when cwd changes", { conc
   }
 });
 
-test("renderMarkdownAsLongImage should include installCwd and original error when auto install fails", { concurrency: false }, async () => {
+test("renderMarkdownAsLongImage should render markdown table as structured layout", { concurrency: false }, async () => {
   const originalRequire = Module.prototype.require;
-  const originalSpawnSync = childProcess.spawnSync;
+  const capturedElements: unknown[] = [];
   const { renderMarkdownAsLongImage } = loadAdapterFresh();
-  const installFailure = new Error("mock npm spawn failure");
+
+  Module.prototype.require = function patchedRequire(id: string): unknown {
+    if (id === "remark") {
+      return {
+        remark: () => ({
+          parse: (markdown: string) => ({
+            type: "root",
+            children: [
+              {
+                type: "paragraph",
+                children: [{ type: "text", value: String(markdown || "") }]
+              }
+            ]
+          })
+        })
+      };
+    }
+
+    if (id === "satori") {
+      return async (element: unknown) => {
+        capturedElements.push(element);
+        return "<svg></svg>";
+      };
+    }
+
+    if (id === "@resvg/resvg-js") {
+      return {
+        Resvg: class {
+          render(): { asPng: () => Buffer } {
+            return {
+              asPng: () => Buffer.from("png-from-table-test")
+            };
+          }
+        }
+      };
+    }
+
+    return originalRequire.call(this, id);
+  };
+
+  try {
+    await withMockedFontData(async () => {
+      const image = await renderMarkdownAsLongImage({
+        markdown: [
+          "# 今日结论",
+          "维持仓位。",
+          "",
+          "| 基金 | 建议动作 | 数据完整性 |",
+          "| --- | --- | --- |",
+          "| 沪深300ETF(510300) | 持有 | 较完整 |"
+        ].join("\n"),
+        filenamePrefix: "table"
+      });
+
+      assert.equal(Buffer.from(image.data, "base64").toString("utf8"), "png-from-table-test");
+      const rendered = JSON.stringify(capturedElements[0] || {});
+      assert.match(rendered, /沪深300ETF/);
+      assert.doesNotMatch(rendered, /\| 基金 \| 建议动作 \| 数据完整性 \|/);
+    });
+  } finally {
+    Module.prototype.require = originalRequire;
+  }
+});
+
+test("renderMarkdownAsLongImage should include installCwd and original error when dependency is missing", { concurrency: false }, async () => {
+  const originalRequire = Module.prototype.require;
+  const { renderMarkdownAsLongImage } = loadAdapterFresh();
 
   Module.prototype.require = function patchedRequire(id: string): unknown {
     if (id === "remark") {
@@ -256,17 +322,6 @@ test("renderMarkdownAsLongImage should include installCwd and original error whe
     }
     return originalRequire.call(this, id);
   };
-
-  childProcess.spawnSync = (() =>
-    ({
-      pid: 0,
-      output: [],
-      stdout: null,
-      stderr: null,
-      status: 1,
-      signal: null,
-      error: installFailure
-    }) as unknown as ReturnType<typeof childProcess.spawnSync>) as typeof childProcess.spawnSync;
 
   try {
     await assert.rejects(
@@ -276,19 +331,17 @@ test("renderMarkdownAsLongImage should include installCwd and original error whe
         const typedError = error as Error;
         assert.match(typedError.message, /moduleName=remark/);
         assert.match(typedError.message, /installCwd=/);
-        assert.match(typedError.message, /mock npm spawn failure/);
+        assert.match(typedError.message, /Cannot find module 'remark'/);
         return true;
       }
     );
   } finally {
     Module.prototype.require = originalRequire;
-    childProcess.spawnSync = originalSpawnSync;
   }
 });
 
-test("renderMarkdownAsLongImage should report missing remark when require is ERR_REQUIRE_ESM and import cannot resolve", { concurrency: false }, async () => {
+test("renderMarkdownAsLongImage should fallback to import when require reports ERR_REQUIRE_ESM", { concurrency: false }, async () => {
   const originalRequire = Module.prototype.require;
-  const originalSpawnSync = childProcess.spawnSync;
   const { renderMarkdownAsLongImage } = loadAdapterFresh();
 
   Module.prototype.require = function patchedRequire(id: string): unknown {
@@ -298,30 +351,13 @@ test("renderMarkdownAsLongImage should report missing remark when require is ERR
     return originalRequire.call(this, id);
   };
 
-  childProcess.spawnSync = (() =>
-    ({
-      pid: 0,
-      output: [],
-      stdout: null,
-      stderr: null,
-      status: 0,
-      signal: null
-    }) as unknown as ReturnType<typeof childProcess.spawnSync>) as typeof childProcess.spawnSync;
-
   try {
-    await assert.rejects(
-      () => renderMarkdownAsLongImage({ markdown: "# esm-missing" }),
-      (error: unknown) => {
-        assert.equal(error instanceof Error, true);
-        const typedError = error as Error;
-        assert.match(typedError.message, /Missing dependency remark/);
-        assert.match(typedError.message, /installCwd=/);
-        assert.match(typedError.message, /Cannot find (?:package|module)\s+['"`]remark['"`]/);
-        return true;
-      }
-    );
+    await withMockedFontData(async () => {
+      const image = await renderMarkdownAsLongImage({ markdown: "# esm-fallback" });
+      assert.equal(image.contentType, "image/png");
+      assert.equal(Buffer.from(image.data, "base64").length > 0, true);
+    });
   } finally {
     Module.prototype.require = originalRequire;
-    childProcess.spawnSync = originalSpawnSync;
   }
 });

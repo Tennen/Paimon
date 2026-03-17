@@ -18,11 +18,24 @@ type MarkdownAstNode = {
   children?: unknown;
 };
 
-type RenderBlockKind = "h1" | "h2" | "h3" | "p" | "li" | "quote" | "code" | "hr";
+type RenderTextBlockKind = "h1" | "h2" | "h3" | "p" | "li" | "quote" | "code" | "hr";
 
-type RenderBlock = {
-  kind: RenderBlockKind;
+type RenderTextBlock = {
+  kind: RenderTextBlockKind;
   text: string;
+};
+
+type RenderTableBlock = {
+  kind: "table";
+  header: string[];
+  rows: string[][];
+};
+
+type RenderBlock = RenderTextBlock | RenderTableBlock;
+
+type MarkdownSegment = {
+  kind: "text" | "table";
+  content: string;
 };
 
 type SatoriFont = {
@@ -119,10 +132,27 @@ export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput)
 }
 
 async function parseMarkdownBlocks(markdown: string): Promise<RenderBlock[]> {
-  const remark = await loadRemark();
-  const tree = remark().parse(markdown) as MarkdownAstNode;
   const blocks: RenderBlock[] = [];
-  visitNodeAsBlocks(tree, blocks);
+  const remark = await loadRemark();
+  const segments = splitMarkdownSegments(markdown);
+
+  for (const segment of segments) {
+    if (segment.kind === "table") {
+      const tableBlock = parseMarkdownTable(segment.content);
+      if (tableBlock) {
+        blocks.push(tableBlock);
+        continue;
+      }
+    }
+
+    const source = segment.content.trim();
+    if (!source) {
+      continue;
+    }
+    const tree = remark().parse(source) as MarkdownAstNode;
+    visitNodeAsBlocks(tree, blocks);
+  }
+
   return blocks.length > 0 ? blocks : [{ kind: "p", text: markdown }];
 }
 
@@ -288,6 +318,10 @@ function buildCardElement(
 }
 
 function buildBlockElement(block: RenderBlock, index: number): unknown {
+  if (block.kind === "table") {
+    return buildTableElement(block, index);
+  }
+
   if (block.kind === "hr") {
     return h("div", {
       key: `b-${index}`,
@@ -424,6 +458,76 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
   );
 }
 
+function buildTableElement(block: RenderTableBlock, index: number): unknown {
+  const columnCount = Math.max(
+    1,
+    block.header.length,
+    ...block.rows.map((row) => row.length)
+  );
+  const header = normalizeTableRow(block.header, columnCount);
+  const bodyRows = block.rows.map((row) => normalizeTableRow(row, columnCount));
+
+  return h(
+    "div",
+    {
+      key: `b-${index}`,
+      style: {
+        marginTop: 8,
+        marginBottom: 14,
+        border: "1px solid #cbd5e1",
+        borderRadius: 10,
+        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column"
+      }
+    },
+    buildTableRowElement(header, true),
+    ...bodyRows.map((row, rowIndex) => buildTableRowElement(row, false, rowIndex))
+  );
+}
+
+function buildTableRowElement(cells: string[], isHeader: boolean, rowIndex = 0): unknown {
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "row",
+        ...(isHeader ? {} : { borderTop: "1px solid #e2e8f0" }),
+        background: isHeader ? "#eff6ff" : rowIndex % 2 === 0 ? "#ffffff" : "#f8fafc"
+      }
+    },
+    ...cells.map((cell, index) =>
+      h(
+        "div",
+        {
+          key: `${isHeader ? "h" : "r"}-c-${index}`,
+          style: {
+            flex: 1,
+            padding: "8px 10px",
+            boxSizing: "border-box",
+            ...(index > 0 ? { borderLeft: "1px solid #e2e8f0" } : {}),
+            fontSize: isHeader ? 14 : 13,
+            lineHeight: 1.55,
+            fontWeight: isHeader ? 700 : 400,
+            color: isHeader ? "#1e3a8a" : "#0f172a",
+            whiteSpace: "pre-wrap"
+          }
+        },
+        cell
+      )
+    )
+  );
+}
+
+function normalizeTableRow(cells: string[], columnCount: number): string[] {
+  const normalized = cells.map((cell) => collapseWhitespace(cell || ""));
+  while (normalized.length < columnCount) {
+    normalized.push("-");
+  }
+  return normalized.slice(0, columnCount).map((cell) => (cell || "-"));
+}
+
 function h(type: string, props: Record<string, unknown>, ...children: unknown[]): unknown {
   const normalizedChildren = children
     .flatMap((item) => (Array.isArray(item) ? item : [item]))
@@ -447,6 +551,11 @@ function estimateHeight(blocks: RenderBlock[], width: number): number {
   let total = CARD_VERTICAL_PADDING * 2 + 100;
 
   for (const block of blocks) {
+    if (block.kind === "table") {
+      total += estimateTableHeight(block, contentWidth);
+      continue;
+    }
+
     if (block.kind === "hr") {
       total += 24;
       continue;
@@ -462,7 +571,29 @@ function estimateHeight(blocks: RenderBlock[], width: number): number {
   return clampInt(total + 44, MIN_HEIGHT, MAX_HEIGHT, 1400);
 }
 
-function getBlockMetric(kind: RenderBlockKind): { fontSize: number; lineHeight: number; marginBottom: number } {
+function estimateTableHeight(block: RenderTableBlock, contentWidth: number): number {
+  const rows = [block.header, ...block.rows];
+  const columnCount = Math.max(1, block.header.length, ...block.rows.map((row) => row.length));
+  const columnWidth = Math.max(120, Math.floor(contentWidth / columnCount));
+  let total = 18;
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = normalizeTableRow(rows[rowIndex], columnCount);
+    const fontSize = rowIndex === 0 ? 14 : 13;
+    const lineHeight = rowIndex === 0 ? 22 : 20;
+    const charsPerLine = Math.max(4, Math.floor(columnWidth / (fontSize * 0.56)));
+    let maxLines = 1;
+    for (const cell of row) {
+      const lines = Math.max(1, Math.ceil(normalizeRenderLength(cell) / charsPerLine));
+      maxLines = Math.max(maxLines, lines);
+    }
+    total += Math.ceil(maxLines * lineHeight + 16);
+  }
+
+  return total;
+}
+
+function getBlockMetric(kind: RenderTextBlockKind): { fontSize: number; lineHeight: number; marginBottom: number } {
   if (kind === "h1") {
     return { fontSize: 28, lineHeight: 38, marginBottom: 12 };
   }
@@ -504,6 +635,89 @@ function collapseWhitespace(text: string): string {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{2,}/g, "\n")
     .trim();
+}
+
+function splitMarkdownSegments(markdown: string): MarkdownSegment[] {
+  const lines = String(markdown || "").replace(/\r\n/g, "\n").split("\n");
+  const out: MarkdownSegment[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    if (isTableStart(lines, index)) {
+      const tableLines: string[] = [lines[index], lines[index + 1]];
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      out.push({ kind: "table", content: tableLines.join("\n") });
+      continue;
+    }
+
+    const textLines: string[] = [];
+    while (index < lines.length && !isTableStart(lines, index)) {
+      textLines.push(lines[index]);
+      index += 1;
+    }
+    const content = textLines.join("\n").trim();
+    if (content) {
+      out.push({ kind: "text", content });
+    }
+  }
+
+  return out;
+}
+
+function isTableStart(lines: string[], index: number): boolean {
+  if (index < 0 || index + 1 >= lines.length) {
+    return false;
+  }
+  return isMarkdownTableRow(lines[index]) && isMarkdownTableDivider(lines[index + 1]);
+}
+
+function isMarkdownTableRow(line: string): boolean {
+  const cells = parseMarkdownTableRow(line);
+  return cells.length >= 2;
+}
+
+function isMarkdownTableDivider(line: string): boolean {
+  return /^(\s*\|)?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+(\|)?\s*$/.test(String(line || ""));
+}
+
+function parseMarkdownTable(content: string): RenderTableBlock | null {
+  const rows = String(content || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (rows.length < 2 || !isMarkdownTableDivider(rows[1])) {
+    return null;
+  }
+
+  const header = parseMarkdownTableRow(rows[0]).map((cell) => collapseWhitespace(cell));
+  if (header.length < 2) {
+    return null;
+  }
+  const bodyRows = rows
+    .slice(2)
+    .map((line) => parseMarkdownTableRow(line).map((cell) => collapseWhitespace(cell)))
+    .filter((row) => row.length > 0);
+
+  return {
+    kind: "table",
+    header,
+    rows: bodyRows
+  };
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  const source = String(line || "").trim();
+  if (!source || !source.includes("|")) {
+    return [];
+  }
+  const noLeading = source.startsWith("|") ? source.slice(1) : source;
+  const noTrailing = noLeading.endsWith("|") ? noLeading.slice(0, -1) : noLeading;
+  return noTrailing.split("|").map((cell) => cell.trim());
 }
 
 function asNodes(input: unknown): MarkdownAstNode[] {
