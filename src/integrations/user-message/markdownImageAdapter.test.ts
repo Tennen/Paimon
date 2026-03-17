@@ -47,6 +47,12 @@ function createModuleNotFoundError(moduleName: string): NodeJS.ErrnoException {
   return error;
 }
 
+function createRequireEsmError(moduleName: string): NodeJS.ErrnoException {
+  const error = new Error(`require() of ES Module ${moduleName} not supported`) as NodeJS.ErrnoException;
+  error.code = "ERR_REQUIRE_ESM";
+  return error;
+}
+
 async function withMockedFontData(run: () => Promise<void>): Promise<void> {
   const fsMutable = fs as unknown as {
     existsSync: typeof fs.existsSync;
@@ -271,6 +277,46 @@ test("renderMarkdownAsLongImage should include installCwd and original error whe
         assert.match(typedError.message, /moduleName=remark/);
         assert.match(typedError.message, /installCwd=/);
         assert.match(typedError.message, /mock npm spawn failure/);
+        return true;
+      }
+    );
+  } finally {
+    Module.prototype.require = originalRequire;
+    childProcess.spawnSync = originalSpawnSync;
+  }
+});
+
+test("renderMarkdownAsLongImage should report missing remark when require is ERR_REQUIRE_ESM and import cannot resolve", { concurrency: false }, async () => {
+  const originalRequire = Module.prototype.require;
+  const originalSpawnSync = childProcess.spawnSync;
+  const { renderMarkdownAsLongImage } = loadAdapterFresh();
+
+  Module.prototype.require = function patchedRequire(id: string): unknown {
+    if (id === "remark") {
+      throw createRequireEsmError(id);
+    }
+    return originalRequire.call(this, id);
+  };
+
+  childProcess.spawnSync = (() =>
+    ({
+      pid: 0,
+      output: [],
+      stdout: null,
+      stderr: null,
+      status: 0,
+      signal: null
+    }) as unknown as ReturnType<typeof childProcess.spawnSync>) as typeof childProcess.spawnSync;
+
+  try {
+    await assert.rejects(
+      () => renderMarkdownAsLongImage({ markdown: "# esm-missing" }),
+      (error: unknown) => {
+        assert.equal(error instanceof Error, true);
+        const typedError = error as Error;
+        assert.match(typedError.message, /Missing dependency remark/);
+        assert.match(typedError.message, /installCwd=/);
+        assert.match(typedError.message, /Cannot find (?:package|module)\s+['"`]remark['"`]/);
         return true;
       }
     );

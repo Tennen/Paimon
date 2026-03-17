@@ -176,7 +176,10 @@ test("service execute should not fallback to pure text when markdown image rende
           assert.equal(error instanceof Error, true);
           const typedError = error as Error & { code?: string };
           assert.equal(typedError.code, "MARKET_IMAGE_PIPELINE_FAILED");
-          assert.match(typedError.message, /failed to render markdown image/);
+          assert.match(
+            typedError.message,
+            /^MARKET_IMAGE_PIPELINE_FAILED: failed to render markdown image/
+          );
           return true;
         }
       );

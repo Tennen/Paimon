@@ -126,6 +126,8 @@ npm install
 npm install satori @resvg/resvg-js remark
 ```
 
+离线部署环境不会自动拉取缺失包，需预装上述依赖后再启动服务。
+
 排障时可检查依赖是否被当前项目正确识别：
 
 ```bash
@@ -316,7 +318,7 @@ STT_FAST_WHISPER_MODEL=small
 该链路为强制模式，不再向下兼容纯文本解释回退：
 
 - `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
-- 运行环境缺少 `satori`、`@resvg/resvg-js` 或 `remark` 依赖时，会直接报错（不会发送纯文本兜底）
+- 缺失依赖识别覆盖 `MODULE_NOT_FOUND`、ESM `ERR_MODULE_NOT_FOUND` 与 “Cannot find package/module” 消息；运行环境缺少 `satori`、`@resvg/resvg-js` 或 `remark` 时会直接报错（不会发送纯文本兜底）
 - 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls satori @resvg/resvg-js remark`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 

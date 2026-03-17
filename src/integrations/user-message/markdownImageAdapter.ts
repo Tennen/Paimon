@@ -713,15 +713,83 @@ async function importModule(moduleName: string, resolvePath: string | null): Pro
 }
 
 function isMissingTopLevelModuleError(error: unknown, moduleName: string): boolean {
+  if (!isMissingDependencyError(error)) {
+    return false;
+  }
+
+  const targetTopLevel = toTopLevelPackageName(moduleName);
+  if (!targetTopLevel) {
+    return false;
+  }
+
+  const missingSpecifier = extractMissingSpecifierFromError(error);
+  if (!missingSpecifier) {
+    return false;
+  }
+
+  const missingTopLevel = toTopLevelPackageName(missingSpecifier);
+  return Boolean(missingTopLevel && missingTopLevel === targetTopLevel);
+}
+
+function isMissingDependencyError(error: unknown): boolean {
   if (!error || typeof error !== "object") {
     return false;
   }
   const maybeError = error as NodeJS.ErrnoException;
-  if (maybeError.code !== "MODULE_NOT_FOUND") {
-    return false;
+  const code = typeof maybeError.code === "string" ? maybeError.code : "";
+  if (code === "MODULE_NOT_FOUND" || code === "ERR_MODULE_NOT_FOUND") {
+    return true;
   }
   const message = String(maybeError.message || "");
-  return message.includes(`'${moduleName}'`) || message.includes(`"${moduleName}"`);
+  return /Cannot find (?:package|module)\s+/i.test(message);
+}
+
+function extractMissingSpecifierFromError(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const message = String((error as NodeJS.ErrnoException).message || "");
+  const quotedMatch = message.match(/Cannot find (?:package|module)\s+['"`]([^'"`]+)['"`]/i);
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1].trim();
+  }
+  const bareMatch = message.match(/Cannot find (?:package|module)\s+([^\s]+)/i);
+  if (!bareMatch?.[1]) {
+    return null;
+  }
+  return bareMatch[1].replace(/[.,;:)\]}]+$/, "").trim();
+}
+
+function toTopLevelPackageName(specifier: string): string | null {
+  const normalized = String(specifier || "").trim();
+  if (!normalized || isPathLikeSpecifier(normalized)) {
+    return null;
+  }
+  if (normalized.startsWith("@")) {
+    const parts = normalized.split("/");
+    if (parts.length < 2 || !parts[0] || !parts[1]) {
+      return null;
+    }
+    return `${parts[0]}/${parts[1]}`;
+  }
+  const [topLevel] = normalized.split("/");
+  return topLevel || null;
+}
+
+function isPathLikeSpecifier(specifier: string): boolean {
+  if (
+    specifier.startsWith(".") ||
+    specifier.startsWith("/") ||
+    specifier.startsWith("\\") ||
+    specifier.startsWith("node:") ||
+    specifier.startsWith("file:")
+  ) {
+    return true;
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(specifier)) {
+    return true;
+  }
+  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(specifier);
 }
 
 function installDependencyOnce(moduleName: string, installCwd: string): void {
