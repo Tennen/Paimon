@@ -1,6 +1,5 @@
 import fs from "fs";
 import path from "path";
-import { spawnSync } from "child_process";
 import { createRequire } from "module";
 import { pathToFileURL } from "url";
 import { Image } from "../../types";
@@ -71,7 +70,6 @@ const FONT_CANDIDATES = [
   "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
   "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 ];
-const AUTO_INSTALL_ATTEMPTED = new Set<string>();
 const ADAPTER_PACKAGE_ROOT = resolvePackageRoot(__dirname);
 const dynamicImport = new Function(
   "specifier",
@@ -539,15 +537,15 @@ type ModuleRequireCandidate = {
   requireFn: NodeRequire;
 };
 
-async function loadModuleWithAutoInstall<T>(moduleName: string): Promise<T> {
+async function loadModuleDynamically<T>(moduleName: string): Promise<T> {
   const installCwd = resolveInstallCwd();
   try {
     return await loadModuleFromCandidates<T>(moduleName);
   } catch (error) {
     const resolvePath = resolvePathFromError(error);
-    if (!isMissingTopLevelModuleError(error, moduleName)) {
+    if (isMissingTopLevelModuleError(error, moduleName)) {
       throw buildModuleLoadError(
-        `Failed to load dependency ${moduleName}`,
+        `Missing dependency ${moduleName}. Run npm install to install project dependencies`,
         moduleName,
         installCwd,
         resolvePath,
@@ -555,19 +553,13 @@ async function loadModuleWithAutoInstall<T>(moduleName: string): Promise<T> {
       );
     }
 
-    installDependencyOnce(moduleName, installCwd);
-
-    try {
-      return await loadModuleFromCandidates<T>(moduleName);
-    } catch (retryError) {
-      throw buildModuleLoadError(
-        `Missing dependency ${moduleName}. Auto-install attempted but module is still unavailable. Run: npm install ${moduleName} --no-save`,
-        moduleName,
-        installCwd,
-        resolvePathFromError(retryError),
-        retryError
-      );
-    }
+    throw buildModuleLoadError(
+      `Failed to load dependency ${moduleName}`,
+      moduleName,
+      installCwd,
+      resolvePath,
+      error
+    );
   }
 }
 
@@ -792,39 +784,6 @@ function isPathLikeSpecifier(specifier: string): boolean {
   return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(specifier);
 }
 
-function installDependencyOnce(moduleName: string, installCwd: string): void {
-  const installKey = `${moduleName}@${installCwd}`;
-  if (AUTO_INSTALL_ATTEMPTED.has(installKey)) {
-    return;
-  }
-  AUTO_INSTALL_ATTEMPTED.add(installKey);
-
-  const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  const result = spawnSync(npmCommand, ["install", moduleName, "--no-save"], {
-    cwd: installCwd,
-    env: process.env,
-    stdio: "inherit"
-  });
-
-  if (result.error) {
-    throw buildModuleLoadError(
-      `Missing dependency ${moduleName}. Auto-install failed. Run: npm install ${moduleName} --no-save`,
-      moduleName,
-      installCwd,
-      null,
-      result.error
-    );
-  }
-  if (typeof result.status === "number" && result.status !== 0) {
-    throw buildModuleLoadError(
-      `Missing dependency ${moduleName}. Auto-install failed with exit code ${result.status}. Run: npm install ${moduleName} --no-save`,
-      moduleName,
-      installCwd,
-      null
-    );
-  }
-}
-
 function resolvePackageRoot(startDir: string): string | null {
   let current = startDir;
   while (true) {
@@ -840,7 +799,7 @@ function resolvePackageRoot(startDir: string): string | null {
 }
 
 async function loadSatori(): Promise<SatoriLike> {
-  const mod = await loadModuleWithAutoInstall<{ default?: SatoriLike } | SatoriLike>("satori");
+  const mod = await loadModuleDynamically<{ default?: SatoriLike } | SatoriLike>("satori");
   const fn = (typeof mod === "function" ? mod : mod.default) as SatoriLike | undefined;
   if (!fn) {
     throw new Error("invalid satori export");
@@ -849,7 +808,7 @@ async function loadSatori(): Promise<SatoriLike> {
 }
 
 async function loadResvgCtor(): Promise<ResvgCtor> {
-  const mod = await loadModuleWithAutoInstall<{
+  const mod = await loadModuleDynamically<{
     Resvg?: ResvgCtor;
     default?: {
       Resvg?: ResvgCtor;
@@ -863,7 +822,7 @@ async function loadResvgCtor(): Promise<ResvgCtor> {
 }
 
 async function loadRemark(): Promise<() => { parse: (markdown: string) => unknown }> {
-  const mod = await loadModuleWithAutoInstall<{
+  const mod = await loadModuleDynamically<{
     remark?: () => { parse: (markdown: string) => unknown };
     default?: {
       remark?: () => { parse: (markdown: string) => unknown };
