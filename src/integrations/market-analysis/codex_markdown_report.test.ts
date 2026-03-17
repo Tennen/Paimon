@@ -90,9 +90,8 @@ test("buildCodexMarketReportSourceMarkdown should include legacy fund fields", (
   assert.match(sourceMarkdown, /当前建议: 持有。保持仓位，等待趋势确认。/);
   assert.match(sourceMarkdown, /关键数据: 特征覆盖: 完整；近20日收益: \+1.23%；近60日收益: \+3.45%/);
   assert.match(sourceMarkdown, /## 结构化数据附录（来自旧链路）/);
-  assert.match(sourceMarkdown, /\| 基金 \| 建议动作 \| 信号强度 \| 关键数据速览 \| 数据完整性 \| 新闻检索 \|/);
+  assert.match(sourceMarkdown, /\| 基金 \| 建议动作 \| 信号强度 \| 关键数据速览 \| 新闻检索 \|/);
   assert.match(sourceMarkdown, /### 附录补充字段（结构化）/);
-  assert.match(sourceMarkdown, /数据完整性: 数据较完整。/);
   assert.match(sourceMarkdown, /新闻检索: SerpAPI\(google_news\) 命中 1 条/);
   assert.match(sourceMarkdown, /### 组合摘要/);
   assert.match(sourceMarkdown, /### 审计错误/);

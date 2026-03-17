@@ -139,13 +139,11 @@ export function buildRunResponseText(result) {
         if (risks.length > 0) {
           lines.push(`  风险: ${risks.join(" | ")}`);
         }
-        if (dashboard.insufficient_data && dashboard.insufficient_data.is_insufficient) {
-          const missing = Array.isArray(dashboard.insufficient_data.missing_fields)
-            ? dashboard.insufficient_data.missing_fields.slice(0, 4).join(", ")
-            : "";
-          lines.push(`  数据完整性: 不足${missing ? ` (missing=${missing})` : ""}`);
+        // 移除数据完整性段落 - 这些信息仅供内部调试，不影响投资决策
+        // 只在有新闻时才显示新闻信息
+        if (newsStatus) {
+          lines.push(`  新闻检索: ${newsStatus}`);
         }
-        lines.push(`  新闻检索: ${newsStatus}`);
         if (newsHeadline) {
           lines.push(`  新闻样本: ${newsHeadline}`);
         }
@@ -291,6 +289,12 @@ function describeNewsStatus(rawContext) {
     ? rawContext.events.market_news
     : [];
   const newsCount = newsItems.length;
+
+  // 如果没有新闻，返回空字符串（不在表格显示）
+  if (newsCount === 0) {
+    return "";
+  }
+
   const disabledSearchEngine = sourceChain.find((item) => /search_engine:.+:disabled$/.test(String(item || "")));
   if (disabledSearchEngine) {
     const engineId = String(disabledSearchEngine).replace(/^search_engine:/, "").replace(/:disabled$/, "");
@@ -304,30 +308,21 @@ function describeNewsStatus(rawContext) {
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
     return `使用环境变量新闻上下文 (${newsCount}条)`;
   }
-  if (sourceChain.includes("serpapi:disabled_no_key")) {
-    return "未启用 SerpAPI（SERPAPI_KEY 未配置）";
-  }
   const serpApiSource = sourceChain.find((item) => String(item || "").startsWith("serpapi:"));
   if (serpApiSource) {
     const serpApiEngine = String(serpApiSource).replace(/^serpapi:/, "") || "unknown";
-    if (newsCount > 0) {
-      return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
-    }
-    const serpError = errors.find((item) => /serpapi/i.test(String(item || "")));
-    if (serpError) {
-      return `SerpAPI 失败: ${serpError}`;
-    }
-    return `SerpAPI(${serpApiEngine}) 已调用，未命中相关新闻`;
+    return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
   }
   const fallbackSource = sourceChain.find((item) => String(item).startsWith("fallback:"));
   if (fallbackSource) {
-    return newsCount > 0 ? `回退新闻源命中 ${newsCount} 条` : "回退新闻源无结果";
+    return `回退新闻源命中 ${newsCount} 条`;
   }
   const serpError = errors.find((item) => /serpapi/i.test(String(item || "")));
   if (serpError) {
     return `SerpAPI 失败: ${serpError}`;
   }
-  return newsCount > 0 ? `新闻命中 ${newsCount} 条` : "未获取到相关新闻";
+
+  return `新闻命中 ${newsCount} 条`;
 }
 
 function pickTopNewsHeadline(rawContext) {

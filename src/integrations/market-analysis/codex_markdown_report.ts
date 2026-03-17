@@ -51,10 +51,16 @@ export function buildCodexMarketReportSystemPrompt(): string {
     "正文优先使用自然语言，不要堆砌字段名、枚举值或变量名。",
     "持仓逐项建议中，先给每个标的的人类可读分析（动作+理由+风险），再补充结构化表格。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
-    "输入中会出现“旧链路补充信息（必须吸收）”章节，这些字段必须在报告里覆盖，不能遗漏。",
-    "对于结构化数据，请在“持仓逐项建议”中补充 markdown 表格，列名使用中文。",
+    "输入中会出现\"旧链路补充信息（必须吸收）\"章节，这些字段必须在报告里覆盖，不能遗漏。",
+    "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文。",
     "除专有名词（如 ETF、LOF、SerpAPI）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
+    "关键信号值需转换为人类可读语言：",
+    "- 决策动作: BUY→买入, ADD→加仓, HOLD→持有, REDUCE→减仓, REDEEM→赎回, WATCH→观察",
+    "- 市场状态: MARKET_STRONG→偏强, MARKET_WEAK→偏弱, MARKET_NEUTRAL→中性",
+    "- 资产类型: fund→基金, equity→股票",
+    "- 阶段: midday→盘中, close→收盘",
+    "- 特征覆盖: ok→完整, partial→部分可用, insufficient→不足",
     "请按以下结构输出：",
     "# 今日结论",
     "## 市场状态",
@@ -189,24 +195,17 @@ function appendFundDashboardSection(
       lines.push(`  - 关键数据: ${metricSummary.join("；")}`);
     }
 
-    const insufficientData = asRecord(dashboard.insufficient_data);
-    const isInsufficient = Boolean(insufficientData.is_insufficient);
-    if (isInsufficient) {
-      const missingFields = asArray(insufficientData.missing_fields)
-        .map((field) => normalizeText(field))
-        .filter((field): field is string => Boolean(field))
-        .slice(0, 6);
-      lines.push(`  - 数据完整性: 数据不足${missingFields.length > 0 ? `（缺失: ${missingFields.join("、")}）` : ""}`);
-    } else {
-      lines.push("  - 数据完整性: 数据较完整。");
-    }
+    // 移除数据完整性段落 - 这些信息仅供内部调试，不影响投资决策
 
     const record = fundRecordMap.get(code);
     if (record && Object.keys(record).length > 0) {
       const rawContext = asRecord(record.raw_context);
       const newsStatus = describeNewsStatus(rawContext);
       const newsHeadline = pickTopNewsHeadline(rawContext);
-      lines.push(`  - 新闻检索: ${newsStatus}`);
+      // 只在有新闻时才显示新闻信息
+      if (newsStatus) {
+        lines.push(`  - 新闻检索: ${newsStatus}`);
+      }
       if (newsHeadline) {
         lines.push(`  - 关注新闻: ${newsHeadline}`);
       }
@@ -254,8 +253,8 @@ function appendLegacyFundCoverageSection(
   lines.push("> 建议保留上文自然语言分析，下表用于快速查阅结构化数据。");
   lines.push("");
   lines.push("### 基金速览表");
-  lines.push("| 基金 | 建议动作 | 信号强度 | 关键数据速览 | 数据完整性 | 新闻检索 |");
-  lines.push("| --- | --- | --- | --- | --- | --- |");
+  lines.push("| 基金 | 建议动作 | 信号强度 | 关键数据速览 | 新闻检索 |");
+  lines.push("| --- | --- | --- | --- | --- |");
 
   for (const item of dashboards) {
     const dashboard = asRecord(item);
@@ -268,24 +267,12 @@ function appendLegacyFundCoverageSection(
     const strength = sanitizeMarkdownTableCell(formatSignalStrength(score, confidence));
     const metricSummary = sanitizeMarkdownTableCell(buildFundMetricSummary(dashboard).join("；") || "-");
 
-    const insufficientData = asRecord(dashboard.insufficient_data);
-    const isInsufficient = Boolean(insufficientData.is_insufficient);
-    const missingFields = asArray(insufficientData.missing_fields)
-      .map((field) => normalizeText(field))
-      .filter((field): field is string => Boolean(field))
-      .slice(0, 4);
-    const dataIntegrity = sanitizeMarkdownTableCell(
-      isInsufficient
-        ? `不足${missingFields.length > 0 ? `(${missingFields.join("、")})` : ""}`
-        : "较完整"
-    );
-
     const record = fundRecordMap.get(code);
     const rawContext = record ? asRecord(record.raw_context) : {};
     const newsStatus = sanitizeMarkdownTableCell(describeNewsStatus(rawContext));
 
     lines.push(
-      `| ${label} | ${decision} | ${strength} | ${metricSummary} | ${dataIntegrity} | ${newsStatus} |`
+      `| ${label} | ${decision} | ${strength} | ${metricSummary} | ${newsStatus} |`
     );
   }
   lines.push("");
@@ -455,6 +442,11 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   const newsItems = asArray(events.market_news);
   const newsCount = newsItems.length;
 
+  // 如果没有新闻，返回空字符串（不在表格显示）
+  if (newsCount === 0) {
+    return "";
+  }
+
   const disabledSearchEngine = sourceChain.find((item) => /search_engine:.+:disabled$/.test(item));
   if (disabledSearchEngine) {
     const engineId = disabledSearchEngine.replace(/^search_engine:/, "").replace(/:disabled$/, "");
@@ -468,31 +460,21 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
     return `使用环境变量新闻上下文 (${newsCount}条)`;
   }
-  if (sourceChain.includes("serpapi:disabled_no_key")) {
-    return "未启用 SerpAPI（SERPAPI_KEY 未配置）";
-  }
   const serpApiSource = sourceChain.find((item) => item.startsWith("serpapi:"));
   if (serpApiSource) {
     const serpApiEngine = serpApiSource.replace(/^serpapi:/, "") || "unknown";
-    if (newsCount > 0) {
-      return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
-    }
-    const serpError = errors.find((item) => /serpapi/i.test(item));
-    if (serpError) {
-      return `SerpAPI 失败: ${serpError}`;
-    }
-    return `SerpAPI(${serpApiEngine}) 已调用，未命中相关新闻`;
+    return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
   }
   const fallbackSource = sourceChain.find((item) => item.startsWith("fallback:"));
   if (fallbackSource) {
-    return newsCount > 0 ? `回退新闻源命中 ${newsCount} 条` : "回退新闻源无结果";
+    return `回退新闻源命中 ${newsCount} 条`;
   }
   const serpError = errors.find((item) => /serpapi/i.test(item));
   if (serpError) {
     return `SerpAPI 失败: ${serpError}`;
   }
 
-  return newsCount > 0 ? `新闻命中 ${newsCount} 条` : "未获取到相关新闻";
+  return `新闻命中 ${newsCount} 条`;
 }
 
 function pickTopNewsHeadline(rawContext: Record<string, unknown>): string {
