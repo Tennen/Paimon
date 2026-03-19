@@ -1,7 +1,7 @@
 import { FundFeatureContext, FundNewsItem, FundRawContext } from "./fund_types";
 import { FundRuleOutput } from "./fund_rule_engine";
 
-const PROMPT_VERSION = "fund_dashboard_v2";
+const PROMPT_VERSION = "fund_dashboard_v3";
 const MAX_NEWS_ITEMS = 8;
 const MAX_SERIES_POINTS = 90;
 
@@ -13,11 +13,13 @@ export type FundPromptInput = {
 
 export function buildFundSystemPrompt(): string {
   return [
-    "你是基金投研助手，目标是给出可执行且风控优先的基金决策仪表盘。",
-    "必须严格依据输入数据推理，严禁编造净值、收益、公告、新闻、费率或持仓数据。",
-    "如果数据不足，必须在 insufficient_data 中明确标记并给出保守建议。",
+    "你是基金投研助手，目标是给出可执行、风控优先、能直接被投资者理解的基金决策仪表盘。",
+    "必须严格依据输入数据推理，严禁编造净值、收益、公告、新闻、费率、持仓、基金经理或申赎信息。",
+    "核心结论、风险提示、执行建议要写成自然中文，不要照抄字段名、枚举值或程序化描述。",
+    "不同基金使用对应指标表达：ETF/指数基金优先参考相对基准、跟踪偏离、折溢价、流动性；主动基金优先参考收益、回撤、波动、基金经理与申赎事件。",
+    "如果数据不足，必须在 insufficient_data 中明确标记，并把建议收敛到保守动作。",
     "若 blocked_actions 非空，decision_type 与 action_plan 不能与其冲突。",
-    "结论要先给动作，再给理由，再给触发/停止条件。",
+    "结论要先给动作，再给理由，再给执行条件和停止条件。",
     "输出仅允许 JSON，不要输出 Markdown、代码块或额外解释。",
     "输出字段必须完整且对齐 FundDecisionDashboard schema。"
   ].join("\n");
@@ -116,10 +118,118 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     output_schema: buildFundDashboardSchemaHint()
   });
 
-  return [
+  const positionSummary = summarizePosition(input.raw.account_context, latestValue);
+  const lines: string[] = [
     "# 基金决策仪表盘分析请求",
-    JSON.stringify(payload || {}, null, 2)
-  ].join("\n");
+    "",
+    "## 基金基础信息",
+    "| 项目 | 数据 |",
+    "| --- | --- |",
+    `| 标的 | ${formatInstrumentLabel(input.raw.identity.fund_name, input.raw.identity.fund_code)} |`,
+    `| 截止日期 | ${input.raw.as_of_date || "未知"} |`,
+    `| 基金类型 | ${formatFundTypeLabel(input.raw.identity.fund_type)} |`,
+    `| 策略属性 | ${formatStrategyTypeLabel(input.raw.identity.strategy_type)} |`,
+    `| 交易方式 | ${formatTradableLabel(input.raw.identity.tradable)} |`,
+    `| 市场/币种 | ${formatMarketLabel(input.raw.identity.market)} / ${input.raw.identity.currency || "CNY"} |`,
+    `| 参考基准 | ${input.raw.benchmark_code || "未提供"} |`,
+    "",
+    "## 净值与阶段表现",
+    "| 指标 | 基金 | 基准 |",
+    "| --- | --- | --- |",
+    `| 最新净值/价格 | ${formatPromptMetricValue(fundSeriesSummary.latest_value, 6)} | ${formatPromptMetricValue(benchmarkSeriesSummary.latest_value, 6)} |`,
+    `| 最新日期 | ${formatPromptText(fundSeriesSummary.latest_date)} | ${formatPromptText(benchmarkSeriesSummary.latest_date)} |`,
+    `| 近1日收益 | ${formatPromptPercent(fundSeriesSummary.ret_1d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_1d)} |`,
+    `| 近5日收益 | ${formatPromptPercent(fundSeriesSummary.ret_5d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_5d)} |`,
+    `| 近20日收益 | ${formatPromptPercent(fundSeriesSummary.ret_20d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_20d)} |`,
+    `| 近60日收益 | ${formatPromptPercent(fundSeriesSummary.ret_60d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_60d)} |`,
+    `| 20日净值斜率 | ${formatPromptMetricValue(fundSeriesSummary.nav_slope_20d, 6)} | 数据不足 |`,
+    `| 近60日区间 | ${formatRangeText(fundSeriesSummary.low_60d, fundSeriesSummary.high_60d, 6)} | ${formatRangeText(benchmarkSeriesSummary.low_60d, benchmarkSeriesSummary.high_60d, 6)} |`,
+    "",
+    "## 账户与持仓背景",
+    "| 项目 | 数据 |",
+    "| --- | --- |",
+    `| 当前持仓份额 | ${formatPromptMetricValue(positionSummary.current_position, 4)} |`,
+    `| 持仓成本 | ${formatPromptMetricValue(positionSummary.avg_cost, 4)} |`,
+    `| 估算市值 | ${formatPromptMetricValue(positionSummary.estimated_market_value, 2)} |`,
+    `| 浮动盈亏 | ${formatPromptPercent(positionSummary.estimated_position_pnl_pct)} |`,
+    `| 可用预算 | ${formatPromptMetricValue(positionSummary.budget, 2)} |`,
+    `| 风险偏好 | ${formatRiskPreferenceLabel(positionSummary.risk_preference)} |`,
+    `| 持有周期 | ${formatHoldingHorizonLabel(positionSummary.holding_horizon)} |`,
+    "",
+    "## 关键特征指标",
+    `- 收益表现: ${buildFeatureLine([
+      metricPair("近1日", input.features.returns.ret_1d, "percent"),
+      metricPair("近5日", input.features.returns.ret_5d, "percent"),
+      metricPair("近20日", input.features.returns.ret_20d, "percent"),
+      metricPair("近60日", input.features.returns.ret_60d, "percent"),
+      metricPair("近120日", input.features.returns.ret_120d, "percent")
+    ])}`,
+    `- 风险刻画: ${buildFeatureLine([
+      metricPair("最大回撤", input.features.risk.max_drawdown, "percent"),
+      metricPair("年化波动", input.features.risk.volatility_annualized, "percent"),
+      metricPair("回撤修复天数", input.features.risk.drawdown_recovery_days, "plain")
+    ])}`,
+    `- 相对表现: ${buildFeatureLine([
+      metricPair("近20日超额", input.features.relative.benchmark_excess_20d, "percent"),
+      metricPair("近60日超额", input.features.relative.benchmark_excess_60d, "percent"),
+      metricPair("同类分位", input.features.relative.peer_percentile, "plain"),
+      metricPair("跟踪偏离", input.features.relative.tracking_deviation, "percent")
+    ])}`,
+    `- 交易与流动性: ${buildFeatureLine([
+      metricPair("MA5", input.features.trading.ma5, "plain"),
+      metricPair("MA10", input.features.trading.ma10, "plain"),
+      metricPair("MA20", input.features.trading.ma20, "plain"),
+      metricPair("10日均成交量", input.features.trading.liquidity_avg_volume_10d, "plain"),
+      metricPair("量能变化", input.features.trading.volume_change_rate, "percent"),
+      metricPair("折溢价", input.features.trading.premium_discount, "percent")
+    ])}`,
+    `- 稳定性与质量: ${buildFeatureLine([
+      metricPair("超额收益稳定度", input.features.stability.excess_return_consistency, "plain"),
+      metricPair("风格漂移", input.features.stability.style_drift, "plain"),
+      metricPair("净值平滑异常", input.features.stability.nav_smoothing_anomaly, "plain"),
+      metricPair("Sharpe", input.features.nav.sharpe, "plain"),
+      metricPair("Sortino", input.features.nav.sortino, "plain"),
+      metricPair("Calmar", input.features.nav.calmar, "plain"),
+      metricPair("基金经理任职", input.features.nav.manager_tenure, "plain")
+    ])}`,
+    `- 数据质量: 特征覆盖 ${formatCoverageLabel(input.features.coverage)}，模型置信度 ${formatPromptMetricValue(input.features.confidence, 2)}。${formatWarningsLine(input.features.warnings)}`,
+    "",
+    "## 规则约束与当前判断",
+    `- 当前规则分数: ${formatPromptMetricValue(input.rules.rule_adjusted_score, 0)} / 100`,
+    `- 被阻断动作: ${formatTextList(input.rules.blocked_actions, "无")}`,
+    `- 风控标记: ${formatTextList(input.rules.rule_flags, "无")}`,
+    `- 强制保守约束: ${input.rules.hard_blocked ? "是" : "否"}`,
+    "",
+    "## 新闻与事件",
+    `- 新闻检索状态: ${formatNewsSearchStatusLabel(inferNewsSearchStatus(input.raw))}`,
+    `- 公告/提示: ${formatTextList(input.raw.events.notices, "暂无重点公告")}`,
+    `- 基金经理变化: ${formatTextList(input.raw.events.manager_changes, "暂无相关变化")}`,
+    `- 申购赎回约束: ${formatTextList(input.raw.events.subscription_redemption, "暂无明显限制")}`,
+    `- 监管或异常风险: ${formatTextList(input.raw.events.regulatory_risks, "暂无新增风险")}`,
+    ...buildNewsLines(input.raw.events.market_news),
+    "",
+    "## 分析任务",
+    "请基于以上信息输出一个完整的 FundDecisionDashboard JSON，并遵守以下要求：",
+    "1. 先给动作，再说明理由，再说执行条件和停止条件。",
+    "2. `core_conclusion.one_sentence` 要像投资者日报中的一句结论，简洁但不要生硬。",
+    "3. `core_conclusion.thesis` 至少给 2 条，每条都必须引用具体指标、回撤、超额、公告或新闻事实。",
+    "4. `risk_alerts` 优先写限制性因素、回撤/波动、申赎限制、基金经理变化和监管风险。",
+    "5. ETF/指数基金不要套用股票特有口径，优先使用相对基准、跟踪偏离、流动性、折溢价等基金指标。",
+    "6. 如果 `blocked_actions` 非空，最终动作和执行计划不得与之冲突。",
+    "7. 如果数据不足或事件不清晰，要直接承认不确定性并给保守建议。",
+    "",
+    "## 结构化输入快照（供校验，禁止照抄字段名）",
+    "```json",
+    JSON.stringify(payload || {}, null, 2),
+    "```",
+    "",
+    "## 输出 JSON Schema",
+    "```json",
+    JSON.stringify(buildFundDashboardSchemaHint(), null, 2),
+    "```"
+  ];
+
+  return lines.join("\n");
 }
 
 function summarizeSeries(
@@ -247,6 +357,221 @@ function buildFundDashboardSchemaHint(): Record<string, unknown> {
       missing_fields: ["string"]
     }
   };
+}
+
+function buildNewsLines(items: FundNewsItem[]): string[] {
+  if (!Array.isArray(items) || items.length === 0) {
+    return ["- 近7日未抓到高置信度公开新闻，请以净值、回撤和规则约束为主。"];
+  }
+
+  return items.slice(0, MAX_NEWS_ITEMS).map((item, index) => {
+    const parts = [
+      `${index + 1}. ${String(item.title || "").trim() || "未命名新闻"}`,
+      item.source ? `来源=${item.source}` : "",
+      item.published_at ? `时间=${item.published_at}` : "",
+      item.snippet ? `摘要=${compactSnippet(item.snippet, 90)}` : ""
+    ].filter(Boolean);
+    return `- ${parts.join("；")}`;
+  });
+}
+
+function buildFeatureLine(items: Array<{ label: string; value: string } | null>): string {
+  const content = items
+    .filter((item): item is { label: string; value: string } => Boolean(item && item.value))
+    .map((item) => `${item.label}${item.value}`)
+    .join("；");
+  return content || "暂无足够特征数据。";
+}
+
+function metricPair(
+  label: string,
+  value: unknown,
+  mode: "plain" | "percent"
+): { label: string; value: string } | null {
+  const text = mode === "percent"
+    ? formatPromptPercent(value)
+    : formatPromptMetricValue(value, 4);
+  return text === "数据不足" ? null : { label: `${label} `, value: text };
+}
+
+function formatInstrumentLabel(name: string, code: string): string {
+  const normalizedName = String(name || "").trim();
+  const normalizedCode = String(code || "").trim();
+  if (normalizedName && normalizedCode) {
+    return `${normalizedName}(${normalizedCode})`;
+  }
+  return normalizedName || normalizedCode || "未知标的";
+}
+
+function formatFundTypeLabel(value: string): string {
+  switch (value) {
+    case "etf":
+      return "ETF";
+    case "lof":
+      return "LOF";
+    case "otc_public":
+      return "场外公募基金";
+    default:
+      return value || "未知";
+  }
+}
+
+function formatStrategyTypeLabel(value: string): string {
+  switch (value) {
+    case "index":
+      return "指数跟踪";
+    case "active_equity":
+      return "主动权益";
+    case "bond":
+      return "债券";
+    case "mixed":
+      return "混合";
+    case "fof":
+      return "FOF";
+    case "money_market":
+      return "货币";
+    case "qdii":
+      return "QDII";
+    default:
+      return value || "未知";
+  }
+}
+
+function formatTradableLabel(value: string): string {
+  switch (value) {
+    case "intraday":
+      return "场内实时交易";
+    case "nav_t_plus_n":
+      return "场外按净值申赎";
+    default:
+      return value || "未知";
+  }
+}
+
+function formatMarketLabel(value: string): string {
+  switch (value) {
+    case "sh":
+      return "上交所";
+    case "sz":
+      return "深交所";
+    case "otc":
+      return "场外";
+    default:
+      return value || "未知";
+  }
+}
+
+function formatRiskPreferenceLabel(value: unknown): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "conservative":
+      return "稳健";
+    case "balanced":
+      return "均衡";
+    case "aggressive":
+      return "进取";
+    default:
+      return formatPromptText(value);
+  }
+}
+
+function formatHoldingHorizonLabel(value: unknown): string {
+  switch (String(value || "").trim().toLowerCase()) {
+    case "short_term":
+      return "短期";
+    case "medium_term":
+      return "中期";
+    case "long_term":
+      return "长期";
+    default:
+      return formatPromptText(value);
+  }
+}
+
+function formatNewsSearchStatusLabel(value: string): string {
+  switch (value) {
+    case "manual_env_context":
+      return "使用环境变量注入的新闻上下文";
+    case "serpapi_hit":
+      return "SerpAPI 已命中相关公开信息";
+    case "serpapi_no_hit":
+      return "SerpAPI 本次未命中相关公开信息";
+    case "serpapi_disabled_no_key":
+      return "SerpAPI 未配置可用密钥";
+    case "serpapi_error":
+      return "SerpAPI 请求失败";
+    case "fallback_hit":
+      return "已由回退新闻源补齐";
+    case "fallback_no_hit":
+      return "回退新闻源也未命中";
+    default:
+      return "新闻可用性不足";
+  }
+}
+
+function formatWarningsLine(warnings: string[]): string {
+  if (!Array.isArray(warnings) || warnings.length === 0) {
+    return "暂无额外警告。";
+  }
+  return `需要额外留意：${warnings.slice(0, 6).join("；")}。`;
+}
+
+function formatRangeText(low: unknown, high: unknown, digits: number): string {
+  const lowText = formatPromptMetricValue(low, digits);
+  const highText = formatPromptMetricValue(high, digits);
+  if (lowText === "数据不足" || highText === "数据不足") {
+    return "数据不足";
+  }
+  return `${lowText} - ${highText}`;
+}
+
+function formatPromptPercent(value: unknown): string {
+  if (value === null || value === undefined || value === "not_supported") {
+    return "数据不足";
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "数据不足";
+  }
+  const normalized = roundNumber(numeric, 2);
+  const prefix = normalized > 0 ? "+" : "";
+  return `${prefix}${normalized}%`;
+}
+
+function formatPromptMetricValue(value: unknown, digits: number): string {
+  if (value === null || value === undefined || value === "not_supported") {
+    return "数据不足";
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return String(roundNumber(numeric, digits));
+  }
+  const text = String(value || "").trim();
+  return text || "数据不足";
+}
+
+function formatPromptText(value: unknown): string {
+  const text = String(value || "").trim();
+  return text || "数据不足";
+}
+
+function formatCoverageLabel(value: string): string {
+  switch (value) {
+    case "ok":
+      return "完整";
+    case "partial":
+      return "部分可用";
+    case "insufficient":
+      return "不足";
+    default:
+      return value || "未知";
+  }
+}
+
+function formatTextList(values: string[], fallback: string): string {
+  if (!Array.isArray(values) || values.length === 0) {
+    return fallback;
+  }
+  return values.join("；");
 }
 
 function calculateWindowReturn(values: number[], window: number): number | "not_supported" {

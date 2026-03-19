@@ -12,6 +12,7 @@ test("buildCodexMarketReportSystemPrompt should require legacy coverage in markd
   assert.match(prompt, /自然语言/);
   assert.match(prompt, /中文表达一致/);
   assert.match(prompt, /markdown 表格/);
+  assert.match(prompt, /素材包/);
 });
 
 test("buildCodexMarketReportSourceMarkdown should include legacy fund fields", () => {
@@ -86,13 +87,14 @@ test("buildCodexMarketReportSourceMarkdown should include legacy fund fields", (
     }
   });
 
-  assert.match(sourceMarkdown, /## 基金分析要点（自然语言）/);
-  assert.match(sourceMarkdown, /当前建议: 持有。保持仓位，等待趋势确认。/);
-  assert.match(sourceMarkdown, /关键数据: 特征覆盖: 完整；近20日收益: \+1.23%；近60日收益: \+3.45%/);
-  assert.match(sourceMarkdown, /## 结构化数据附录（来自旧链路）/);
-  assert.match(sourceMarkdown, /\| 基金 \| 建议动作 \| 信号强度 \| 关键数据速览 \| 新闻检索 \|/);
-  assert.match(sourceMarkdown, /### 附录补充字段（结构化）/);
-  assert.match(sourceMarkdown, /新闻检索: SerpAPI\(google_news\) 命中 1 条/);
+  assert.match(sourceMarkdown, /## 持仓逐项要点/);
+  assert.match(sourceMarkdown, /### 沪深300ETF\(510300\)/);
+  assert.match(sourceMarkdown, /当前判断: 持有。保持仓位，等待趋势确认。/);
+  assert.match(sourceMarkdown, /关键数据: 数据完整性: 完整；近20个交易日回报: \+1.23%；近60个交易日回报: \+3.45%/);
+  assert.match(sourceMarkdown, /## 旧链路补充信息（必须吸收）/);
+  assert.match(sourceMarkdown, /\| 基金 \| 当前建议 \| 信号强弱 \| 关键数据 \| 公开信息 \|/);
+  assert.match(sourceMarkdown, /### 逐项补充字段/);
+  assert.match(sourceMarkdown, /公开信息: SerpAPI\(google_news\) 命中 1 条；样本：基金公告更新 \(中证网\)/);
   assert.match(sourceMarkdown, /### 组合摘要/);
-  assert.match(sourceMarkdown, /### 审计错误/);
+  assert.match(sourceMarkdown, /### 运行中需要注意/);
 });

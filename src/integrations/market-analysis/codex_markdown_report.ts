@@ -48,11 +48,12 @@ export function buildCodexMarketReportSystemPrompt(): string {
     "你是市场策略分析助理，请只输出中文 markdown 报告。",
     "不要输出 JSON，不要输出代码块围栏，不要额外解释。",
     "报告必须可直接发给投资者阅读，语言自然、克制、可执行。",
-    "正文优先使用自然语言，不要堆砌字段名、枚举值或变量名。",
-    "持仓逐项建议中，先给每个标的的人类可读分析（动作+理由+风险），再补充结构化表格。",
+    "正文优先使用自然语言，不要堆砌字段名、枚举值、变量名或调试口径。",
+    "把输入视为基金持仓日报素材包：先写结论，再解释依据，再提示风险和执行动作。",
+    "持仓逐项建议中，先给每个标的的人类可读分析（动作+依据+风险+执行建议），再补充结构化表格。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
     "输入中会出现\"旧链路补充信息（必须吸收）\"章节，这些字段必须在报告里覆盖，不能遗漏。",
-    "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文。",
+    "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文，指标名称改成人能读懂的表达。",
     "除专有名词（如 ETF、LOF、SerpAPI）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
     "关键信号值需转换为人类可读语言：",
@@ -132,7 +133,7 @@ function appendPortfolioSection(lines: string[], portfolio: Record<string, unkno
 }
 
 function appendSignalSection(lines: string[], signalResult: Record<string, unknown>): void {
-  lines.push("## 规则引擎信号");
+  lines.push("## 系统初步判断");
   const signals = asArray(signalResult.assetSignals);
   if (signals.length === 0) {
     lines.push("- 无信号");
@@ -158,7 +159,7 @@ function appendFundDashboardSection(
   }
   const fundRecordMap = buildFundRecordMap(marketData);
 
-  lines.push("## 基金分析要点（自然语言）");
+  lines.push("## 持仓逐项要点");
   for (const item of dashboards) {
     const dashboard = asRecord(item);
     const code = normalizeText(dashboard.fund_code) || "-";
@@ -169,54 +170,58 @@ function appendFundDashboardSection(
     const conclusion = normalizeText(asRecord(dashboard.core_conclusion).one_sentence) || "未提供";
     const label = name ? `${name}(${code})` : code;
 
-    lines.push(`- ${label}`);
-    lines.push(`  - 当前建议: ${decision}。${conclusion}`);
-    lines.push(`  - 信号强度: ${formatSignalStrength(score, confidence)}`);
+    lines.push(`### ${label}`);
+    lines.push(`- 当前判断: ${decision}。${conclusion}`);
+    lines.push(`- 信号强弱: ${formatSignalStrength(score, confidence)}`);
+
+    const rationale = buildFundRationaleLine(dashboard);
+    if (rationale) {
+      lines.push(`- 主要依据: ${rationale}`);
+    }
 
     const riskAlerts = asArray(dashboard.risk_alerts)
       .map((risk) => normalizeText(risk))
       .filter((risk): risk is string => Boolean(risk))
       .slice(0, 4);
     if (riskAlerts.length > 0) {
-      lines.push(`  - 风险提示: ${riskAlerts.join("；")}`);
+      lines.push(`- 风险与观察: ${riskAlerts.join("；")}`);
     } else {
-      lines.push("  - 风险提示: 暂无新增重点风险。");
+      lines.push("- 风险与观察: 暂无新增重点风险。");
     }
 
     const action = asRecord(dashboard.action_plan);
     const suggestion = normalizeText(action.suggestion);
     const positionChange = normalizeText(action.position_change);
     if (suggestion || positionChange) {
-      lines.push(`  - 执行计划: ${suggestion || "未提供"}${positionChange ? `（仓位建议: ${positionChange}）` : ""}`);
+      lines.push(`- 执行建议: ${suggestion || "未提供"}${positionChange ? `（仓位变化: ${positionChange}）` : ""}`);
     }
 
     const metricSummary = buildFundMetricSummary(dashboard);
     if (metricSummary.length > 0) {
-      lines.push(`  - 关键数据: ${metricSummary.join("；")}`);
+      lines.push(`- 关键数据: ${metricSummary.join("；")}`);
     }
-
-    // 移除数据完整性段落 - 这些信息仅供内部调试，不影响投资决策
 
     const record = fundRecordMap.get(code);
     if (record && Object.keys(record).length > 0) {
       const rawContext = asRecord(record.raw_context);
       const newsStatus = describeNewsStatus(rawContext);
       const newsHeadline = pickTopNewsHeadline(rawContext);
-      // 只在有新闻时才显示新闻信息
-      if (newsStatus) {
-        lines.push(`  - 新闻检索: ${newsStatus}`);
-      }
-      if (newsHeadline) {
-        lines.push(`  - 关注新闻: ${newsHeadline}`);
+      const newsSummary = [newsStatus, newsHeadline ? `样本：${newsHeadline}` : ""]
+        .filter(Boolean)
+        .join("；");
+      if (newsSummary) {
+        lines.push(`- 公开信息: ${newsSummary}`);
       }
     }
+
+    lines.push("");
   }
 
   const portfolioReport = asRecord(signalResult.portfolio_report);
   const brief = normalizeText(portfolioReport.brief);
   const full = normalizeText(portfolioReport.full);
   if (brief || full) {
-    lines.push("### 组合层结论");
+    lines.push("### 组合层判断");
     if (brief) {
       lines.push(`- 摘要: ${brief}`);
     }
@@ -230,7 +235,7 @@ function appendFundDashboardSection(
     .map((item) => normalizeText(item))
     .filter((item): item is string => Boolean(item));
   if (auditErrors.length > 0) {
-    lines.push("### 审计错误");
+    lines.push("### 运行中需要注意");
     for (const error of auditErrors.slice(0, 8)) {
       lines.push(`- ${error}`);
     }
@@ -249,11 +254,11 @@ function appendLegacyFundCoverageSection(
   }
 
   const fundRecordMap = buildFundRecordMap(marketData);
-  lines.push("## 结构化数据附录（来自旧链路）");
-  lines.push("> 建议保留上文自然语言分析，下表用于快速查阅结构化数据。");
+  lines.push("## 旧链路补充信息（必须吸收）");
+  lines.push("> 上文用于自然语言表达，下表和补充字段用于核对动作、数据和公开信息，不要遗漏。");
   lines.push("");
-  lines.push("### 基金速览表");
-  lines.push("| 基金 | 建议动作 | 信号强度 | 关键数据速览 | 新闻检索 |");
+  lines.push("### 快速查阅表");
+  lines.push("| 基金 | 当前建议 | 信号强弱 | 关键数据 | 公开信息 |");
   lines.push("| --- | --- | --- | --- | --- |");
 
   for (const item of dashboards) {
@@ -276,7 +281,7 @@ function appendLegacyFundCoverageSection(
     );
   }
   lines.push("");
-  lines.push("### 附录补充字段（结构化）");
+  lines.push("### 逐项补充字段");
   for (const item of dashboards) {
     const dashboard = asRecord(item);
     const code = normalizeText(dashboard.fund_code) || "-";
@@ -331,7 +336,7 @@ function appendMarketErrorsSection(lines: string[], marketData: Record<string, u
     return;
   }
 
-  lines.push("## 数据告警");
+  lines.push("## 数据告警与口径说明");
   for (const error of errors.slice(0, 8)) {
     lines.push(`- ${error}`);
   }
@@ -343,7 +348,7 @@ function appendNewsSection(lines: string[], optionalNewsContext: Record<string, 
     return;
   }
 
-  lines.push("## 新闻上下文");
+  lines.push("## 近期公开信息摘录");
 
   const equityNews = optionalNewsContext.content;
   if (typeof equityNews === "string" && equityNews.trim()) {
@@ -395,16 +400,16 @@ function buildFundMetricSummary(dashboard: Record<string, unknown>): string[] {
   const relative = asRecord(dataPerspective.relative_metrics);
   const coverage = formatCoverageLabel(normalizeText(dataPerspective.feature_coverage));
   if (coverage) {
-    metrics.push(`特征覆盖: ${coverage}`);
+    metrics.push(`数据完整性: ${coverage}`);
   }
 
   const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
   if (ret20d) {
-    metrics.push(`近20日收益: ${ret20d}`);
+    metrics.push(`近20个交易日回报: ${ret20d}`);
   }
   const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
   if (ret60d) {
-    metrics.push(`近60日收益: ${ret60d}`);
+    metrics.push(`近60个交易日回报: ${ret60d}`);
   }
   const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
   if (drawdown) {
@@ -416,10 +421,24 @@ function buildFundMetricSummary(dashboard: Record<string, unknown>): string[] {
   }
   const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
   if (excess20d) {
-    metrics.push(`近20日超额: ${excess20d}`);
+    metrics.push(`近20个交易日相对基准超额: ${excess20d}`);
   }
 
   return metrics.slice(0, 6);
+}
+
+function buildFundRationaleLine(dashboard: Record<string, unknown>): string {
+  const conclusion = asRecord(dashboard.core_conclusion);
+  const thesis = asArray(conclusion.thesis)
+    .map((item) => normalizeText(item))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 2);
+  const metrics = buildFundMetricSummary(dashboard).slice(0, 4);
+  const parts = [...thesis];
+  if (metrics.length > 0) {
+    parts.push(`可直接核对的数据包括 ${metrics.join("、")}`);
+  }
+  return parts.join("；");
 }
 
 function formatMetricValue(value: unknown, digits: number, suffix: string, signed: boolean): string {
@@ -442,11 +461,6 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   const newsItems = asArray(events.market_news);
   const newsCount = newsItems.length;
 
-  // 如果没有新闻，返回空字符串（不在表格显示）
-  if (newsCount === 0) {
-    return "";
-  }
-
   const disabledSearchEngine = sourceChain.find((item) => /search_engine:.+:disabled$/.test(item));
   if (disabledSearchEngine) {
     const engineId = disabledSearchEngine.replace(/^search_engine:/, "").replace(/:disabled$/, "");
@@ -463,15 +477,23 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   const serpApiSource = sourceChain.find((item) => item.startsWith("serpapi:"));
   if (serpApiSource) {
     const serpApiEngine = serpApiSource.replace(/^serpapi:/, "") || "unknown";
-    return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
+    return newsCount > 0
+      ? `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`
+      : `SerpAPI(${serpApiEngine}) 本次未命中明确新闻`;
   }
   const fallbackSource = sourceChain.find((item) => item.startsWith("fallback:"));
   if (fallbackSource) {
-    return `回退新闻源命中 ${newsCount} 条`;
+    return newsCount > 0
+      ? `回退新闻源命中 ${newsCount} 条`
+      : "回退新闻源未命中";
   }
   const serpError = errors.find((item) => /serpapi/i.test(item));
   if (serpError) {
     return `SerpAPI 失败: ${serpError}`;
+  }
+
+  if (newsCount === 0) {
+    return "";
   }
 
   return `新闻命中 ${newsCount} 条`;

@@ -295,6 +295,8 @@ async function collectRawContext(
   const news = await fetchFundNews({
     fundCode: identity.fund_code,
     fundName: identity.fund_name,
+    fundType: identity.fund_type,
+    strategyType: identity.strategy_type,
     searchEngine: options.searchEngine,
     querySuffix: options.querySuffix,
     timeoutMs: options.timeoutMs,

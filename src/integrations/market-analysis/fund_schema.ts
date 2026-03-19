@@ -162,25 +162,33 @@ export function buildFallbackFundDashboard(input: {
     confidence: input.insufficient ? 0.25 : 0.55,
     core_conclusion: {
       one_sentence: input.insufficient
-        ? "关键数据不足，建议先观察并补齐数据后再决策。"
-        : "基于规则层与特征层结果生成保守建议。",
+        ? "目前数据不完整，这个判断不太可靠，建议先等等。"
+        : "在现有规则和数据下，这是一个偏保守的判断结果。",
+
       thesis: input.insufficient
-        ? ["净值或价格序列不完整", "先以风险控制为先"]
-        : ["规则层优先执行硬约束", "在约束内给出保守动作"]
+        ? [
+            "关键数据还不齐（比如净值或价格）",
+            "当前更重要的是先控制风险"
+          ]
+        : [
+            "优先遵守风控规则（有红线不能碰）",
+            "在这些限制下给出一个稳妥的建议"
+          ]
     },
     risk_alerts: input.ruleFlags.slice(0, 6),
     action_plan: {
       suggestion: decision === "watch"
-        ? "保持观察，等待更多有效数据。"
-        : "按规则层约束执行，避免与 blocked_actions 冲突。",
+        ? "先别动，继续观察一段时间更稳妥。"
+        : "可以行动，但要严格避开被限制的操作。",
+
       position_change: decisionToPositionChange(decision),
       execution_conditions: [
-        "数据时效与关键指标恢复正常",
-        "规则层无新增高风险拦截"
+        "数据恢复正常、更新及时",
+        "没有出现新的风险信号"
       ],
       stop_conditions: [
-        "触发规则层高风险标记",
-        "连续两期特征覆盖不足"
+        "出现新的高风险提示",
+        "连续两次数据质量不足"
       ]
     },
     data_perspective: {

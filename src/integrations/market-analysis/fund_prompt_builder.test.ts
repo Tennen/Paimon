@@ -115,10 +115,10 @@ function buildFeatureContext(): FundFeatureContext {
   };
 }
 
-function parsePromptPayload(prompt: string): Record<string, unknown> {
-  const start = prompt.indexOf("{");
-  assert.ok(start >= 0, "prompt payload should contain a JSON object");
-  return JSON.parse(prompt.slice(start));
+function parsePromptSnapshot(prompt: string): Record<string, unknown> {
+  const match = prompt.match(/## 结构化输入快照（供校验，禁止照抄字段名）\n```json\n([\s\S]*?)\n```/);
+  assert.ok(match, "prompt should contain a structured json snapshot");
+  return JSON.parse(match[1]);
 }
 
 test("fund system prompt should enforce json-only and data constraints", () => {
@@ -126,9 +126,11 @@ test("fund system prompt should enforce json-only and data constraints", () => {
   assert.ok(prompt.includes("输出仅允许 JSON"));
   assert.ok(prompt.includes("严禁编造"));
   assert.ok(prompt.includes("blocked_actions"));
+  assert.ok(prompt.includes("自然中文"));
+  assert.ok(prompt.includes("ETF/指数基金"));
 });
 
-test("fund user prompt should include structured snapshot and news status", () => {
+test("fund user prompt should include natural-language sections and structured snapshot", () => {
   const raw = buildRawContext();
   const prompt = buildFundUserPrompt({
     raw,
@@ -141,12 +143,18 @@ test("fund user prompt should include structured snapshot and news status", () =
     }
   });
 
-  const payload = parsePromptPayload(prompt);
+  const payload = parsePromptSnapshot(prompt);
   const newsAndEvents = payload.news_and_events as Record<string, unknown>;
   const marketSnapshot = payload.market_snapshot as Record<string, unknown>;
-  const taskAndConstraints = payload.task_and_constraints as Record<string, unknown>;
 
+  assert.match(prompt, /## 基金基础信息/);
+  assert.match(prompt, /## 净值与阶段表现/);
+  assert.match(prompt, /## 账户与持仓背景/);
+  assert.match(prompt, /## 新闻与事件/);
+  assert.match(prompt, /## 分析任务/);
+  assert.match(prompt, /ETF\/指数基金不要套用股票特有口径/);
+  assert.match(prompt, /近7日未抓到高置信度公开新闻|1\. 沪深300ETF份额增长/);
   assert.equal(newsAndEvents.news_search_status, "serpapi_hit");
   assert.equal((marketSnapshot.fund_series_summary as Record<string, unknown>).latest_value, 4.35);
-  assert.equal(Array.isArray(taskAndConstraints.must_answer), true);
+  assert.equal(Array.isArray((payload.task_and_constraints as Record<string, unknown>).must_answer), true);
 });
