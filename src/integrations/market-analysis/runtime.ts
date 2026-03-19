@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { resolveAnalysisAssetType, isFundAnalysisEnabled } from "./analysis_router";
-import { generateCodexMarkdownReport, shouldUseCodexMarkdownReport } from "./codex_markdown_report";
-import { fetchOptionalNewsContext, generateExplanationByProvider, isExplanationEnabled } from "./explanation";
-import { runFundAnalysis } from "./fund_analysis_service";
-import { fetchMarketData, resolveIndexCodes } from "./marketData";
-import { executeRuleEngine, calculateFeatureLayer } from "./signals";
+import { fetchOptionalNewsContext } from "./equity/news_context";
+import { runFundAnalysis } from "./fund/fund_analysis_service";
+import { fetchMarketData, resolveIndexCodes } from "./equity/marketData";
+import { executeRuleEngine, calculateFeatureLayer } from "./equity/signals";
+import { generateMarketLlmReport, shouldUseLlmReport } from "./reporting/llm_report_adapter";
+import { requireExplanationMarkdown } from "./reporting/markdown_output_adapter";
+import { createMarketImagePipelineError } from "./reporting/pipeline_errors";
 import { persistRun, readAnalysisConfig, readPortfolio } from "./storage";
-
-const MARKET_IMAGE_PIPELINE_FAILED = "MARKET_IMAGE_PIPELINE_FAILED";
 
 export async function runAnalysis(phase, withExplanation, options = {}) {
   const portfolio = readPortfolio();
@@ -16,82 +16,30 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
     requestedAssetType: options.assetType,
     analysisConfig
   });
-  const explanationEnabled = withExplanation && isExplanationEnabled();
-  const useCodexMarkdownBatch = explanationEnabled && shouldUseCodexMarkdownReport(analysisConfig.analysisEngine);
-  const useNativeExplanation = explanationEnabled && !useCodexMarkdownBatch;
-  if (withExplanation && !useCodexMarkdownBatch) {
+  const explanationEnabled = withExplanation && isLlmExplanationEnabled();
+  const useBatchMarkdownReport = explanationEnabled && shouldUseLlmReport(analysisConfig.analysisEngine);
+  if (withExplanation && !useBatchMarkdownReport) {
     throw createMarketImagePipelineError("markdown report pipeline requires codex analysis engine");
   }
 
-  let marketData = null;
-  let signalResult = null;
-  let explanation = null;
-  let optionalNewsContext = null;
-
-  if (assetType === "fund" && isFundAnalysisEnabled(analysisConfig)) {
-    try {
-      const fundResult = await runFundAnalysis({
+  const analysisResult = assetType === "fund" && isFundAnalysisEnabled(analysisConfig)
+    ? await runFundAnalysis({
         phase,
-        withExplanation: useNativeExplanation,
+        withExplanation: false,
         portfolio,
         analysisConfig
-      });
+      })
+    : await runLegacyEquityAnalysis(phase, portfolio);
 
-      marketData = fundResult.marketData;
-      signalResult = fundResult.signalResult;
-      explanation = fundResult.explanation;
-      optionalNewsContext = fundResult.optionalNewsContext;
-    } catch (error) {
-      const detail = (error && error.message) ? error.message : String(error || "unknown error");
-      const now = new Date().toISOString();
-      marketData = {
-        assetType: "fund",
-        generatedAt: now,
-        funds: [],
-        source_chain: ["fund_runtime:fallback"],
-        errors: [detail]
-      };
-      signalResult = {
-        phase,
-        marketState: "MARKET_NEUTRAL",
-        benchmark: "",
-        generatedAt: now,
-        assetType: "fund",
-        assetSignals: portfolio.funds.map((item) => ({
-          code: item.code,
-          signal: "WATCH"
-        })),
-        fund_dashboards: [],
-        portfolio_report: {
-          brief: "基金流程执行失败，已降级为 watch。",
-          full: `fund runtime failed: ${detail}`
-        },
-        audit: {
-          steps: [],
-          errors: [detail]
-        }
-      };
-      explanation = {
-        summary: "基金流程执行失败，已降级为 watch。",
-        provider: "rule_template",
-        generatedAt: now,
-        dashboards: [],
-        error: detail
-      };
-      optionalNewsContext = null;
-    }
-  } else {
-    const equityResult = await runLegacyEquityAnalysis(phase, useNativeExplanation, portfolio, analysisConfig);
-    marketData = equityResult.marketData;
-    signalResult = equityResult.signalResult;
-    explanation = equityResult.explanation;
-    optionalNewsContext = equityResult.optionalNewsContext;
-  }
+  let marketData = analysisResult.marketData;
+  let signalResult = analysisResult.signalResult;
+  let explanation = analysisResult.explanation;
+  const optionalNewsContext = analysisResult.optionalNewsContext;
 
-  if (useCodexMarkdownBatch) {
+  if (useBatchMarkdownReport) {
     let report = null;
     try {
-      report = await generateCodexMarkdownReport({
+      report = await generateMarketLlmReport({
         phase,
         portfolio,
         marketData,
@@ -104,10 +52,7 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
       throw createMarketImagePipelineError(`failed to generate markdown report: ${detail}`, error);
     }
 
-    const markdown = String(report && report.markdown || "").trim();
-    if (!report || !markdown) {
-      throw createMarketImagePipelineError("markdown report is required when explanation is enabled");
-    }
+    const markdown = requireExplanationMarkdown(report);
 
     explanation = {
       summary: report.summary,
@@ -121,10 +66,7 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
   }
 
   if (withExplanation) {
-    const markdown = String(explanation && explanation.markdown || "").trim();
-    if (!markdown) {
-      throw createMarketImagePipelineError("markdown report is required when explanation is enabled");
-    }
+    requireExplanationMarkdown(explanation);
   }
 
   const persisted = persistRun({
@@ -146,7 +88,7 @@ export async function runAnalysis(phase, withExplanation, options = {}) {
   };
 }
 
-async function runLegacyEquityAnalysis(phase, withExplanation, portfolio, analysisConfig) {
+async function runLegacyEquityAnalysis(phase, portfolio) {
   const assetCodes = Array.from(new Set(portfolio.funds.map((item) => item.code)));
   const indexCodes = resolveIndexCodes();
 
@@ -165,38 +107,15 @@ async function runLegacyEquityAnalysis(phase, withExplanation, portfolio, analys
 
   const optionalNewsContext = await fetchOptionalNewsContext();
 
-  let explanation = null;
-  if (withExplanation && isExplanationEnabled()) {
-    try {
-      explanation = await generateExplanationByProvider(
-        signalResult,
-        optionalNewsContext,
-        analysisConfig
-      );
-    } catch (error) {
-      explanation = {
-        summary: "",
-        error: (error && error.message) ? error.message : String(error || "unknown error"),
-        generatedAt: new Date().toISOString(),
-        provider: analysisConfig.analysisEngine
-      };
-    }
-  }
-
   return {
     marketData,
     signalResult,
-    explanation,
+    explanation: null,
     optionalNewsContext
   };
 }
 
-function createMarketImagePipelineError(reason, cause) {
-  const detail = String(reason || "unknown error").trim() || "unknown error";
-  const error = new Error(`${MARKET_IMAGE_PIPELINE_FAILED}: ${detail}`);
-  error.code = MARKET_IMAGE_PIPELINE_FAILED;
-  if (cause) {
-    error.cause = cause;
-  }
-  return error;
+function isLlmExplanationEnabled() {
+  const flag = String(process.env.MARKET_ANALYSIS_LLM_ENABLED || "true").trim().toLowerCase();
+  return flag !== "false" && flag !== "0";
 }

@@ -1,4 +1,4 @@
-import { MarketAnalysisAssetType, MarketAnalysisConfig } from "./fund_types";
+import { MarketAnalysisAssetType, MarketAnalysisConfig } from "./fund/fund_types";
 
 export function resolveAnalysisAssetType(input: {
   requestedAssetType?: string;

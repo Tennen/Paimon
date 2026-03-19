@@ -1,5 +1,5 @@
 import { jsonrepair } from "jsonrepair";
-import { createLLMEngine } from "../../engines/llm";
+import { createLLMEngine } from "../../../engines/llm";
 import { buildFundFeatureContext } from "./fund_feature_engine";
 import { buildFundSystemPrompt, buildFundUserPrompt } from "./fund_prompt_builder";
 import { evaluateFundRules } from "./fund_rule_engine";

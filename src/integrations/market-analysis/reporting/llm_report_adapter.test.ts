@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildCodexMarketReportSourceMarkdown,
-  buildCodexMarketReportSystemPrompt
-} from "./codex_markdown_report";
+  buildMarketReportSourceMarkdown,
+  buildMarketReportSystemPrompt
+} from "./llm_report_adapter";
 
-test("buildCodexMarketReportSystemPrompt should require legacy coverage in markdown report", () => {
-  const prompt = buildCodexMarketReportSystemPrompt();
+test("buildMarketReportSystemPrompt should require legacy coverage in markdown report", () => {
+  const prompt = buildMarketReportSystemPrompt();
   assert.match(prompt, /旧链路补充信息（必须吸收）/);
   assert.match(prompt, /持仓逐项建议/);
   assert.match(prompt, /自然语言/);
@@ -16,8 +16,8 @@ test("buildCodexMarketReportSystemPrompt should require legacy coverage in markd
   assert.match(prompt, /核心结论 \/ 数据视角 \/ 情报观察 \/ 执行计划/);
 });
 
-test("buildCodexMarketReportSourceMarkdown should include legacy fund fields", () => {
-  const sourceMarkdown = buildCodexMarketReportSourceMarkdown({
+test("buildMarketReportSourceMarkdown should include legacy fund fields", () => {
+  const sourceMarkdown = buildMarketReportSourceMarkdown({
     phase: "close",
     analysisEngine: "codex",
     portfolio: {

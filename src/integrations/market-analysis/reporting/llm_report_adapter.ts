@@ -1,7 +1,7 @@
-import { resolveDataPath } from "../../storage/persistence";
-import { isCodexProvider, runCodexMarkdownReport } from "../codex/markdownReport";
+import { resolveDataPath } from "../../../storage/persistence";
+import { isCodexProvider, runCodexMarkdownReport } from "../../codex/markdownReport";
 
-export type MarketRunPayload = {
+export type MarketReportPayload = {
   phase: string;
   portfolio: unknown;
   marketData: unknown;
@@ -10,7 +10,7 @@ export type MarketRunPayload = {
   analysisEngine: string;
 };
 
-export type CodexMarkdownReport = {
+export type MarketLlmReport = {
   provider: "codex";
   model: string;
   summary: string;
@@ -20,30 +20,29 @@ export type CodexMarkdownReport = {
   outputPath: string;
 };
 
-const REPORT_DIR = resolveDataPath("market-analysis", "codex-reports");
+const REPORT_DIR = resolveDataPath("market-analysis", "llm-reports");
 
-export function shouldUseCodexMarkdownReport(engineRaw: unknown): boolean {
+export function shouldUseLlmReport(engineRaw: unknown): boolean {
   return isCodexProvider(engineRaw);
 }
 
-export async function generateCodexMarkdownReport(input: MarketRunPayload): Promise<CodexMarkdownReport | null> {
-  const sourceMarkdown = buildCodexMarketReportSourceMarkdown(input);
+export async function generateMarketLlmReport(input: MarketReportPayload): Promise<MarketLlmReport | null> {
+  const sourceMarkdown = buildMarketReportSourceMarkdown(input);
   const timeoutOverride = resolveTimeoutOverride(process.env.MARKET_ANALYSIS_LLM_TIMEOUT_MS);
 
   return runCodexMarkdownReport({
     providerRaw: input.analysisEngine,
     taskPrefix: input.phase,
     sourceMarkdown,
-    systemPrompt: buildCodexMarketReportSystemPrompt(),
+    systemPrompt: buildMarketReportSystemPrompt(),
     userPrompt: "请阅读这份市场上下文 markdown，并输出完整分析报告。",
-    engineSystemPrompt: buildMarkdownReportEngineSystemPrompt(),
     outputDir: REPORT_DIR,
     modelOverride: normalizeText(process.env.MARKET_ANALYSIS_LLM_MODEL),
     ...(timeoutOverride ? { timeoutMs: timeoutOverride } : {})
   });
 }
 
-export function buildCodexMarketReportSystemPrompt(): string {
+export function buildMarketReportSystemPrompt(): string {
   return [
     "你是市场策略分析助理，请只输出中文 markdown 报告。",
     "不要输出 JSON，不要输出代码块围栏，不要额外解释。",
@@ -71,17 +70,7 @@ export function buildCodexMarketReportSystemPrompt(): string {
   ].join("\n");
 }
 
-function buildMarkdownReportEngineSystemPrompt(): string {
-  return [
-    "You are acting as an LLM backend for an automation runtime.",
-    "Read the provided conversation messages and output only the assistant reply body.",
-    "Do not execute side-effectful operations and do not modify workspace files.",
-    "If the messages require strict JSON, output strict JSON only.",
-    "Preserve markdown formatting instructions from the message content."
-  ].join("\n");
-}
-
-export function buildCodexMarketReportSourceMarkdown(input: MarketRunPayload): string {
+export function buildMarketReportSourceMarkdown(input: MarketReportPayload): string {
   const signalResult = asRecord(input.signalResult);
   const portfolio = asRecord(input.portfolio);
   const marketData = asRecord(input.marketData);

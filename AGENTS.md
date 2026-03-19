@@ -45,7 +45,9 @@ This file defines hard constraints for coding agents working in this repository.
     - `src/integrations/topic-summary/`
     - `src/integrations/market-analysis/`
     - `src/integrations/writing-organizer/`
-  - Keep integrations flat by domain (`src/integrations/<domain>/`), no `integrations/tools` layer.
+  - Prefer flat domain roots (`src/integrations/<domain>/`), no `integrations/tools` layer.
+  - Flatness has a limit: if one domain directory grows beyond 10 files, or if multiple files in that directory clearly belong to different abstraction layers or capability groups, you must split it into subdirectories.
+  - When splitting a domain, group by stable capability or responsibility (for example `fund/`, `equity/`, `reporting/`) and keep cross-capability entrypoints in the domain root.
 
 - `src/tools/`
   - Independent tool definitions exposed to orchestration/LLM (for example: `terminal`, `homeassistant`).

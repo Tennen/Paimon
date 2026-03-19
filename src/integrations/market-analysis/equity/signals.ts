@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { chooseBenchmarkCode } from "./marketData";
-import { average, isFiniteNumber, movingAverage, normalizeAssetName, round, safeNumber } from "./utils";
+import { average, isFiniteNumber, movingAverage, normalizeAssetName, round, safeNumber } from "../utils";
 
 export function calculateFeatureLayer(marketData) {
   const indices = {};

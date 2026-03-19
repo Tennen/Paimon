@@ -5,7 +5,7 @@ import {
   HISTORY_LIMIT,
   SH_INDEX_CODES,
   SZ_INDEX_CODES
-} from "./defaults";
+} from "../defaults";
 import {
   fetchJson,
   normalizeCode,
@@ -14,7 +14,7 @@ import {
   normalizeVolume,
   round,
   toNumber
-} from "./utils";
+} from "../utils";
 
 export async function fetchMarketData(input) {
   const indexCodes = Array.isArray(input.indexCodes) ? input.indexCodes : [];

@@ -3,7 +3,7 @@ import {
   SearchEngineProfile,
   getSearchEngineProfile,
   resolveSearchEngineSelector
-} from "../search-engine/store";
+} from "../../search-engine/store";
 
 export type FundNewsSearchInput = {
   fundCode: string;

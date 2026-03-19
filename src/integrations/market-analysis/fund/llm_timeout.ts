@@ -4,7 +4,7 @@ import {
   listLLMProviderProfiles,
   resolveLegacyEngineSelector,
   type LLMProviderProfile
-} from "../../engines/llm/provider_store";
+} from "../../../engines/llm/provider_store";
 
 export const DEFAULT_MARKET_ANALYSIS_LLM_TIMEOUT_MS = 60000;
 

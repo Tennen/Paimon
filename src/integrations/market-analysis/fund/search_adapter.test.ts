@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SearchEngineProfile } from "../search-engine/store";
+import { SearchEngineProfile } from "../../search-engine/store";
 import { buildSerpApiSearchPlans, normalizeFundNewsQuerySuffix } from "./search_adapter";
 
 function buildSerpApiProfile(engine = "google_news"): SearchEngineProfile {

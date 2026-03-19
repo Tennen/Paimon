@@ -59,14 +59,15 @@ export async function runCodexMarkdownReport(input: CodexMarkdownReportInput): P
     throw new Error("sourceMarkdown is empty");
   }
   fs.writeFileSync(inputPath, sourceMarkdown, "utf-8");
+  const engineSystemPrompt = normalizeText(input.engineSystemPrompt) || buildAutomationRuntimeEngineSystemPrompt();
 
   const markdown = await engine.chat({
     step: "general",
     model,
     ...(Number.isFinite(input.timeoutMs) && Number(input.timeoutMs) > 0 ? { timeoutMs: Math.floor(Number(input.timeoutMs)) } : {}),
-    ...(normalizeText(input.engineSystemPrompt)
+    ...(engineSystemPrompt
       ? {
-          engineSystemPrompt: normalizeText(input.engineSystemPrompt),
+          engineSystemPrompt,
           engineSystemPromptMode: input.engineSystemPromptMode
         }
       : {}),
@@ -146,4 +147,14 @@ function normalizeMarkdown(raw: unknown): string {
 
 function normalizeText(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function buildAutomationRuntimeEngineSystemPrompt(): string {
+  return [
+    "You are acting as an LLM backend for an automation runtime.",
+    "Read the provided conversation messages and output only the assistant reply body.",
+    "Do not execute side-effectful operations and do not modify workspace files.",
+    "If the messages require strict JSON, output strict JSON only.",
+    "Preserve markdown formatting instructions from the message content."
+  ].join("\n");
 }

@@ -4,7 +4,7 @@ import {
   readLLMProviderStore,
   writeLLMProviderStore,
   type LLMProviderStore
-} from "../../engines/llm/provider_store";
+} from "../../../engines/llm/provider_store";
 import {
   DEFAULT_MARKET_ANALYSIS_LLM_TIMEOUT_MS,
   resolveMarketAnalysisLlmTimeoutMs

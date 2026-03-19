@@ -7,12 +7,11 @@ import {
   formatPortfolioAddResult,
   formatStatus
 } from "./formatters";
-import { renderMarkdownAsLongImage } from "../user-message/markdownImageAdapter";
+import { renderMarketExplanationImage, requireExplanationMarkdown } from "./reporting/markdown_output_adapter";
 import { runAnalysis } from "./runtime";
 import { addPortfolioHolding, ensureStorage, readPortfolio, readState } from "./storage";
 
 export const directCommands = ["/market"];
-const MARKET_IMAGE_PIPELINE_FAILED = "MARKET_IMAGE_PIPELINE_FAILED";
 
 export async function execute(input) {
   ensureStorage();
@@ -47,24 +46,14 @@ export async function execute(input) {
 
   const text = withExplanation ? "" : buildRunResponseText(result);
   let image = null;
-  const markdownReport = String(result.explanation && result.explanation.markdown || "").trim();
-  if (withExplanation && !markdownReport) {
-    throw createMarketImagePipelineError("missing markdown report for explanation mode");
-  }
+  const markdownReport = withExplanation
+    ? requireExplanationMarkdown(result.explanation, "missing markdown report for explanation mode")
+    : "";
   if (withExplanation) {
-    try {
-      image = await renderMarkdownAsLongImage({
-        markdown: markdownReport,
-        title: `Market Analysis ${phase}`,
-        filenamePrefix: `market-${phase}`
-      });
-    } catch (error) {
-      const detail = (error && error.message) ? error.message : String(error || "unknown error");
-      throw createMarketImagePipelineError(`failed to render markdown image: ${detail}`, error);
-    }
-    if (!image || !image.data) {
-      throw createMarketImagePipelineError("rendered image payload is empty");
-    }
+    image = await renderMarketExplanationImage({
+      phase,
+      markdown: markdownReport
+    });
   }
 
   return {
@@ -81,14 +70,4 @@ export async function execute(input) {
       ...(markdownReport ? { markdownReport } : {})
     }
   };
-}
-
-function createMarketImagePipelineError(reason, cause) {
-  const detail = String(reason || "unknown error").trim() || "unknown error";
-  const error = new Error(`${MARKET_IMAGE_PIPELINE_FAILED}: ${detail}`);
-  error.code = MARKET_IMAGE_PIPELINE_FAILED;
-  if (cause) {
-    error.cause = cause;
-  }
-  return error;
 }

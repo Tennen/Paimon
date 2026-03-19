@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { buildFundFeatureContext } from "./fund_feature_engine";
 import { evaluateFundRules } from "./fund_rule_engine";
 import { buildFallbackFundDashboard, validateFundDecisionDashboard } from "./fund_schema";
-import { CodexLLMEngine } from "../../engines/llm/codex";
+import { CodexLLMEngine } from "../../../engines/llm/codex";
 import { runFundAnalysis } from "./fund_analysis_service";
 import { FundRawContext, MarketAnalysisConfig } from "./fund_types";
 
