@@ -104,6 +104,36 @@ export async function runFundAnalysis(input: RunFundAnalysisInput): Promise<RunF
       auditErrors.push(...ingestion.raw.errors);
     }
 
+    if (!hasRequiredFundBaseData(ingestion.raw)) {
+      const skipStart = Date.now();
+      const skipFeature = buildSkippedFundFeatureContext();
+      const skipRules = buildSkippedFundRuleContext();
+      const skipDashboard = buildSkippedFundDashboard({
+        identity,
+        raw: ingestion.raw,
+        feature: skipFeature
+      });
+
+      auditSteps.push({
+        step: `skip:${identity.fund_code}`,
+        duration_ms: Date.now() - skipStart,
+        source_chain: ["fund_base_data_guard"],
+        errors: ingestion.raw.errors
+      });
+
+      records.push({
+        identity,
+        raw: ingestion.raw,
+        feature: skipFeature,
+        rules: skipRules,
+        dashboard: skipDashboard,
+        rawLlmText: "",
+        provider: "base_data_skip",
+        llmErrors: []
+      });
+      continue;
+    }
+
     const featureStart = Date.now();
     const feature = buildFundFeatureContext(ingestion.raw);
     auditSteps.push({
@@ -286,6 +316,26 @@ async function collectRawContext(
 
   sourceChain.push(...seriesResult.source_chain);
   errors.push(...seriesResult.errors);
+
+  if (seriesResult.series.length === 0) {
+    logFundBaseDataFailure(identity, {
+      sourceChain: seriesResult.source_chain,
+      errors: seriesResult.errors
+    });
+    const raw = buildBaseDataFailureRawContext(identity, options.accountCash, {
+      sourceChain,
+      errors
+    });
+    return {
+      raw,
+      auditStep: {
+        step: `ingestion:${identity.fund_code}`,
+        duration_ms: Date.now() - start,
+        source_chain: raw.source_chain,
+        errors: raw.errors
+      }
+    };
+  }
 
   const benchmarkCode = chooseBenchmarkCode(identity.strategy_type);
   const benchmarkSeries = await fetchBenchmarkSeries(benchmarkCode, options.lookbackDays, options.timeoutMs);
@@ -706,6 +756,173 @@ function inferMissingFields(raw: FundRawContext, feature: FundFeatureContext): s
   return dedupStrings(missing);
 }
 
+function hasRequiredFundBaseData(raw: FundRawContext): boolean {
+  return Array.isArray(raw.price_or_nav_series) && raw.price_or_nav_series.length > 0;
+}
+
+function buildSkippedFundFeatureContext(): FundFeatureContext {
+  return {
+    returns: {
+      ret_1d: "not_supported",
+      ret_5d: "not_supported",
+      ret_20d: "not_supported",
+      ret_60d: "not_supported",
+      ret_120d: "not_supported"
+    },
+    risk: {
+      volatility_annualized: "not_supported",
+      max_drawdown: "not_supported",
+      drawdown_recovery_days: "not_supported"
+    },
+    stability: {
+      excess_return_consistency: "not_supported",
+      style_drift: "not_supported",
+      nav_smoothing_anomaly: "not_supported"
+    },
+    relative: {
+      benchmark_excess_20d: "not_supported",
+      benchmark_excess_60d: "not_supported",
+      peer_percentile: "not_supported",
+      tracking_deviation: "not_supported"
+    },
+    trading: {
+      ma5: "not_supported",
+      ma10: "not_supported",
+      ma20: "not_supported",
+      liquidity_avg_volume_10d: "not_supported",
+      volume_change_rate: "not_supported",
+      premium_discount: "not_supported"
+    },
+    nav: {
+      nav_slope_20d: "not_supported",
+      sharpe: "not_supported",
+      sortino: "not_supported",
+      calmar: "not_supported",
+      manager_tenure: "not_supported",
+      style_drift_alert: "not_supported"
+    },
+    coverage: "insufficient",
+    confidence: 0.1,
+    warnings: ["base_market_data_unavailable"]
+  };
+}
+
+function buildSkippedFundRuleContext(): ReturnType<typeof evaluateFundRules> {
+  return {
+    rule_flags: [],
+    rule_adjusted_score: 50,
+    blocked_actions: [],
+    hard_blocked: false
+  };
+}
+
+function buildSkippedFundDashboard(input: {
+  identity: FundIdentity;
+  raw: FundRawContext;
+  feature: FundFeatureContext;
+}): FundDecisionDashboard {
+  return {
+    fund_code: input.identity.fund_code,
+    fund_name: input.identity.fund_name,
+    as_of_date: input.raw.as_of_date,
+    decision_type: "watch",
+    sentiment_score: 50,
+    confidence: 0.1,
+    core_conclusion: {
+      one_sentence: "基础行情数据获取失败，本次跳过该基金分析。",
+      thesis: [
+        "本次未取得可用的基金净值/价格序列，收益与回撤分析不成立。",
+        "这属于流程数据异常，不代表基金本身风险升高。"
+      ]
+    },
+    risk_alerts: [],
+    action_plan: {
+      suggestion: "持仓者先不要依据本次结果调整；未持仓者也不要据此做判断，优先等待数据恢复后重跑。",
+      position_change: "本次结果不用于仓位决策",
+      execution_conditions: [
+        "基础行情数据恢复正常后重新运行分析"
+      ],
+      stop_conditions: [
+        "在基础数据仍缺失前，不依据本次结果做投资判断"
+      ]
+    },
+    data_perspective: {
+      return_metrics: {},
+      risk_metrics: {},
+      relative_metrics: {},
+      feature_coverage: input.feature.coverage
+    },
+    rule_trace: {
+      rule_flags: [],
+      blocked_actions: [],
+      adjusted_score: 50
+    },
+    insufficient_data: {
+      is_insufficient: true,
+      missing_fields: inferMissingFields(input.raw, input.feature)
+    }
+  };
+}
+
+function buildBaseDataFailureRawContext(
+  identity: FundIdentity,
+  accountCash: number,
+  input: {
+    sourceChain: string[];
+    errors: string[];
+  }
+): FundRawContext {
+  return {
+    identity,
+    as_of_date: todayDate(),
+    price_or_nav_series: [],
+    benchmark_series: [],
+    benchmark_code: chooseBenchmarkCode(identity.strategy_type),
+    holdings_style: {
+      top_holdings: [],
+      sector_exposure: {},
+      style_factor_exposure: {},
+      duration_credit_profile: {}
+    },
+    events: {
+      notices: [],
+      manager_changes: [],
+      subscription_redemption: [],
+      regulatory_risks: [],
+      market_news: []
+    },
+    account_context: {
+      current_position: identity.account_position.quantity,
+      avg_cost: identity.account_position.avg_cost,
+      budget: normalizeNumber(accountCash, 0),
+      risk_preference: String(process.env.FUND_ACCOUNT_RISK_PREFERENCE || "balanced").trim() || "balanced",
+      holding_horizon: String(process.env.FUND_ACCOUNT_HOLDING_HORIZON || "medium_term").trim() || "medium_term"
+    },
+    source_chain: dedupStrings(input.sourceChain),
+    errors: dedupStrings([
+      ...input.errors,
+      "base_fund_series_unavailable"
+    ])
+  };
+}
+
+function logFundBaseDataFailure(
+  identity: FundIdentity,
+  input: {
+    sourceChain: string[];
+    errors: string[];
+  }
+): void {
+  const label = identity.fund_name
+    ? `${identity.fund_name}(${identity.fund_code})`
+    : identity.fund_code || "-";
+  const errors = dedupStrings(input.errors);
+  const sources = dedupStrings(input.sourceChain);
+  console.error(
+    `[MarketAnalysis][fund][base_data] failed fund=${label} sources=${sources.join(",") || "-"} errors=${errors.join(" | ") || "unknown"}`
+  );
+}
+
 function chooseBenchmarkCode(strategy: StrategyType): string {
   if (strategy === "bond") {
     return "000012";
@@ -797,27 +1014,52 @@ async function fetchExchangeFundSeries(code: string, lookbackDays: number, timeo
   }
 
   try {
-    const [quote, history] = await Promise.all([
+    const [quoteResult, historyResult] = await Promise.allSettled([
       fetchQuote(secid, timeoutMs),
       fetchHistoryKline(secid, lookbackDays, timeoutMs)
     ]);
 
-    const points = history.points.slice();
-    if (Number.isFinite(quote.price) && quote.price > 0) {
+    if (historyResult.status !== "fulfilled") {
+      const historyError = historyResult.reason instanceof Error
+        ? historyResult.reason.message
+        : String(historyResult.reason);
+      const quoteError = quoteResult.status === "rejected"
+        ? (quoteResult.reason instanceof Error ? quoteResult.reason.message : String(quoteResult.reason))
+        : "";
+      return {
+        series: [],
+        source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
+        errors: dedupStrings([historyError, quoteError])
+      };
+    }
+
+    const points = historyResult.value.points.slice();
+    if (points.length === 0) {
+      const quoteError = quoteResult.status === "rejected"
+        ? (quoteResult.reason instanceof Error ? quoteResult.reason.message : String(quoteResult.reason))
+        : "";
+      return {
+        series: [],
+        source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
+        errors: dedupStrings(["fund history series empty", quoteError])
+      };
+    }
+
+    if (quoteResult.status === "fulfilled" && Number.isFinite(quoteResult.value.price) && quoteResult.value.price > 0) {
       const lastDate = points.length > 0 ? points[points.length - 1].date : todayDate();
-      const existsSame = points.length > 0 && Math.abs(points[points.length - 1].value - quote.price) < 0.0001;
+      const existsSame = points.length > 0 && Math.abs(points[points.length - 1].value - quoteResult.value.price) < 0.0001;
       if (!existsSame) {
         points.push({
           date: lastDate,
-          value: quote.price,
-          ...(Number.isFinite(quote.volume) ? { volume: quote.volume } : {})
+          value: quoteResult.value.price,
+          ...(Number.isFinite(quoteResult.value.volume) ? { volume: quoteResult.value.volume } : {})
         });
       }
     }
 
     return {
       series: points,
-      source_chain: ["eastmoney:fund_quote", "eastmoney:fund_history"],
+      source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
       errors: []
     };
   } catch (error) {

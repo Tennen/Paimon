@@ -311,7 +311,7 @@ STT_FAST_WHISPER_MODEL=small
 - `/market equity <midday|close>`：原股票信号路径
 - `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM）
 
-基金流程会在数据层做 fail-open 降级（数据/新闻/LLM 任一失败不终止主流程），并输出结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。
+基金流程会在数据层做分层降级：新闻与 LLM 失败默认不终止主流程，但若单只基金的基础行情/净值序列获取失败，则直接跳过该基金后续特征、规则与 LLM 分析，并在日志中记录基础数据接口错误；这种情况代表流程数据异常，不会被误判为基金高风险。输出仍统一为结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。基金 prompt 与报告结构会尽量贴近股票分析侧的“核心结论 / 数据视角 / 舆情情报 / 执行计划”四块架构，只是把股票指标替换为基金适用指标（收益、回撤、相对基准、跟踪偏离、申赎与基金经理事件等）。
 
 当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染长图用于推送。
 
@@ -326,8 +326,9 @@ STT_FAST_WHISPER_MODEL=small
 
 旧链路文本输出（例如 `--no-llm`）会按单基金展示：
 
+- 核心结论、数据视角、情报观察、执行计划四块
 - 决策动作、评分、置信度
-- 核心结论、执行建议与仓位调整提示
+- 执行建议与仓位调整提示
 - 关键指标摘要（如 `ret20d`、`maxDD`、`excess20d`、`coverage`）
 - 风险提示与数据完整性标记
 - 新闻检索状态（`SerpAPI 命中/未命中/未启用`，以及回退新闻源状态）

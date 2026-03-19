@@ -128,6 +128,7 @@ test("fund system prompt should enforce json-only and data constraints", () => {
   assert.ok(prompt.includes("blocked_actions"));
   assert.ok(prompt.includes("自然中文"));
   assert.ok(prompt.includes("ETF/指数基金"));
+  assert.ok(prompt.includes("核心结论、数据透视、舆情情报、作战计划"));
 });
 
 test("fund user prompt should include natural-language sections and structured snapshot", () => {
@@ -147,12 +148,13 @@ test("fund user prompt should include natural-language sections and structured s
   const newsAndEvents = payload.news_and_events as Record<string, unknown>;
   const marketSnapshot = payload.market_snapshot as Record<string, unknown>;
 
-  assert.match(prompt, /## 基金基础信息/);
-  assert.match(prompt, /## 净值与阶段表现/);
-  assert.match(prompt, /## 账户与持仓背景/);
-  assert.match(prompt, /## 新闻与事件/);
-  assert.match(prompt, /## 分析任务/);
-  assert.match(prompt, /ETF\/指数基金不要套用股票特有口径/);
+  assert.match(prompt, /## 📊 基金基础信息/);
+  assert.match(prompt, /## 📈 数据透视/);
+  assert.match(prompt, /### 风险收益与相对基准/);
+  assert.match(prompt, /## 📰 舆情情报/);
+  assert.match(prompt, /## ✅ 分析任务/);
+  assert.match(prompt, /### 决策仪表盘四块结构（必须吸收）/);
+  assert.match(prompt, /持仓者\.\.\.；未持仓者\.\.\./);
   assert.match(prompt, /近7日未抓到高置信度公开新闻|1\. 沪深300ETF份额增长/);
   assert.equal(newsAndEvents.news_search_status, "serpapi_hit");
   assert.equal((marketSnapshot.fund_series_summary as Record<string, unknown>).latest_value, 4.35);

@@ -111,12 +111,13 @@ data/              # Runtime data files
 
 ## Market Analysis Runtime Notes
 
-- 基金主流程 prompt 由 `src/integrations/market-analysis/fund_prompt_builder.ts` 统一组装（基础信息/行情摘要/特征/规则/新闻状态/schema 约束）。
+- 基金主流程 prompt 由 `src/integrations/market-analysis/fund_prompt_builder.ts` 统一组装，结构尽量对齐股票分析侧“核心结论 / 数据视角 / 舆情情报 / 执行计划”的决策仪表盘架构，但基金指标改为收益、回撤、相对基准、跟踪偏离、申赎/基金经理事件等基金口径。
+- `src/integrations/market-analysis/fund_analysis_service.ts` 对单基金设置基础数据守卫：基金自身价格/净值序列抓取失败时，只保留 ingestion 审计与失败日志，直接跳过后续 feature/rule/LLM，避免把流程数据异常误判为高风险基金。
 - 基金新闻检索由 `src/integrations/market-analysis/search_adapter.ts` 负责；未配置 `SERPAPI_KEY` 时会标记 `serpapi:disabled_no_key` 并保持 fail-open。
 - 全局搜索引擎 profile 存储在 `src/integrations/search-engine/store.ts`，持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
-- 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/codex_markdown_report.ts` 组装 markdown 上下文并生成长图，需覆盖旧链路关键字段（动作、评分、关键指标、数据完整性、新闻检索状态、组合摘要）。
+- 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/codex_markdown_report.ts` 组装 markdown 上下文并生成长图。两条链路都应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并覆盖旧链路关键字段（动作、评分、关键指标、数据完整性、新闻检索状态、组合摘要）。
 - markdown 长图渲染适配器位于 `src/integrations/user-message/markdownImageAdapter.ts`，由各业务集成按需调用（例如 market/topic-summary）；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
 
 ## Structural Change Checklist

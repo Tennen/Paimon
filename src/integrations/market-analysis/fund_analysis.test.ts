@@ -228,6 +228,115 @@ test("runFundAnalysis should stop LLM retries after timeout-like error", { concu
   }
 });
 
+test("runFundAnalysis should skip a fund when base history data fetch fails and log the base data error", { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+  const originalChat = CodexLLMEngine.prototype.chat;
+
+  const errorLogs: string[] = [];
+  let llmCalls = 0;
+
+  try {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("push2.eastmoney.com/api/qt/stock/get")) return createJsonResponse({ data: { f43: 4.36, f47: 1234567 } });
+      if (url.includes("push2his.eastmoney.com/api/qt/stock/kline/get")) throw new Error("history endpoint failed");
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    }) as typeof fetch;
+
+    console.error = (...args: unknown[]) => {
+      errorLogs.push(args.map((item) => String(item)).join(" "));
+    };
+
+    (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
+      llmCalls += 1;
+      return JSON.stringify({});
+    };
+
+    const result = await runFundAnalysis({
+      phase: "close",
+      withExplanation: true,
+      portfolio: {
+        funds: [{ code: "510300", name: "沪深300ETF", quantity: 100, avgCost: 4 }],
+        cash: 1000
+      },
+      analysisConfig: {
+        ...baseConfig,
+        analysisEngine: "codex"
+      }
+    });
+
+    const fund = result.marketData.funds[0];
+    const dashboard = result.explanation.dashboards[0];
+    const auditSteps = result.signalResult.audit.steps.map((step) => step.step);
+
+    assert.equal(llmCalls, 0);
+    assert.equal(fund.raw_context.price_or_nav_series.length, 0);
+    assert.equal(fund.raw_context.benchmark_series.length, 0);
+    assert.equal(fund.raw_context.errors.includes("base_fund_series_unavailable"), true);
+    assert.equal(fund.raw_context.errors.includes("history endpoint failed"), true);
+    assert.equal(fund.feature_context.coverage, "insufficient");
+    assert.deepEqual(fund.rule_context.rule_flags, []);
+    assert.deepEqual(fund.rule_context.blocked_actions, []);
+    assert.equal(fund.llm_provider, "base_data_skip");
+    assert.equal(dashboard.decision_type, "watch");
+    assert.deepEqual(dashboard.risk_alerts, []);
+    assert.equal(dashboard.core_conclusion.one_sentence, "基础行情数据获取失败，本次跳过该基金分析。");
+    assert.equal(auditSteps.includes("ingestion:510300"), true);
+    assert.equal(auditSteps.includes("skip:510300"), true);
+    assert.equal(auditSteps.includes("feature:510300"), false);
+    assert.equal(auditSteps.includes("rule:510300"), false);
+    assert.equal(auditSteps.includes("llm:510300"), false);
+    assert.deepEqual(result.optionalNewsContext.funds[0]?.market_news || [], []);
+    assert.equal(
+      errorLogs.some((line) =>
+        line.includes("[MarketAnalysis][fund][base_data] failed fund=沪深300ETF(510300)")
+        && line.includes("history endpoint failed")
+      ),
+      true
+    );
+  } finally {
+    CodexLLMEngine.prototype.chat = originalChat;
+    console.error = originalError;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("runFundAnalysis should continue when quote fetch fails but fund history is available", { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch;
+
+  try {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("push2.eastmoney.com/api/qt/stock/get")) throw new Error("quote endpoint failed");
+      if (url.includes("push2his.eastmoney.com/api/qt/stock/kline/get")) return createJsonResponse({ data: { klines: buildMockKlines() } });
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    }) as typeof fetch;
+
+    const result = await runFundAnalysis({
+      phase: "close",
+      withExplanation: false,
+      portfolio: {
+        funds: [{ code: "510300", name: "沪深300ETF", quantity: 100, avgCost: 4 }],
+        cash: 1000
+      },
+      analysisConfig: baseConfig
+    });
+
+    const fund = result.marketData.funds[0];
+    const auditSteps = result.signalResult.audit.steps.map((step) => step.step);
+
+    assert.equal(fund.raw_context.price_or_nav_series.length > 0, true);
+    assert.equal(fund.raw_context.errors.includes("base_fund_series_unavailable"), false);
+    assert.equal(fund.llm_provider, "rule_template");
+    assert.equal(auditSteps.includes("feature:510300"), true);
+    assert.equal(auditSteps.includes("rule:510300"), true);
+    assert.equal(auditSteps.includes("skip:510300"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function buildMockKlines(): string[] {
   return Array.from({ length: 40 }, (_, index) => {
     const day = index + 1;

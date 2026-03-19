@@ -126,26 +126,18 @@ export function buildRunResponseText(result) {
         const record = fundRecordMap.get(code);
         const newsStatus = describeNewsStatus(record && record.raw_context);
         const newsHeadline = pickTopNewsHeadline(record && record.raw_context);
-
-        lines.push(`- ${label}: ${decision} | score=${score} | confidence=${confidence}`);
-        lines.push(`  结论: ${conclusion}`);
-        if (actionSuggestion || positionChange) {
-          lines.push(`  执行: ${actionSuggestion || "未提供"}${positionChange ? ` | 仓位: ${positionChange}` : ""}`);
-        }
-        if (metricSummary.length > 0) {
-          lines.push(`  关键指标: ${metricSummary.join(" | ")}`);
-        }
         const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
-        if (risks.length > 0) {
-          lines.push(`  风险: ${risks.join(" | ")}`);
+        const checklist = buildFundChecklistText(dashboard, record && record.raw_context);
+
+        lines.push(`- ${label}`);
+        lines.push(`  核心结论: ${decision}。${conclusion}`);
+        lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号强弱=${score}/100，置信度=${confidence}`);
+        lines.push(`  情报观察: ${risks.length > 0 ? risks.join("；") : "暂无新增重点风险"}${newsStatus ? `；${newsStatus}` : ""}${newsHeadline ? `；样本=${newsHeadline}` : ""}`);
+        if (actionSuggestion || positionChange) {
+          lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}`);
         }
-        // 移除数据完整性段落 - 这些信息仅供内部调试，不影响投资决策
-        // 只在有新闻时才显示新闻信息
-        if (newsStatus) {
-          lines.push(`  新闻检索: ${newsStatus}`);
-        }
-        if (newsHeadline) {
-          lines.push(`  新闻样本: ${newsHeadline}`);
+        if (checklist.length > 0) {
+          lines.push(`  检查清单: ${checklist.join("；")}`);
         }
       }
     }
@@ -242,31 +234,61 @@ function buildFundMetricSummary(dashboard) {
     : "";
 
   if (coverage) {
-    metrics.push(`coverage=${coverage}`);
+    metrics.push(`数据完整性=${formatCoverageLabel(coverage)}`);
   }
 
   const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
   if (ret20d) {
-    metrics.push(`ret20d=${ret20d}`);
+    metrics.push(`近20日回报=${ret20d}`);
   }
   const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
   if (ret60d) {
-    metrics.push(`ret60d=${ret60d}`);
+    metrics.push(`近60日回报=${ret60d}`);
   }
   const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
   if (drawdown) {
-    metrics.push(`maxDD=${drawdown}`);
+    metrics.push(`最大回撤=${drawdown}`);
   }
   const volatility = formatMetricValue(risks.volatility_annualized, 2, "%", false);
   if (volatility) {
-    metrics.push(`vol=${volatility}`);
+    metrics.push(`年化波动=${volatility}`);
   }
   const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
   if (excess20d) {
-    metrics.push(`excess20d=${excess20d}`);
+    metrics.push(`近20日超额=${excess20d}`);
   }
 
   return metrics.slice(0, 5);
+}
+
+function buildFundChecklistText(dashboard, rawContext) {
+  const checklist = [];
+  const perspective = dashboard && dashboard.data_perspective ? dashboard.data_perspective : {};
+  const relative = perspective.relative_metrics || {};
+  const risks = perspective.risk_metrics || {};
+  const coverage = String(perspective.feature_coverage || "").trim();
+  const excess20d = Number(relative.benchmark_excess_20d);
+  const maxDrawdown = Number(risks.max_drawdown);
+  const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts : [];
+  const newsStatus = describeNewsStatus(rawContext);
+
+  checklist.push(
+    coverage === "ok"
+      ? "✅ 数据完整"
+      : coverage === "partial"
+        ? "⚠️ 数据部分可用"
+        : "❌ 数据不足"
+  );
+  if (Number.isFinite(excess20d)) {
+    checklist.push(excess20d >= 0 ? "✅ 相对基准未转弱" : "⚠️ 相对基准偏弱");
+  }
+  if (Number.isFinite(maxDrawdown)) {
+    checklist.push(maxDrawdown >= -5 ? "✅ 回撤可控" : "⚠️ 回撤偏大");
+  }
+  checklist.push(riskAlerts.length > 0 ? "⚠️ 风险事件待跟踪" : "✅ 暂无新增风险");
+  checklist.push(newsStatus ? "✅ 已有公开信息样本" : "⚠️ 公开信息有限");
+
+  return checklist.slice(0, 5);
 }
 
 function formatMetricValue(value, digits, suffix, signed) {
@@ -339,4 +361,12 @@ function pickTopNewsHeadline(rawContext) {
     return "";
   }
   return source ? `${title} (${source})` : title;
+}
+
+function formatCoverageLabel(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "ok") return "完整";
+  if (value === "partial") return "部分可用";
+  if (value === "insufficient") return "不足";
+  return value || "-";
 }
