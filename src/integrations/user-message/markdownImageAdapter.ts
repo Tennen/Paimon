@@ -9,6 +9,7 @@ type RenderMarkdownImageInput = {
   title?: string;
   width?: number;
   filenamePrefix?: string;
+  layoutPreset?: "default" | "mobile";
 };
 
 type MarkdownAstNode = {
@@ -45,6 +46,45 @@ type SatoriFont = {
   style?: "normal" | "italic";
 };
 
+type RenderLayoutPreset = "default" | "mobile";
+
+type RenderLayoutMetrics = {
+  defaultWidth: number;
+  outerPadding: number;
+  horizontalPadding: number;
+  verticalPadding: number;
+  titleFontSize: number;
+  titleLineHeight: number;
+  titleMarginBottom: number;
+  metaFontSize: number;
+  metaMarginBottom: number;
+  h1FontSize: number;
+  h1LineHeight: number;
+  h1MarginTop: number;
+  h1MarginBottom: number;
+  h2FontSize: number;
+  h2LineHeight: number;
+  h2MarginTop: number;
+  h2MarginBottom: number;
+  h3FontSize: number;
+  h3LineHeight: number;
+  h3MarginTop: number;
+  h3MarginBottom: number;
+  bodyFontSize: number;
+  bodyLineHeight: number;
+  bodyMarginBottom: number;
+  quotePaddingLeft: number;
+  codeFontSize: number;
+  codeLineHeight: number;
+  codeMarginBottom: number;
+  tableHeaderFontSize: number;
+  tableHeaderLineHeight: number;
+  tableBodyFontSize: number;
+  tableBodyLineHeight: number;
+  tableCellPaddingY: number;
+  tableCellPaddingX: number;
+};
+
 type SatoriLike = (
   element: unknown,
   options: {
@@ -73,8 +113,80 @@ const MIN_WIDTH = 720;
 const MAX_WIDTH = 1800;
 const MIN_HEIGHT = 640;
 const MAX_HEIGHT = 16000;
-const CARD_HORIZONTAL_PADDING = 40;
-const CARD_VERTICAL_PADDING = 44;
+
+const DEFAULT_LAYOUT: RenderLayoutMetrics = {
+  defaultWidth: 1080,
+  outerPadding: 22,
+  horizontalPadding: 40,
+  verticalPadding: 44,
+  titleFontSize: 34,
+  titleLineHeight: 1.28,
+  titleMarginBottom: 14,
+  metaFontSize: 13,
+  metaMarginBottom: 20,
+  h1FontSize: 28,
+  h1LineHeight: 1.34,
+  h1MarginTop: 8,
+  h1MarginBottom: 10,
+  h2FontSize: 23,
+  h2LineHeight: 1.38,
+  h2MarginTop: 14,
+  h2MarginBottom: 8,
+  h3FontSize: 19,
+  h3LineHeight: 1.45,
+  h3MarginTop: 10,
+  h3MarginBottom: 7,
+  bodyFontSize: 16,
+  bodyLineHeight: 1.76,
+  bodyMarginBottom: 10,
+  quotePaddingLeft: 10,
+  codeFontSize: 14,
+  codeLineHeight: 1.7,
+  codeMarginBottom: 12,
+  tableHeaderFontSize: 14,
+  tableHeaderLineHeight: 22,
+  tableBodyFontSize: 13,
+  tableBodyLineHeight: 20,
+  tableCellPaddingY: 8,
+  tableCellPaddingX: 10
+};
+
+const MOBILE_LAYOUT: RenderLayoutMetrics = {
+  defaultWidth: 780,
+  outerPadding: 18,
+  horizontalPadding: 28,
+  verticalPadding: 34,
+  titleFontSize: 38,
+  titleLineHeight: 1.24,
+  titleMarginBottom: 12,
+  metaFontSize: 15,
+  metaMarginBottom: 18,
+  h1FontSize: 34,
+  h1LineHeight: 1.3,
+  h1MarginTop: 6,
+  h1MarginBottom: 10,
+  h2FontSize: 28,
+  h2LineHeight: 1.36,
+  h2MarginTop: 14,
+  h2MarginBottom: 9,
+  h3FontSize: 23,
+  h3LineHeight: 1.42,
+  h3MarginTop: 10,
+  h3MarginBottom: 8,
+  bodyFontSize: 18,
+  bodyLineHeight: 1.82,
+  bodyMarginBottom: 11,
+  quotePaddingLeft: 12,
+  codeFontSize: 15,
+  codeLineHeight: 1.72,
+  codeMarginBottom: 12,
+  tableHeaderFontSize: 16,
+  tableHeaderLineHeight: 24,
+  tableBodyFontSize: 15,
+  tableBodyLineHeight: 22,
+  tableCellPaddingY: 10,
+  tableCellPaddingX: 10
+};
 
 const FONT_CANDIDATES = [
   "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -95,16 +207,17 @@ export async function renderMarkdownAsLongImage(input: RenderMarkdownImageInput)
     throw new Error("markdown is empty");
   }
 
-  const width = clampInt(input.width, MIN_WIDTH, MAX_WIDTH, DEFAULT_WIDTH);
+  const layout = resolveLayoutMetrics(input.layoutPreset);
+  const width = clampInt(input.width, MIN_WIDTH, MAX_WIDTH, layout.defaultWidth);
   const title = String(input.title || "Market Analysis 报告").trim() || "Market Analysis 报告";
   const blocks = await parseMarkdownBlocks(markdown);
-  const height = estimateHeight(blocks, width);
+  const height = estimateHeight(blocks, width, layout);
 
   const satori = await loadSatori();
   const Resvg = await loadResvgCtor();
   const fontData = loadFontData();
 
-  const element = buildCardElement(title, blocks, width, height);
+  const element = buildCardElement(title, blocks, width, height, layout);
   const svg = await satori(element, {
     width,
     height,
@@ -253,10 +366,12 @@ function buildCardElement(
   title: string,
   blocks: RenderBlock[],
   width: number,
-  height: number
+  height: number,
+  layout: RenderLayoutMetrics
 ): unknown {
-  const contentWidth = width - CARD_HORIZONTAL_PADDING * 2;
-  const bodyChildren = blocks.map((block, index) => buildBlockElement(block, index));
+  const cardWidth = width - layout.outerPadding * 2;
+  const contentWidth = cardWidth - layout.horizontalPadding * 2;
+  const bodyChildren = blocks.map((block, index) => buildBlockElement(block, index, layout));
 
   return h(
     "div",
@@ -266,7 +381,7 @@ function buildCardElement(
         height,
         background: "linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)",
         display: "flex",
-        padding: 22,
+        padding: layout.outerPadding,
         boxSizing: "border-box"
       }
     },
@@ -274,29 +389,29 @@ function buildCardElement(
       "div",
       {
         style: {
-          width: contentWidth + CARD_HORIZONTAL_PADDING * 2 - 44,
-          minHeight: height - 44,
+          width: cardWidth,
+          minHeight: height - layout.outerPadding * 2,
           background: "#ffffff",
           border: "1px solid #dbeafe",
           borderRadius: 18,
           display: "flex",
           flexDirection: "column",
           boxSizing: "border-box",
-          paddingLeft: CARD_HORIZONTAL_PADDING,
-          paddingRight: CARD_HORIZONTAL_PADDING,
-          paddingTop: CARD_VERTICAL_PADDING,
-          paddingBottom: CARD_VERTICAL_PADDING
+          paddingLeft: layout.horizontalPadding,
+          paddingRight: layout.horizontalPadding,
+          paddingTop: layout.verticalPadding,
+          paddingBottom: layout.verticalPadding
         }
       },
       h(
         "div",
         {
           style: {
-            fontSize: 34,
-            lineHeight: 1.28,
+            fontSize: layout.titleFontSize,
+            lineHeight: layout.titleLineHeight,
             fontWeight: 700,
             color: "#111827",
-            marginBottom: 14
+            marginBottom: layout.titleMarginBottom
           }
         },
         title
@@ -305,9 +420,9 @@ function buildCardElement(
         "div",
         {
           style: {
-            fontSize: 13,
+            fontSize: layout.metaFontSize,
             color: "#475569",
-            marginBottom: 20
+            marginBottom: layout.metaMarginBottom
           }
         },
         `Generated at ${new Date().toISOString()}`
@@ -317,9 +432,9 @@ function buildCardElement(
   );
 }
 
-function buildBlockElement(block: RenderBlock, index: number): unknown {
+function buildBlockElement(block: RenderBlock, index: number, layout: RenderLayoutMetrics): unknown {
   if (block.kind === "table") {
-    return buildTableElement(block, index);
+    return buildTableElement(block, index, layout);
   }
 
   if (block.kind === "hr") {
@@ -339,12 +454,12 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 28,
-          lineHeight: 1.34,
+          fontSize: layout.h1FontSize,
+          lineHeight: layout.h1LineHeight,
           fontWeight: 700,
           color: "#0f172a",
-          marginTop: 8,
-          marginBottom: 10
+          marginTop: layout.h1MarginTop,
+          marginBottom: layout.h1MarginBottom
         }
       },
       block.text
@@ -357,12 +472,12 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 23,
-          lineHeight: 1.38,
+          fontSize: layout.h2FontSize,
+          lineHeight: layout.h2LineHeight,
           fontWeight: 700,
           color: "#1e3a8a",
-          marginTop: 14,
-          marginBottom: 8
+          marginTop: layout.h2MarginTop,
+          marginBottom: layout.h2MarginBottom
         }
       },
       block.text
@@ -375,12 +490,12 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 19,
-          lineHeight: 1.45,
+          fontSize: layout.h3FontSize,
+          lineHeight: layout.h3LineHeight,
           fontWeight: 700,
           color: "#1d4ed8",
-          marginTop: 10,
-          marginBottom: 7
+          marginTop: layout.h3MarginTop,
+          marginBottom: layout.h3MarginBottom
         }
       },
       block.text
@@ -393,10 +508,10 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 16,
-          lineHeight: 1.76,
+          fontSize: layout.bodyFontSize,
+          lineHeight: layout.bodyLineHeight,
           color: "#111827",
-          marginBottom: 8
+          marginBottom: layout.bodyMarginBottom
         }
       },
       `• ${block.text}`
@@ -409,13 +524,13 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 16,
-          lineHeight: 1.76,
+          fontSize: layout.bodyFontSize,
+          lineHeight: layout.bodyLineHeight,
           color: "#1f2937",
           marginTop: 6,
-          marginBottom: 10,
+          marginBottom: layout.bodyMarginBottom,
           borderLeft: "4px solid #bfdbfe",
-          paddingLeft: 10
+          paddingLeft: layout.quotePaddingLeft
         }
       },
       block.text
@@ -428,14 +543,14 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
       {
         key: `b-${index}`,
         style: {
-          fontSize: 14,
-          lineHeight: 1.7,
+          fontSize: layout.codeFontSize,
+          lineHeight: layout.codeLineHeight,
           color: "#0f172a",
           background: "#f8fafc",
           border: "1px solid #d1d5db",
           borderRadius: 8,
           padding: "10px 12px",
-          marginBottom: 12,
+          marginBottom: layout.codeMarginBottom,
           whiteSpace: "pre-wrap"
         }
       },
@@ -448,17 +563,17 @@ function buildBlockElement(block: RenderBlock, index: number): unknown {
     {
       key: `b-${index}`,
       style: {
-        fontSize: 16,
-        lineHeight: 1.76,
+        fontSize: layout.bodyFontSize,
+        lineHeight: layout.bodyLineHeight,
         color: "#111827",
-        marginBottom: 10
+        marginBottom: layout.bodyMarginBottom
       }
     },
     block.text
   );
 }
 
-function buildTableElement(block: RenderTableBlock, index: number): unknown {
+function buildTableElement(block: RenderTableBlock, index: number, layout: RenderLayoutMetrics): unknown {
   const columnCount = Math.max(
     1,
     block.header.length,
@@ -481,12 +596,17 @@ function buildTableElement(block: RenderTableBlock, index: number): unknown {
         flexDirection: "column"
       }
     },
-    buildTableRowElement(header, true),
-    ...bodyRows.map((row, rowIndex) => buildTableRowElement(row, false, rowIndex))
+    buildTableRowElement(header, true, 0, layout),
+    ...bodyRows.map((row, rowIndex) => buildTableRowElement(row, false, rowIndex, layout))
   );
 }
 
-function buildTableRowElement(cells: string[], isHeader: boolean, rowIndex = 0): unknown {
+function buildTableRowElement(
+  cells: string[],
+  isHeader: boolean,
+  rowIndex = 0,
+  layout: RenderLayoutMetrics
+): unknown {
   return h(
     "div",
     {
@@ -504,11 +624,11 @@ function buildTableRowElement(cells: string[], isHeader: boolean, rowIndex = 0):
           key: `${isHeader ? "h" : "r"}-c-${index}`,
           style: {
             flex: 1,
-            padding: "8px 10px",
+            padding: `${layout.tableCellPaddingY}px ${layout.tableCellPaddingX}px`,
             boxSizing: "border-box",
             ...(index > 0 ? { borderLeft: "1px solid #e2e8f0" } : {}),
-            fontSize: isHeader ? 14 : 13,
-            lineHeight: 1.55,
+            fontSize: isHeader ? layout.tableHeaderFontSize : layout.tableBodyFontSize,
+            lineHeight: isHeader ? layout.tableHeaderLineHeight : layout.tableBodyLineHeight,
             fontWeight: isHeader ? 700 : 400,
             color: isHeader ? "#1e3a8a" : "#0f172a",
             whiteSpace: "pre-wrap"
@@ -546,13 +666,13 @@ function h(type: string, props: Record<string, unknown>, ...children: unknown[])
   };
 }
 
-function estimateHeight(blocks: RenderBlock[], width: number): number {
-  const contentWidth = width - CARD_HORIZONTAL_PADDING * 2;
-  let total = CARD_VERTICAL_PADDING * 2 + 100;
+function estimateHeight(blocks: RenderBlock[], width: number, layout: RenderLayoutMetrics): number {
+  const contentWidth = width - layout.outerPadding * 2 - layout.horizontalPadding * 2;
+  let total = layout.verticalPadding * 2 + 100;
 
   for (const block of blocks) {
     if (block.kind === "table") {
-      total += estimateTableHeight(block, contentWidth);
+      total += estimateTableHeight(block, contentWidth, layout);
       continue;
     }
 
@@ -561,7 +681,7 @@ function estimateHeight(blocks: RenderBlock[], width: number): number {
       continue;
     }
 
-    const metric = getBlockMetric(block.kind);
+    const metric = getBlockMetric(block.kind, layout);
     const charsPerLine = Math.max(8, Math.floor(contentWidth / (metric.fontSize * 0.56)));
     const normalizedLength = normalizeRenderLength(block.text);
     const lines = Math.max(1, Math.ceil(normalizedLength / charsPerLine));
@@ -571,7 +691,7 @@ function estimateHeight(blocks: RenderBlock[], width: number): number {
   return clampInt(total + 44, MIN_HEIGHT, MAX_HEIGHT, 1400);
 }
 
-function estimateTableHeight(block: RenderTableBlock, contentWidth: number): number {
+function estimateTableHeight(block: RenderTableBlock, contentWidth: number, layout: RenderLayoutMetrics): number {
   const rows = [block.header, ...block.rows];
   const columnCount = Math.max(1, block.header.length, ...block.rows.map((row) => row.length));
   const columnWidth = Math.max(120, Math.floor(contentWidth / columnCount));
@@ -579,34 +699,57 @@ function estimateTableHeight(block: RenderTableBlock, contentWidth: number): num
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     const row = normalizeTableRow(rows[rowIndex], columnCount);
-    const fontSize = rowIndex === 0 ? 14 : 13;
-    const lineHeight = rowIndex === 0 ? 22 : 20;
+    const fontSize = rowIndex === 0 ? layout.tableHeaderFontSize : layout.tableBodyFontSize;
+    const lineHeight = rowIndex === 0 ? layout.tableHeaderLineHeight : layout.tableBodyLineHeight;
     const charsPerLine = Math.max(4, Math.floor(columnWidth / (fontSize * 0.56)));
     let maxLines = 1;
     for (const cell of row) {
       const lines = Math.max(1, Math.ceil(normalizeRenderLength(cell) / charsPerLine));
       maxLines = Math.max(maxLines, lines);
     }
-    total += Math.ceil(maxLines * lineHeight + 16);
+    total += Math.ceil(maxLines * lineHeight + layout.tableCellPaddingY * 2);
   }
 
   return total;
 }
 
-function getBlockMetric(kind: RenderTextBlockKind): { fontSize: number; lineHeight: number; marginBottom: number } {
+function getBlockMetric(
+  kind: RenderTextBlockKind,
+  layout: RenderLayoutMetrics
+): { fontSize: number; lineHeight: number; marginBottom: number } {
   if (kind === "h1") {
-    return { fontSize: 28, lineHeight: 38, marginBottom: 12 };
+    return {
+      fontSize: layout.h1FontSize,
+      lineHeight: Math.round(layout.h1FontSize * layout.h1LineHeight),
+      marginBottom: layout.h1MarginBottom + 2
+    };
   }
   if (kind === "h2") {
-    return { fontSize: 23, lineHeight: 33, marginBottom: 10 };
+    return {
+      fontSize: layout.h2FontSize,
+      lineHeight: Math.round(layout.h2FontSize * layout.h2LineHeight),
+      marginBottom: layout.h2MarginBottom + 2
+    };
   }
   if (kind === "h3") {
-    return { fontSize: 19, lineHeight: 29, marginBottom: 9 };
+    return {
+      fontSize: layout.h3FontSize,
+      lineHeight: Math.round(layout.h3FontSize * layout.h3LineHeight),
+      marginBottom: layout.h3MarginBottom + 2
+    };
   }
   if (kind === "code") {
-    return { fontSize: 14, lineHeight: 24, marginBottom: 14 };
+    return {
+      fontSize: layout.codeFontSize,
+      lineHeight: Math.round(layout.codeFontSize * layout.codeLineHeight),
+      marginBottom: layout.codeMarginBottom + 2
+    };
   }
-  return { fontSize: 16, lineHeight: 28, marginBottom: 10 };
+  return {
+    fontSize: layout.bodyFontSize,
+    lineHeight: Math.round(layout.bodyFontSize * layout.bodyLineHeight),
+    marginBottom: layout.bodyMarginBottom
+  };
 }
 
 function normalizeRenderLength(text: string): number {
@@ -616,6 +759,11 @@ function normalizeRenderLength(text: string): number {
     total += /[\u4e00-\u9fa5]/.test(ch) ? 2 : 1;
   }
   return Math.max(1, total);
+}
+
+function resolveLayoutMetrics(raw: unknown): RenderLayoutMetrics {
+  const preset = String(raw || "").trim().toLowerCase() as RenderLayoutPreset;
+  return preset === "mobile" ? MOBILE_LAYOUT : DEFAULT_LAYOUT;
 }
 
 function toHeadingDepth(raw: unknown): 1 | 2 | 3 {

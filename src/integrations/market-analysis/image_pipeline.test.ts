@@ -72,7 +72,6 @@ async function withIsolatedMarketState(run: () => Promise<void>): Promise<void> 
     });
     setStore(MARKET_CONFIG_STORE, {
       version: 1,
-      assetType: "fund",
       analysisEngine: "codex",
       searchEngine: "default",
       gptPlugin: {
@@ -137,7 +136,7 @@ test("runAnalysis should fail when codex markdown generation fails", { concurren
   try {
     await withIsolatedMarketState(async () => {
       await assert.rejects(
-        () => runAnalysis("close", true, { assetType: "fund" }),
+        () => runAnalysis("close", true),
         (error: unknown) => {
           assert.equal(error instanceof Error, true);
           const typedError = error as Error & { code?: string };

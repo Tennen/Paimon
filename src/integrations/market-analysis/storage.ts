@@ -266,11 +266,6 @@ export function normalizePortfolio(input) {
 
 export function normalizeAnalysisConfig(input) {
   const source = (input && typeof input === "object") ? input : {};
-  const assetTypeRaw = typeof source.assetType === "string"
-    ? source.assetType.trim().toLowerCase()
-    : "";
-  const assetType = assetTypeRaw === "fund" ? "fund" : "equity";
-
   const engineRaw = typeof source.analysisEngine === "string"
     ? source.analysisEngine.trim().toLowerCase()
     : "";
@@ -314,7 +309,6 @@ export function normalizeAnalysisConfig(input) {
 
   return {
     version: 1,
-    assetType,
     analysisEngine,
     searchEngine,
     gptPlugin: {

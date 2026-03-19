@@ -9,7 +9,6 @@ import { FundRawContext, MarketAnalysisConfig } from "./fund_types";
 
 const baseConfig: MarketAnalysisConfig = {
   version: 1,
-  assetType: "fund",
   analysisEngine: "local",
   searchEngine: "default",
   gptPlugin: {

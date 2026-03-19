@@ -1,14 +1,11 @@
 import { FeatureCoverage, FundDecisionDashboard } from "./fund_schema";
 
-export type MarketAnalysisAssetType = "equity" | "fund";
-
 export type MarketAnalysisEngine = string;
 
 export type FundRiskLevel = "low" | "medium" | "high";
 
 export type MarketAnalysisConfig = {
   version: 1;
-  assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
   searchEngine: string;
   gptPlugin: {

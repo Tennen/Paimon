@@ -47,18 +47,18 @@ export function buildMarketReportSystemPrompt(): string {
     "你是市场策略分析助理，请只输出中文 markdown 报告。",
     "不要输出 JSON，不要输出代码块围栏，不要额外解释。",
     "报告必须可直接发给投资者阅读，语言自然、克制、可执行。",
+    "默认面向手机端阅读：段落尽量短，每段控制在 1-3 句。",
     "正文优先使用自然语言，不要堆砌字段名、枚举值、变量名或调试口径。",
     "把输入视为基金持仓日报素材包，分析架构尽量贴近“决策仪表盘”：核心结论、数据视角、情报观察、执行计划。",
+    "优先使用二级/三级标题和短 bullet，避免连续大段文字。",
     "持仓逐项建议中，每个标的都按“核心结论 / 数据视角 / 情报观察 / 执行计划”四段展开，再补充结构化表格。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
-    "输入中会出现\"旧链路补充信息（必须吸收）\"章节，这些字段必须在报告里覆盖，不能遗漏。",
-    "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文，指标名称改成人能读懂的表达。",
+    "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文，指标名称改成人能读懂的表达；宽表最多 4 列，超过时拆成多段短列表。",
     "除专有名词（如 ETF、LOF、SerpAPI）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
     "关键信号值需转换为人类可读语言：",
     "- 决策动作: BUY→买入, ADD→加仓, HOLD→持有, REDUCE→减仓, REDEEM→赎回, WATCH→观察",
     "- 市场状态: MARKET_STRONG→偏强, MARKET_WEAK→偏弱, MARKET_NEUTRAL→中性",
-    "- 资产类型: fund→基金, equity→股票",
     "- 阶段: midday→盘中, close→收盘",
     "- 特征覆盖: ok→完整, partial→部分可用, insufficient→不足",
     "请按以下结构输出：",
@@ -80,7 +80,7 @@ export function buildMarketReportSourceMarkdown(input: MarketReportPayload): str
     "# 市场分析上下文",
     "",
     `- 运行阶段: ${formatPhaseLabel(normalizeText(input.phase))}`,
-    `- 资产类型: ${formatAssetTypeLabel(normalizeText(signalResult.assetType) || normalizeText(marketData.assetType))}`,
+    "- 资产类型: 基金",
     `- 市场状态: ${formatMarketStateLabel(normalizeText(signalResult.marketState))}`,
     `- 基准: ${normalizeText(signalResult.benchmark) || "-"}`,
     `- 生成时间: ${normalizeText(signalResult.generatedAt) || new Date().toISOString()}`,
@@ -90,7 +90,6 @@ export function buildMarketReportSourceMarkdown(input: MarketReportPayload): str
   appendPortfolioSection(lines, portfolio);
   appendSignalSection(lines, signalResult);
   appendFundDashboardSection(lines, signalResult, marketData);
-  appendLegacyFundCoverageSection(lines, signalResult, marketData);
   appendMarketErrorsSection(lines, marketData);
   appendNewsSection(lines, optionalNews);
   return lines.join("\n").trim();
@@ -217,91 +216,6 @@ function appendFundDashboardSection(
   lines.push("");
 }
 
-function appendLegacyFundCoverageSection(
-  lines: string[],
-  signalResult: Record<string, unknown>,
-  marketData: Record<string, unknown>
-): void {
-  const dashboards = asArray(signalResult.fund_dashboards);
-  if (dashboards.length === 0) {
-    return;
-  }
-
-  const fundRecordMap = buildFundRecordMap(marketData);
-  lines.push("## 旧链路补充信息（必须吸收）");
-  lines.push("> 上文用于自然语言表达，下表和补充字段用于核对动作、数据和公开信息，不要遗漏。");
-  lines.push("");
-  lines.push("### 快速查阅表");
-  lines.push("| 基金 | 当前建议 | 信号强弱 | 关键数据 | 公开信息 |");
-  lines.push("| --- | --- | --- | --- | --- |");
-
-  for (const item of dashboards) {
-    const dashboard = asRecord(item);
-    const code = normalizeText(dashboard.fund_code) || "-";
-    const name = normalizeText(dashboard.fund_name) || "-";
-    const label = sanitizeMarkdownTableCell(`${name}(${code})`);
-    const decision = sanitizeMarkdownTableCell(formatDecisionLabel(normalizeText(dashboard.decision_type) || "watch"));
-    const score = toFiniteNumber(dashboard.sentiment_score);
-    const confidence = toFiniteNumber(dashboard.confidence);
-    const strength = sanitizeMarkdownTableCell(formatSignalStrength(score, confidence));
-    const metricSummary = sanitizeMarkdownTableCell(buildFundMetricSummary(dashboard).join("；") || "-");
-
-    const record = fundRecordMap.get(code);
-    const rawContext = record ? asRecord(record.raw_context) : {};
-    const newsStatus = sanitizeMarkdownTableCell(describeNewsStatus(rawContext));
-
-    lines.push(
-      `| ${label} | ${decision} | ${strength} | ${metricSummary} | ${newsStatus} |`
-    );
-  }
-  lines.push("");
-  lines.push("### 逐项补充字段");
-  for (const item of dashboards) {
-    const dashboard = asRecord(item);
-    const code = normalizeText(dashboard.fund_code) || "-";
-    const name = normalizeText(dashboard.fund_name) || "-";
-    const label = name ? `${name}(${code})` : code;
-    lines.push(`- ${label}`);
-
-    const conclusion = normalizeText(asRecord(dashboard.core_conclusion).one_sentence);
-    if (conclusion) {
-      lines.push(`  - 结论: ${conclusion}`);
-    }
-
-    const action = asRecord(dashboard.action_plan);
-    const suggestion = normalizeText(action.suggestion);
-    const positionChange = normalizeText(action.position_change);
-    if (suggestion || positionChange) {
-      lines.push(`  - 执行: ${suggestion || "未提供"}${positionChange ? `（仓位建议: ${positionChange}）` : ""}`);
-    }
-
-    const riskAlerts = asArray(dashboard.risk_alerts)
-      .map((risk) => normalizeText(risk))
-      .filter((risk): risk is string => Boolean(risk))
-      .slice(0, 4);
-    if (riskAlerts.length > 0) {
-      lines.push(`  - 风险: ${riskAlerts.join("；")}`);
-    }
-
-    const record = fundRecordMap.get(code);
-    if (record && Object.keys(record).length > 0) {
-      const rawContext = asRecord(record.raw_context);
-      const headline = pickTopNewsHeadline(rawContext);
-      if (headline) {
-        lines.push(`  - 新闻样本: ${headline}`);
-      }
-    }
-  }
-
-  const portfolioReport = asRecord(signalResult.portfolio_report);
-  const brief = normalizeText(portfolioReport.brief);
-  if (brief) {
-    lines.push("");
-    lines.push(`### 组合摘要\n- ${brief}`);
-  }
-  lines.push("");
-}
-
 function appendMarketErrorsSection(lines: string[], marketData: Record<string, unknown>): void {
   const errors = asArray(marketData.errors)
     .map((item) => normalizeText(item))
@@ -323,11 +237,6 @@ function appendNewsSection(lines: string[], optionalNewsContext: Record<string, 
   }
 
   lines.push("## 近期公开信息摘录");
-
-  const equityNews = optionalNewsContext.content;
-  if (typeof equityNews === "string" && equityNews.trim()) {
-    lines.push(`- 摘要: ${equityNews.trim()}`);
-  }
 
   const funds = asArray(optionalNewsContext.funds);
   for (const item of funds.slice(0, 16)) {
@@ -660,11 +569,6 @@ function pickTopNewsHeadline(rawContext: Record<string, unknown>): string {
   return source ? `${title} (${source})` : title;
 }
 
-function sanitizeMarkdownTableCell(input: string): string {
-  const text = normalizeText(input) || "-";
-  return text.replace(/\|/g, "/");
-}
-
 function formatDecisionLabel(raw: string): string {
   const value = raw.trim().toLowerCase();
   if (value === "buy") return "买入";
@@ -700,13 +604,6 @@ function formatMarketStateLabel(raw: string): string {
   if (value === "MARKET_STRONG") return "偏强";
   if (value === "MARKET_WEAK") return "偏弱";
   if (value === "MARKET_NEUTRAL") return "中性";
-  return raw || "-";
-}
-
-function formatAssetTypeLabel(raw: string): string {
-  const value = raw.trim().toLowerCase();
-  if (value === "fund") return "基金";
-  if (value === "equity") return "股票";
   return raw || "-";
 }
 

@@ -32,15 +32,12 @@ export function parseCommand(input) {
   }
 
   const withExplanation = !/--no-llm\b/i.test(body);
-  const explicitAssetType = detectAssetTypeFromText(body);
-
   const explicitPhase = detectPhaseFromText(body);
   if (explicitPhase) {
     return {
       kind: "run",
       phase: explicitPhase,
-      withExplanation,
-      assetType: explicitAssetType || undefined
+      withExplanation
     };
   }
 
@@ -49,8 +46,7 @@ export function parseCommand(input) {
     return {
       kind: "run",
       phase: detectPhaseFromText(rest) || inferPhaseFromLocalTime(),
-      withExplanation,
-      assetType: explicitAssetType || undefined
+      withExplanation
     };
   }
 
@@ -58,16 +54,14 @@ export function parseCommand(input) {
     return {
       kind: "run",
       phase: inferPhaseFromLocalTime(),
-      withExplanation,
-      assetType: explicitAssetType || undefined
+      withExplanation
     };
   }
 
   return {
     kind: "run",
     phase: inferPhaseFromLocalTime(),
-    withExplanation,
-    assetType: explicitAssetType || undefined
+    withExplanation
   };
 }
 
@@ -140,33 +134,6 @@ function detectPhaseFromText(text) {
 
   return null;
 }
-
-function detectAssetTypeFromText(text) {
-  const source = String(text || "").trim().toLowerCase();
-  if (!source) return null;
-
-  if (
-    /\bfund\b/.test(source) ||
-    /基金/.test(source) ||
-    /asset[_-]?type\s*[:=]\s*fund/.test(source) ||
-    /--asset[-_]type\s+fund/.test(source)
-  ) {
-    return "fund";
-  }
-
-  if (
-    /\bequity\b/.test(source) ||
-    /\bstock\b/.test(source) ||
-    /股票/.test(source) ||
-    /asset[_-]?type\s*[:=]\s*(equity|stock)/.test(source) ||
-    /--asset[-_]type\s+(equity|stock)/.test(source)
-  ) {
-    return "equity";
-  }
-
-  return null;
-}
-
 function inferPhaseFromLocalTime() {
   const now = new Date();
   const hour = now.getHours();

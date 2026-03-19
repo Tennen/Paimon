@@ -5,18 +5,19 @@ import {
   buildMarketReportSystemPrompt
 } from "./llm_report_adapter";
 
-test("buildMarketReportSystemPrompt should require legacy coverage in markdown report", () => {
+test("buildMarketReportSystemPrompt should require dashboard-style markdown report", () => {
   const prompt = buildMarketReportSystemPrompt();
-  assert.match(prompt, /旧链路补充信息（必须吸收）/);
   assert.match(prompt, /持仓逐项建议/);
+  assert.match(prompt, /手机端阅读/);
   assert.match(prompt, /自然语言/);
+  assert.match(prompt, /短 bullet/);
   assert.match(prompt, /中文表达一致/);
-  assert.match(prompt, /markdown 表格/);
+  assert.match(prompt, /宽表最多 4 列/);
   assert.match(prompt, /素材包/);
   assert.match(prompt, /核心结论 \/ 数据视角 \/ 情报观察 \/ 执行计划/);
 });
 
-test("buildMarketReportSourceMarkdown should include legacy fund fields", () => {
+test("buildMarketReportSourceMarkdown should include fund dashboard context", () => {
   const sourceMarkdown = buildMarketReportSourceMarkdown({
     phase: "close",
     analysisEngine: "codex",
@@ -25,7 +26,6 @@ test("buildMarketReportSourceMarkdown should include legacy fund fields", () => 
       funds: [{ code: "510300", name: "沪深300ETF", quantity: 100, avgCost: 4.2 }]
     },
     marketData: {
-      assetType: "fund",
       errors: [],
       funds: [
         {
@@ -45,7 +45,6 @@ test("buildMarketReportSourceMarkdown should include legacy fund fields", () => 
       marketState: "MARKET_NEUTRAL",
       benchmark: "000300",
       generatedAt: "2026-03-17T00:00:00.000Z",
-      assetType: "fund",
       assetSignals: [{ code: "510300", signal: "HOLD" }],
       fund_dashboards: [
         {
@@ -100,9 +99,6 @@ test("buildMarketReportSourceMarkdown should include legacy fund fields", () => 
   assert.match(sourceMarkdown, /#### 执行计划/);
   assert.match(sourceMarkdown, /操作建议: 保持持有/);
   assert.match(sourceMarkdown, /检查清单: /);
-  assert.match(sourceMarkdown, /## 旧链路补充信息（必须吸收）/);
-  assert.match(sourceMarkdown, /\| 基金 \| 当前建议 \| 信号强弱 \| 关键数据 \| 公开信息 \|/);
-  assert.match(sourceMarkdown, /### 逐项补充字段/);
-  assert.match(sourceMarkdown, /### 组合摘要/);
+  assert.match(sourceMarkdown, /### 组合层判断/);
   assert.match(sourceMarkdown, /### 运行中需要注意/);
 });

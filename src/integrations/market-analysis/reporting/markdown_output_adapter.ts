@@ -20,8 +20,9 @@ export async function renderMarketExplanationImage(input: { phase: string; markd
   try {
     const image = await renderMarkdownAsLongImage({
       markdown: input.markdown,
-      title: `Market Analysis ${input.phase}`,
-      filenamePrefix: `market-${input.phase}`
+      title: buildMarketImageTitle(input.phase),
+      filenamePrefix: `market-${input.phase}`,
+      layoutPreset: "mobile"
     });
     if (!image || !image.data) {
       throw createMarketImagePipelineError("rendered image payload is empty");
@@ -34,6 +35,17 @@ export async function renderMarketExplanationImage(input: { phase: string; markd
     const detail = error instanceof Error ? error.message : String(error || "unknown error");
     throw createMarketImagePipelineError(`failed to render markdown image: ${detail}`, error);
   }
+}
+
+function buildMarketImageTitle(phase: string): string {
+  const normalized = String(phase || "").trim().toLowerCase();
+  if (normalized === "midday") {
+    return "基金分析 盘中";
+  }
+  if (normalized === "close") {
+    return "基金分析 收盘";
+  }
+  return "基金分析";
 }
 
 function isRecord(value: unknown): value is ExplanationRecord {

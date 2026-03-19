@@ -78,115 +78,70 @@ export function formatStatus(state) {
 
 export function buildRunResponseText(result) {
   const signalResult = result.signalResult;
-  const assetType = signalResult && signalResult.assetType ? signalResult.assetType : "equity";
   const lines = [
     `Market Analysis ${phaseLabel(signalResult.phase)} 完成`,
-    `资产类型: ${assetType}`,
+    "分析对象: 基金组合",
     `市场状态: ${signalResult.marketState}${signalResult.benchmark ? ` (${signalResult.benchmark})` : ""}`
   ];
 
-  if (assetType === "fund" && Array.isArray(signalResult.fund_dashboards)) {
-    const fundRecords = Array.isArray(result.marketData && result.marketData.funds)
-      ? result.marketData.funds
-      : [];
-    const fundRecordMap = new Map();
-    for (const record of fundRecords) {
-      const code = String(record && record.identity && record.identity.fund_code || "").trim();
-      if (!code) {
-        continue;
-      }
-      fundRecordMap.set(code, record);
+  const fundRecords = Array.isArray(result.marketData && result.marketData.funds)
+    ? result.marketData.funds
+    : [];
+  const fundRecordMap = new Map();
+  for (const record of fundRecords) {
+    const code = String(record && record.identity && record.identity.fund_code || "").trim();
+    if (!code) {
+      continue;
     }
-
-    if (signalResult.fund_dashboards.length === 0) {
-      lines.push("基金决策: 无可用标的");
-    } else {
-      lines.push("基金决策:");
-      for (const dashboard of signalResult.fund_dashboards.slice(0, 24)) {
-        const code = String(dashboard.fund_code || "").trim();
-        const name = String(dashboard.fund_name || "").trim();
-        const label = name && code ? `${name}(${code})` : (name || code || "-");
-        const decision = String(dashboard.decision_type || "watch").trim();
-        const score = Number.isFinite(Number(dashboard.sentiment_score))
-          ? Math.round(Number(dashboard.sentiment_score))
-          : 0;
-        const confidence = Number.isFinite(Number(dashboard.confidence))
-          ? Number(dashboard.confidence).toFixed(2)
-          : "0.00";
-        const conclusion = dashboard.core_conclusion && dashboard.core_conclusion.one_sentence
-          ? String(dashboard.core_conclusion.one_sentence).trim()
-          : "未提供";
-        const actionSuggestion = dashboard.action_plan && dashboard.action_plan.suggestion
-          ? String(dashboard.action_plan.suggestion).trim()
-          : "";
-        const positionChange = dashboard.action_plan && dashboard.action_plan.position_change
-          ? String(dashboard.action_plan.position_change).trim()
-          : "";
-        const metricSummary = buildFundMetricSummary(dashboard);
-        const record = fundRecordMap.get(code);
-        const newsStatus = describeNewsStatus(record && record.raw_context);
-        const newsHeadline = pickTopNewsHeadline(record && record.raw_context);
-        const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
-        const checklist = buildFundChecklistText(dashboard, record && record.raw_context);
-
-        lines.push(`- ${label}`);
-        lines.push(`  核心结论: ${decision}。${conclusion}`);
-        lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号强弱=${score}/100，置信度=${confidence}`);
-        lines.push(`  情报观察: ${risks.length > 0 ? risks.join("；") : "暂无新增重点风险"}${newsStatus ? `；${newsStatus}` : ""}${newsHeadline ? `；样本=${newsHeadline}` : ""}`);
-        if (actionSuggestion || positionChange) {
-          lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}`);
-        }
-        if (checklist.length > 0) {
-          lines.push(`  检查清单: ${checklist.join("；")}`);
-        }
-      }
-    }
-
-    if (signalResult.portfolio_report && signalResult.portfolio_report.brief) {
-      lines.push(`组合摘要: ${signalResult.portfolio_report.brief}`);
-    }
-
-    if (result.explanation && result.explanation.error) {
-      lines.push(`解释生成失败: ${result.explanation.error}`);
-    }
-
-    return lines.join("\n");
+    fundRecordMap.set(code, record);
   }
 
-  if (Array.isArray(signalResult.assetSignals) && signalResult.assetSignals.length > 0) {
-    lines.push("资产信号:");
-    for (const signal of signalResult.assetSignals) {
-      lines.push(`- ${signal.code}: ${signal.signal}`);
-    }
+  if (!Array.isArray(signalResult.fund_dashboards) || signalResult.fund_dashboards.length === 0) {
+    lines.push("基金决策: 无可用标的");
   } else {
-    lines.push("资产信号: 无持仓或无可用资产数据");
-  }
-
-  if (result.explanation && result.explanation.summary) {
-    lines.push(`解释: ${result.explanation.summary}`);
-  }
-
-  if (result.explanation && Array.isArray(result.explanation.holdings) && result.explanation.holdings.length > 0) {
-    lines.push("持仓逐项建议:");
-    for (const holding of result.explanation.holdings.slice(0, 24)) {
-      const code = String(holding.code || "").trim();
-      const name = String(holding.name || "").trim();
+    lines.push("基金决策:");
+    for (const dashboard of signalResult.fund_dashboards.slice(0, 24)) {
+      const code = String(dashboard.fund_code || "").trim();
+      const name = String(dashboard.fund_name || "").trim();
       const label = name && code ? `${name}(${code})` : (name || code || "-");
-      const inputData = String(holding.inputData || "").trim();
-      const shortTermAdvice = String(holding.shortTermAdvice || "").trim();
-      const longTermAdvice = String(holding.longTermAdvice || "").trim();
+      const decision = String(dashboard.decision_type || "watch").trim();
+      const score = Number.isFinite(Number(dashboard.sentiment_score))
+        ? Math.round(Number(dashboard.sentiment_score))
+        : 0;
+      const confidence = Number.isFinite(Number(dashboard.confidence))
+        ? Number(dashboard.confidence).toFixed(2)
+        : "0.00";
+      const conclusion = dashboard.core_conclusion && dashboard.core_conclusion.one_sentence
+        ? String(dashboard.core_conclusion.one_sentence).trim()
+        : "未提供";
+      const actionSuggestion = dashboard.action_plan && dashboard.action_plan.suggestion
+        ? String(dashboard.action_plan.suggestion).trim()
+        : "";
+      const positionChange = dashboard.action_plan && dashboard.action_plan.position_change
+        ? String(dashboard.action_plan.position_change).trim()
+        : "";
+      const metricSummary = buildFundMetricSummary(dashboard);
+      const record = fundRecordMap.get(code);
+      const newsStatus = describeNewsStatus(record && record.raw_context);
+      const newsHeadline = pickTopNewsHeadline(record && record.raw_context);
+      const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
+      const checklist = buildFundChecklistText(dashboard, record && record.raw_context);
+
       lines.push(`- ${label}`);
-      lines.push(`  关键数据: ${inputData || "数据缺失"}`);
-      lines.push(`  短期(1-5日): ${shortTermAdvice || "未提供"}`);
-      lines.push(`  长期(1-3月): ${longTermAdvice || "未提供"}`);
+      lines.push(`  核心结论: ${decision}。${conclusion}`);
+      lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号强弱=${score}/100，置信度=${confidence}`);
+      lines.push(`  情报观察: ${risks.length > 0 ? risks.join("；") : "暂无新增重点风险"}${newsStatus ? `；${newsStatus}` : ""}${newsHeadline ? `；样本=${newsHeadline}` : ""}`);
+      if (actionSuggestion || positionChange) {
+        lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}`);
+      }
+      if (checklist.length > 0) {
+        lines.push(`  检查清单: ${checklist.join("；")}`);
+      }
     }
   }
 
-  if (result.explanation && Array.isArray(result.explanation.suggestions) && result.explanation.suggestions.length > 0) {
-    lines.push("参考建议(可不采纳，不改变既有信号):");
-    for (const suggestion of result.explanation.suggestions.slice(0, 3)) {
-      lines.push(`- ${suggestion}`);
-    }
+  if (signalResult.portfolio_report && signalResult.portfolio_report.brief) {
+    lines.push(`组合摘要: ${signalResult.portfolio_report.brief}`);
   }
 
   if (result.explanation && result.explanation.error) {
@@ -199,8 +154,7 @@ export function buildRunResponseText(result) {
 export function buildHelpText() {
   return [
     "Market Analysis 命令:",
-    "/market fund <midday|close>    运行基金分析主流程（标准化->特征->规则->LLM）",
-    "/market equity <midday|close>  运行原股票信号流程",
+    "/market [fund] <midday|close>  运行基金分析主流程（标准化->特征->规则->LLM）",
     "/market midday         运行 13:30 盘中分析",
     "/market close          运行 15:15 收盘分析",
     "/market status         查看最近一次运行结果",

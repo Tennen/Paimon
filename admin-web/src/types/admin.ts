@@ -268,15 +268,12 @@ export type MarketPortfolio = {
   cash: number;
 };
 
-export type MarketAnalysisAssetType = "equity" | "fund";
-
 export type MarketAnalysisEngine = string;
 
 export type MarketFundRiskLevel = "low" | "medium" | "high";
 
 export type MarketAnalysisConfig = {
   version: 1;
-  assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
   searchEngine: string;
   gptPlugin: {
@@ -370,7 +367,6 @@ export type MarketSectionProps = {
   marketSearchResults: MarketSecuritySearchItem[][];
   searchingMarketFundIndex: number | null;
   onCashChange: (value: number) => void;
-  onMarketAssetTypeChange: (value: MarketAnalysisAssetType) => void;
   onMarketAnalysisEngineChange: (value: MarketAnalysisEngine) => void;
   onMarketSearchEngineChange: (value: string) => void;
   onMarketFundNewsQuerySuffixChange: (value: string) => void;
@@ -705,7 +701,6 @@ export const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
 
 export const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
-  assetType: "equity",
   analysisEngine: "local",
   searchEngine: "default",
   gptPlugin: {

@@ -26,7 +26,6 @@ import {
   EvolutionStateSnapshot,
   MarketConfig,
   MarketAnalysisConfig,
-  MarketAnalysisAssetType,
   MarketAnalysisEngine,
   MarketFundRiskLevel,
   MarketFundHolding,
@@ -1110,13 +1109,6 @@ export default function App() {
     }));
   }
 
-  function handleMarketAssetTypeChange(value: MarketAnalysisAssetType): void {
-    setMarketAnalysisConfig((prev) => ({
-      ...prev,
-      assetType: value
-    }));
-  }
-
   function handleMarketAnalysisEngineChange(value: MarketAnalysisEngine): void {
     setMarketAnalysisConfig((prev) => ({
       ...prev,
@@ -2131,7 +2123,6 @@ export default function App() {
               marketSearchResults={marketSearchResults}
               searchingMarketFundIndex={searchingMarketFundIndex}
               onCashChange={handleMarketCashChange}
-              onMarketAssetTypeChange={handleMarketAssetTypeChange}
               onMarketAnalysisEngineChange={handleMarketAnalysisEngineChange}
               onMarketSearchEngineChange={handleMarketSearchEngineChange}
               onMarketFundNewsQuerySuffixChange={handleMarketFundNewsQuerySuffixChange}
@@ -2300,7 +2291,6 @@ function normalizeMarketPortfolio(portfolio: MarketPortfolio): MarketPortfolio {
 }
 
 function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnalysisConfig {
-  const assetType = config?.assetType === "fund" ? "fund" : "equity";
   const engine = normalizeMarketAnalysisEngine(config?.analysisEngine);
   const searchEngine = normalizeMarketSearchEngine(config?.searchEngine);
   const timeoutMs = Number(config?.gptPlugin?.timeoutMs);
@@ -2320,7 +2310,6 @@ function normalizeMarketAnalysisConfig(config: MarketAnalysisConfig): MarketAnal
       : "medium";
   return {
     version: 1,
-    assetType,
     analysisEngine: engine,
     searchEngine,
     gptPlugin: {

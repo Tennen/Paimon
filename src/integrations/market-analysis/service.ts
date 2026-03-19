@@ -38,11 +38,7 @@ export async function execute(input) {
 
   const phase = command.phase;
   const withExplanation = command.withExplanation;
-  const assetType = command.assetType;
-
-  const result = await runAnalysis(phase, withExplanation, {
-    assetType
-  });
+  const result = await runAnalysis(phase, withExplanation);
 
   const text = withExplanation ? "" : buildRunResponseText(result);
   let image = null;
@@ -62,7 +58,7 @@ export async function execute(input) {
     result: {
       runId: result.persisted.id,
       phase: result.signalResult.phase,
-      assetType: result.signalResult.assetType || assetType || "equity",
+      assetType: result.signalResult.assetType || "fund",
       marketState: result.signalResult.marketState,
       generatedAt: result.signalResult.generatedAt,
       signalResult: result.signalResult,

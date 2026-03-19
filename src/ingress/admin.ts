@@ -88,8 +88,6 @@ type MarketPortfolio = {
   cash: number;
 };
 
-type MarketAnalysisAssetType = "equity" | "fund";
-
 type MarketAnalysisEngine = string;
 
 type MarketGptPluginConfig = {
@@ -108,7 +106,6 @@ type MarketFundAnalysisConfig = {
 
 type MarketAnalysisConfig = {
   version: 1;
-  assetType: MarketAnalysisAssetType;
   analysisEngine: MarketAnalysisEngine;
   searchEngine: string;
   gptPlugin: MarketGptPluginConfig;
@@ -211,7 +208,6 @@ const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {
 
 const DEFAULT_MARKET_ANALYSIS_CONFIG: MarketAnalysisConfig = {
   version: 1,
-  assetType: "equity",
   analysisEngine: "local",
   searchEngine: "default",
   gptPlugin: {
@@ -1338,7 +1334,6 @@ export class AdminIngressAdapter implements IngressAdapter {
       const hasConfig = "config" in payload
         || "analysisEngine" in payload
         || "searchEngine" in payload
-        || "assetType" in payload
         || "gptPlugin" in payload
         || "fund" in payload;
       if (!hasPortfolio && !hasConfig) {
@@ -2464,8 +2459,6 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
   }
 
   const source = input as Record<string, unknown>;
-  const assetTypeRaw = typeof source.assetType === "string" ? source.assetType.trim().toLowerCase() : "";
-  const assetType: MarketAnalysisAssetType = assetTypeRaw === "fund" ? "fund" : "equity";
   const engineRaw = typeof source.analysisEngine === "string" ? source.analysisEngine.trim().toLowerCase() : "";
   const analysisEngine: MarketAnalysisEngine = normalizeMarketAnalysisEngine(engineRaw);
   const searchEngineRaw = typeof source.searchEngine === "string" ? source.searchEngine.trim().toLowerCase() : "";
@@ -2496,7 +2489,6 @@ function normalizeMarketAnalysisConfig(input: unknown): MarketAnalysisConfig {
 
   return {
     version: 1,
-    assetType,
     analysisEngine,
     searchEngine,
     gptPlugin: {

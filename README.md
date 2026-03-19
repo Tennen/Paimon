@@ -80,7 +80,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `terminal`: 执行本机命令
 - `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
 - `writing-organizer`: 材料整理流水线（`Material -> Insight -> Document`），支持增量采集、结构化提炼、版本化 Markdown 文档与回滚
-- `market-analysis`: A 股/ETF/基金分析、持仓管理、盘中/收盘分析结果沉淀
+- `market-analysis`: 基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
 - `re-agent modules`: 子 agent 可调用 `rag`、`mcp`、`multiagent` 三类模块
@@ -306,16 +306,16 @@ STT_FAST_WHISPER_MODEL=small
 
 #### Market Analysis（基金主流程）
 
-`/market` 已支持双路径：
+`/market` 当前仅支持基金分析主流程（标准化 -> 特征 -> 规则 -> LLM）：
 
-- `/market equity <midday|close>`：原股票信号路径
-- `/market fund <midday|close>`：基金分析主流程（标准化 -> 特征 -> 规则 -> LLM）
+- `/market <midday|close>`
+- `/market fund <midday|close>`
 
 基金流程会在数据层做分层降级：新闻与 LLM 失败默认不终止主流程，但若单只基金的基础行情/净值序列获取失败，则直接跳过该基金后续特征、规则与 LLM 分析，并在日志中记录基础数据接口错误；这种情况代表流程数据异常，不会被误判为基金高风险。输出仍统一为结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。基金 prompt 与报告结构会尽量贴近股票分析侧的“核心结论 / 数据视角 / 舆情情报 / 执行计划”四块架构，只是把股票指标替换为基金适用指标（收益、回撤、相对基准、跟踪偏离、申赎与基金经理事件等）。
 
 当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染长图用于推送。
 
-解释模式下不再额外发送旧链路长文本，避免“图片 + 文本”双发；旧文本里的关键字段（动作/评分/关键指标/数据完整性/新闻检索状态/组合摘要）会在 markdown 上下文中强制补齐，并整合到长图报告。
+解释模式下会先组装基金分析 markdown 上下文，再交给 codex 生成最终报告并渲染长图，不再维护股票旧链路或旧版补充段落。
 
 该链路为强制模式，不再向下兼容纯文本解释回退：
 
@@ -324,7 +324,7 @@ STT_FAST_WHISPER_MODEL=small
 - 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls satori @resvg/resvg-js remark`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 
-旧链路文本输出（例如 `--no-llm`）会按单基金展示：
+纯文本输出（例如 `--no-llm`）会按单基金展示：
 
 - 核心结论、数据视角、情报观察、执行计划四块
 - 决策动作、评分、置信度

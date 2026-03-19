@@ -30,7 +30,6 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
-  MarketAnalysisAssetType,
   MarketAnalysisEngine,
   MarketFundRiskLevel,
   MarketSectionProps
@@ -106,20 +105,7 @@ export function MarketSection(props: MarketSectionProps) {
       <CardContent className="space-y-4">
         <div className="space-y-3 rounded-md border border-border p-3">
           <h3 className="text-sm font-medium">分析引擎配置</h3>
-          <div className="grid gap-3 md:grid-cols-5">
-            <div className="space-y-1.5">
-              <Label>Asset Type</Label>
-              <Select value={props.marketAnalysisConfig.assetType} onValueChange={(value) => props.onMarketAssetTypeChange(value as MarketAnalysisAssetType)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="选择资产类型" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="equity">equity（原股票路径）</SelectItem>
-                  <SelectItem value="fund">fund（基金主流程）</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
+          <div className="grid gap-3 md:grid-cols-4">
             <div className="space-y-1.5">
               <Label>Analysis Provider</Label>
               <Select

@@ -15,7 +15,6 @@ export const SZ_INDEX_CODES = new Set(["399001", "399005", "399006", "399102", "
 
 export const DEFAULT_ANALYSIS_CONFIG = {
   version: 1,
-  assetType: "equity",
   analysisEngine: "local",
   searchEngine: "default",
   gptPlugin: {

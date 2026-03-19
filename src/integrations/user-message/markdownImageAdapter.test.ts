@@ -10,6 +10,7 @@ type RenderMarkdownImageInput = {
   title?: string;
   width?: number;
   filenamePrefix?: string;
+  layoutPreset?: "default" | "mobile";
 };
 
 type RenderMarkdownImageResult = {
@@ -306,6 +307,69 @@ test("renderMarkdownAsLongImage should render markdown table as structured layou
       const rendered = JSON.stringify(capturedElements[0] || {});
       assert.match(rendered, /沪深300ETF/);
       assert.doesNotMatch(rendered, /\| 基金 \| 建议动作 \| 数据完整性 \|/);
+    });
+  } finally {
+    Module.prototype.require = originalRequire;
+  }
+});
+
+test("renderMarkdownAsLongImage should support mobile layout preset for phone reading", { concurrency: false }, async () => {
+  const originalRequire = Module.prototype.require;
+  const capturedElements: unknown[] = [];
+  const capturedOptions: Array<{ width: number; height: number }> = [];
+  const { renderMarkdownAsLongImage } = loadAdapterFresh();
+
+  Module.prototype.require = function patchedRequire(id: string): unknown {
+    if (id === "remark") {
+      return {
+        remark: () => ({
+          parse: () => ({
+            type: "root",
+            children: [
+              { type: "heading", depth: 1, children: [{ type: "text", value: "今日结论" }] },
+              { type: "paragraph", children: [{ type: "text", value: "建议保持耐心，先看确认信号。" }] }
+            ]
+          })
+        })
+      };
+    }
+
+    if (id === "satori") {
+      return async (element: unknown, options: { width: number; height: number }) => {
+        capturedElements.push(element);
+        capturedOptions.push(options);
+        return "<svg></svg>";
+      };
+    }
+
+    if (id === "@resvg/resvg-js") {
+      return {
+        Resvg: class {
+          render(): { asPng: () => Buffer } {
+            return {
+              asPng: () => Buffer.from("png-from-mobile-layout-test")
+            };
+          }
+        }
+      };
+    }
+
+    return originalRequire.call(this, id);
+  };
+
+  try {
+    await withMockedFontData(async () => {
+      const image = await renderMarkdownAsLongImage({
+        markdown: "# 今日结论\n建议保持耐心，先看确认信号。",
+        filenamePrefix: "mobile-layout",
+        layoutPreset: "mobile"
+      });
+
+      assert.equal(Buffer.from(image.data, "base64").toString("utf8"), "png-from-mobile-layout-test");
+      assert.equal(capturedOptions[0]?.width, 780);
+      const rendered = JSON.stringify(capturedElements[0] || {});
+      assert.match(rendered, /"fontSize":38/);
+      assert.match(rendered, /"fontSize":18/);
     });
   } finally {
     Module.prototype.require = originalRequire;
