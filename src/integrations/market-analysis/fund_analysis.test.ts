@@ -337,6 +337,61 @@ test("runFundAnalysis should continue when quote fetch fails but fund history is
   }
 });
 
+test("runFundAnalysis should log benchmark fallback errors when benchmark history fetch fails", { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+
+  const errorLogs: string[] = [];
+
+  try {
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.includes("push2.eastmoney.com/api/qt/stock/get")) return createJsonResponse({ data: { f43: 4.36, f47: 1234567 } });
+      if (url.includes("push2his.eastmoney.com/api/qt/stock/kline/get") && url.includes("secid=1.510300")) {
+        return createJsonResponse({ data: { klines: buildMockKlines() } });
+      }
+      if (url.includes("push2his.eastmoney.com/api/qt/stock/kline/get") && url.includes("secid=1.000300")) {
+        throw new Error("benchmark history failed");
+      }
+      throw new Error(`unexpected fetch url in test: ${url}`);
+    }) as typeof fetch;
+
+    console.error = (...args: unknown[]) => {
+      errorLogs.push(args.map((item) => String(item)).join(" "));
+    };
+
+    const result = await runFundAnalysis({
+      phase: "close",
+      withExplanation: false,
+      portfolio: {
+        funds: [{ code: "510300", name: "沪深300ETF", quantity: 100, avgCost: 4 }],
+        cash: 1000
+      },
+      analysisConfig: baseConfig
+    });
+
+    const fund = result.marketData.funds[0];
+    const auditSteps = result.signalResult.audit.steps.map((step) => step.step);
+
+    assert.equal(fund.raw_context.price_or_nav_series.length > 0, true);
+    assert.equal(fund.raw_context.benchmark_series.length, 0);
+    assert.equal(fund.raw_context.errors.includes("benchmark history failed"), true);
+    assert.equal(auditSteps.includes("feature:510300"), true);
+    assert.equal(auditSteps.includes("rule:510300"), true);
+    assert.equal(
+      errorLogs.some((line) =>
+        line.includes("[MarketAnalysis][fund][benchmark] fallback")
+        && line.includes("code=000300")
+        && line.includes("benchmark history failed")
+      ),
+      true
+    );
+  } finally {
+    console.error = originalError;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function buildMockKlines(): string[] {
   return Array.from({ length: 40 }, (_, index) => {
     const day = index + 1;

@@ -991,10 +991,14 @@ async function fetchBenchmarkSeries(code: string, lookbackDays: number, timeoutM
       errors: []
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[MarketAnalysis][fund][benchmark] fallback code=${code || "-"} secid=${secid || "-"} lookbackDays=${lookbackDays} error=${message}`
+    );
     return {
       series: [],
       source_chain: ["eastmoney:index_history"],
-      errors: [error instanceof Error ? error.message : String(error)]
+      errors: [message]
     };
   }
 }

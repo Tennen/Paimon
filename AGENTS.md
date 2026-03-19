@@ -129,6 +129,7 @@ This file defines hard constraints for coding agents working in this repository.
 - Validate external input at boundaries (`ingress`, integration adapters) before entering core flow.
 - Preserve existing language style in user-facing text (current codebase mixes Chinese/English intentionally).
 - Keep logs actionable: include subsystem context and avoid swallowing errors silently.
+- If interface code or critical logic enters a `catch` path and then falls back/degrades/compat-returns, it must emit an explicit error log in that `catch` branch with subsystem context, target/input identity, and the fallback behavior. Do not silently return fallback data.
 
 ## Change Safety Checklist
 
