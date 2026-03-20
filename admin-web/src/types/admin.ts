@@ -256,6 +256,63 @@ export type ScheduledTask = {
   lastRunKey?: string;
 };
 
+export type WeComMenuLeafButton = {
+  id: string;
+  name: string;
+  key: string;
+  enabled: boolean;
+  dispatchText: string;
+};
+
+export type WeComMenuButton = WeComMenuLeafButton & {
+  subButtons: WeComMenuLeafButton[];
+};
+
+export type WeComMenuConfig = {
+  version: 1;
+  buttons: WeComMenuButton[];
+  updatedAt: string;
+  lastPublishedAt?: string;
+};
+
+export type WeComMenuEventRecord = {
+  id: string;
+  source: "wecom";
+  eventType: "click";
+  eventKey: string;
+  fromUser: string;
+  toUser: string;
+  agentId?: string;
+  matchedButtonId?: string;
+  matchedButtonName?: string;
+  dispatchText?: string;
+  status: "recorded" | "dispatched" | "ignored" | "failed";
+  error?: string;
+  receivedAt: string;
+};
+
+export type WeComMenuPublishLeafButton = {
+  type: "click";
+  name: string;
+  key: string;
+};
+
+export type WeComMenuPublishGroupButton = {
+  name: string;
+  sub_button: WeComMenuPublishLeafButton[];
+};
+
+export type WeComMenuPublishPayload = {
+  button: Array<WeComMenuPublishLeafButton | WeComMenuPublishGroupButton>;
+};
+
+export type WeComMenuSnapshot = {
+  config: WeComMenuConfig;
+  recentEvents: WeComMenuEventRecord[];
+  publishPayload: WeComMenuPublishPayload | null;
+  validationErrors: string[];
+};
+
 export type MarketFundHolding = {
   code: string;
   name: string;
@@ -678,7 +735,7 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "messages" | "market" | "topic" | "writing" | "evolution";
+export type MenuKey = "system" | "messages" | "wecom" | "market" | "topic" | "writing" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",
@@ -692,6 +749,12 @@ export const EMPTY_TASK_FORM: TaskFormState = {
   userIds: [],
   message: "",
   enabled: true
+};
+
+export const DEFAULT_WECOM_MENU_CONFIG: WeComMenuConfig = {
+  version: 1,
+  buttons: [],
+  updatedAt: ""
 };
 
 export const DEFAULT_MARKET_PORTFOLIO: MarketPortfolio = {

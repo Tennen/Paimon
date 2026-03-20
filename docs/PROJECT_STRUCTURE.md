@@ -38,6 +38,7 @@ src/
     writing-organizer/
     wecom/
   memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
+  observable/      # Admin-defined menu/trigger config + callback event dispatch
   scheduler/       # Scheduler and push-user domain
   skills/          # Skill metadata manager only
   storage/         # Persistence abstraction (register/get/set)
@@ -69,6 +70,7 @@ data/              # Runtime data files
   - `topic-summary`
   - `market-analysis`
   - `writing-organizer`
+- Admin-defined external trigger/menu config + callback dispatch -> `src/observable/`.
 - LLM-callable tools (schema + execute handler) -> `src/tools/`.
 - Persistent state access -> `src/storage/persistence.ts` API only.
 - Runtime config services -> `src/config/`.
@@ -99,6 +101,18 @@ data/              # Runtime data files
   - `PUT /admin/api/llm/providers`
   - `POST /admin/api/llm/providers/default`
   - `DELETE /admin/api/llm/providers/:id`
+
+## WeCom Menu Admin And Callback Routing
+
+- 企业微信菜单配置和事件日志保存在 `src/observable/menuService.ts`，持久化 key 为：
+  - `observable.menu_config`
+  - `observable.event_log`
+- 企业微信菜单发布 API client 在 `src/integrations/wecom/menuClient.ts`。
+- `src/ingress/wecom.ts` 现在除文本/语音外，还负责接收 `MsgType=event` + `Event=click` 的企业微信菜单回调，并将 `EventKey` 转成内部可分发事件。
+- Admin API 入口在 `src/ingress/admin.ts`：
+  - `GET /admin/api/wecom/menu`
+  - `PUT /admin/api/wecom/menu`
+  - `POST /admin/api/wecom/menu/publish`
 
 ## Market Admin API Entry Points
 

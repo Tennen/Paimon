@@ -59,6 +59,11 @@ This file defines hard constraints for coding agents working in this repository.
   - Callers should use `registerStore`, `getStore`, `setStore`.
   - Business modules must not depend on file paths.
 
+- `src/observable/`
+  - Admin-defined trigger/menu config and callback-event dispatch only.
+  - No direct vendor HTTP/API client code here; WeCom API access stays in `src/integrations/wecom/`.
+  - No ingress parsing here; ingress only translates requests into observable service calls.
+
 - `src/scheduler/`, `src/memory/`
   - Domain services and state management.
   - Persistence access only through `src/storage/persistence.ts`.

@@ -5,6 +5,7 @@ import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 import { WeComMediaDownloader } from "../integrations/wecom/mediaDownloader";
+import { ObservableMenuService } from "../observable/menuService";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: true,
@@ -15,10 +16,12 @@ const xmlParser = new XMLParser({
 export class WeComIngressAdapter implements IngressAdapter {
   private readonly token: string;
   private readonly mediaDownloader: WeComMediaDownloader;
+  private readonly observableMenuService: ObservableMenuService;
 
-  constructor(token?: string, mediaDownloader?: WeComMediaDownloader) {
+  constructor(token?: string, mediaDownloader?: WeComMediaDownloader, observableMenuService?: ObservableMenuService) {
     this.token = token ?? process.env.WECOM_TOKEN ?? "";
     this.mediaDownloader = mediaDownloader ?? new WeComMediaDownloader();
+    this.observableMenuService = observableMenuService ?? new ObservableMenuService();
   }
 
   register(app: Express, sessionManager: SessionManager): void {
@@ -74,6 +77,79 @@ export class WeComIngressAdapter implements IngressAdapter {
       }
 
       const msgType = String(parsed.MsgType ?? "").trim().toLowerCase();
+      const fromUser = String(parsed.FromUserName ?? "");
+      const toUser = String(parsed.ToUserName ?? "");
+      const agentId = String(parsed.AgentID ?? parsed.AgentId ?? "").trim();
+
+      if (msgType === "event") {
+        const eventType = String(parsed.Event ?? "").trim().toLowerCase();
+        if (eventType !== "click") {
+          res.status(200).send("success");
+          return;
+        }
+
+        const eventKey = String(parsed.EventKey ?? "").trim();
+        if (!fromUser || !eventKey) {
+          res.status(400).send("missing fields");
+          return;
+        }
+
+        const handled = this.observableMenuService.handleWeComClickEvent({
+          eventKey,
+          fromUser,
+          toUser,
+          agentId,
+          receivedAt: new Date().toISOString()
+        });
+
+        if (!handled.dispatchText) {
+          if (!handled.replyText) {
+            res.status(200).send("success");
+            return;
+          }
+          const reply = buildTextReply(fromUser, toUser, handled.replyText);
+          res.type("application/xml").send(reply);
+          return;
+        }
+
+        const envelope = buildMenuEventEnvelope({
+          requestId: handled.event.id,
+          fromUser,
+          toUser,
+          agentId,
+          eventKey,
+          dispatchText: handled.dispatchText,
+          receivedAt: handled.event.receivedAt
+        });
+
+        try {
+          const response = await sessionManager.enqueue(envelope);
+          if (hasResponseImages(response)) {
+            const unsupportedReply = buildTextReply(
+              fromUser,
+              toUser,
+              "当前通道不支持图片回复，请使用 WeCom bridge 通道。"
+            );
+            res.type("application/xml").send(unsupportedReply);
+            return;
+          }
+
+          const responseText = String(response.text ?? "").trim();
+          if (!responseText) {
+            res.status(200).send("success");
+            return;
+          }
+          const reply = buildTextReply(fromUser, toUser, responseText);
+          res.type("application/xml").send(reply);
+        } catch (error) {
+          this.observableMenuService.markEventDispatchFailed(handled.event.id, error);
+          console.error(`[wecom] menu event dispatch failed: ${eventKey}`, error);
+          const reply = buildTextReply(fromUser, toUser, "菜单事件处理失败，请稍后重试。");
+          res.type("application/xml").send(reply);
+        }
+        return;
+      }
+
       const isText = msgType === "text";
       const isVoice = msgType === "voice";
       if (!isText && !isVoice) {
@@ -83,8 +159,6 @@ export class WeComIngressAdapter implements IngressAdapter {
 
       const content = String(parsed.Content ?? "").trim();
       const recognition = String(parsed.Recognition ?? "").trim();
-      const fromUser = String(parsed.FromUserName ?? "");
-      const toUser = String(parsed.ToUserName ?? "");
       const msgId = String(parsed.MsgId ?? parsed.MsgID ?? "");
       const mediaId = String(parsed.MediaId ?? "").trim();
 
@@ -170,6 +244,32 @@ function buildTextReply(toUser: string, fromUser: string, content: string): stri
     `<Content><![CDATA[${content}]]></Content>` +
     "</xml>"
   );
+}
+
+function buildMenuEventEnvelope(input: {
+  requestId: string;
+  fromUser: string;
+  toUser: string;
+  agentId?: string;
+  eventKey: string;
+  dispatchText: string;
+  receivedAt: string;
+}): Envelope {
+  return {
+    requestId: input.requestId,
+    source: "wecom",
+    sessionId: input.fromUser,
+    kind: "text",
+    text: input.dispatchText,
+    meta: {
+      callback_to_user: input.fromUser,
+      wecom_msg_type: "event",
+      wecom_event_type: "click",
+      wecom_event_key: input.eventKey,
+      wecom_agent_id: input.agentId || undefined
+    },
+    receivedAt: input.receivedAt
+  };
 }
 
 function hasResponseImages(response: { data?: { image?: unknown; images?: unknown[] } }): boolean {

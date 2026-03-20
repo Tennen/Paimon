@@ -32,6 +32,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
 - `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
 - `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
+- `src/observable/`: Admin 定义的菜单/触发器配置与回调事件分发
 - `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
 - `src/scheduler/`: 定时任务和推送用户管理
 - `src/memory/`: 记忆域服务（session/raw/summary/index、compaction、hybrid 检索）
@@ -61,6 +62,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 - 企业微信文本消息接入
 - 企业微信语音消息接入，支持 STT 转写后继续执行
+- 企业微信 click 菜单事件接入（`EventKey` 回调）
 - 通用 HTTP ingress
 - Home Assistant 通知转发入口
 - WeCom bridge SSE 模式，适合本地服务不方便公网暴露的场景
@@ -93,6 +95,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - Admin API 与 Admin Web 界面
 - 模型配置查看与更新
 - 定时任务和推送用户管理
+- 企业微信应用 click 菜单配置、发布与最近 `EventKey` 回调查看
 - Topic Summary 配置管理
 - Writing Organizer 主题列表/详情查看与整理操作
 - Market Analysis 配置、持仓批量导入与运行记录查看
@@ -275,6 +278,19 @@ WECOM_CORP_ID=your_corp_id
 WECOM_APP_SECRET=your_app_secret
 WECOM_AGENT_ID=your_agent_id
 ```
+
+启用后，Admin 可以额外管理企业微信应用的 click 菜单：
+
+- `GET /admin/api/wecom/menu`
+- `PUT /admin/api/wecom/menu`
+- `POST /admin/api/wecom/menu/publish`
+
+说明：
+
+- 当前只支持 click 菜单（企业微信回调里体现为 `Event=click` + `EventKey`）
+- Admin 里每个按钮都可以额外配置一段会送入 orchestrator 的命令或输入
+- 当某个 `EventKey` 配置了这段命令/输入时，回调会把它送入现有会话处理链路（例如 `/market close`）
+- 当该字段为空时，服务只记录该菜单事件，便于后续接真实 handler
 
 #### Evolution 推送通知（可选）
 

@@ -66,6 +66,7 @@ import {
   setDefaultSearchEngine,
   upsertSearchEngineProfile
 } from "../integrations/search-engine/store";
+import { ObservableMenuService } from "../observable/menuService";
 
 const execAsync = promisify(exec);
 
@@ -231,6 +232,7 @@ export class AdminIngressAdapter implements IngressAdapter {
   private readonly evolutionService?: EvolutionOperatorService;
   private readonly adminDistCandidates: string[];
   private readonly openAIQuotaManager: OpenAIQuotaManager;
+  private readonly observableMenuService: ObservableMenuService;
 
   constructor(
     envStore: EnvConfigStore,
@@ -248,6 +250,7 @@ export class AdminIngressAdapter implements IngressAdapter {
       ? adminDistCandidates.map((candidate) => path.resolve(process.cwd(), candidate))
       : DEFAULT_ADMIN_DIST_CANDIDATES;
     this.openAIQuotaManager = new OpenAIQuotaManager();
+    this.observableMenuService = new ObservableMenuService();
   }
 
   register(app: Express, _sessionManager: SessionManager): void {
@@ -433,6 +436,60 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(500).json({
           ok: false,
           error: (error as Error).message ?? "failed to update openai quota"
+        });
+      }
+    });
+
+    app.get("/admin/api/wecom/menu", (_req: Request, res: ExResponse) => {
+      try {
+        res.json({
+          ok: true,
+          ...this.observableMenuService.getSnapshot()
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to read wecom menu config"
+        });
+      }
+    });
+
+    app.put("/admin/api/wecom/menu", (req: Request, res: ExResponse) => {
+      const payload = parseWeComMenuConfigPayload(req.body);
+      if (payload === null) {
+        res.status(400).json({ ok: false, error: "invalid wecom menu payload" });
+        return;
+      }
+
+      try {
+        res.json({
+          ok: true,
+          ...this.observableMenuService.saveConfig(payload)
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to save wecom menu config"
+        });
+      }
+    });
+
+    app.post("/admin/api/wecom/menu/publish", async (req: Request, res: ExResponse) => {
+      const payload = parseWeComMenuConfigPayload(req.body, { allowEmpty: true });
+      if (payload === null) {
+        res.status(400).json({ ok: false, error: "invalid wecom menu payload" });
+        return;
+      }
+
+      try {
+        res.json({
+          ok: true,
+          ...await this.observableMenuService.publishConfig(payload ?? undefined)
+        });
+      } catch (error) {
+        res.status(502).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to publish wecom menu"
         });
       }
     });
@@ -1966,6 +2023,26 @@ function parseUpdateTaskInput(rawBody: unknown): UpdateScheduledTaskInput | null
   }
 
   return payload;
+}
+
+function parseWeComMenuConfigPayload(
+  rawBody: unknown,
+  options: { allowEmpty?: boolean } = {}
+): unknown | null | undefined {
+  if (rawBody === undefined || rawBody === null) {
+    return options.allowEmpty ? undefined : null;
+  }
+
+  if (typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
+  if (options.allowEmpty && Object.keys(body).length === 0) {
+    return undefined;
+  }
+
+  return "config" in body ? body.config : rawBody;
 }
 
 function parseEvolutionGoalInput(rawBody: unknown): { goal: string; commitMessage?: string } | null {

@@ -17,6 +17,7 @@ export function FeatureMenu(props: FeatureMenuProps) {
   const items: Array<{ key: MenuKey; label: string }> = [
     { key: "system", label: "系统设置" },
     { key: "messages", label: "消息任务" },
+    { key: "wecom", label: "企业微信菜单" },
     { key: "market", label: "Market Analysis" },
     { key: "topic", label: "Topic Summary" },
     { key: "writing", label: "Writing Organizer" },

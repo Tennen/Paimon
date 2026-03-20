@@ -12,6 +12,7 @@ import type {
   SystemRuntimeDraft
 } from "@/components/admin/SystemSection";
 import { TopicSummarySection } from "@/components/admin/TopicSummarySection";
+import { WeComMenuSection } from "@/components/admin/WeComMenuSection";
 import { WritingOrganizerSection } from "@/components/admin/WritingOrganizerSection";
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
@@ -20,6 +21,7 @@ import {
   DEFAULT_TOPIC_SUMMARY_STATE,
   DEFAULT_MARKET_ANALYSIS_CONFIG,
   DEFAULT_MARKET_PORTFOLIO,
+  DEFAULT_WECOM_MENU_CONFIG,
   EMPTY_TASK_FORM,
   EMPTY_USER_FORM,
   EvolutionGoal,
@@ -57,6 +59,12 @@ import {
   WritingTopicMeta,
   WritingTopicState,
   WritingTopicsPayload,
+  WeComMenuConfig,
+  WeComMenuButton,
+  WeComMenuEventRecord,
+  WeComMenuLeafButton,
+  WeComMenuPublishPayload,
+  WeComMenuSnapshot,
   UserFormState
 } from "@/types/admin";
 
@@ -131,6 +139,12 @@ export default function App() {
   const [taskForm, setTaskForm] = useState<TaskFormState>(EMPTY_TASK_FORM);
 
   const [activeMenu, setActiveMenu] = useState<MenuKey>("system");
+  const [wecomMenuConfig, setWecomMenuConfig] = useState<WeComMenuConfig>(DEFAULT_WECOM_MENU_CONFIG);
+  const [wecomMenuEvents, setWecomMenuEvents] = useState<WeComMenuEventRecord[]>([]);
+  const [wecomMenuPublishPayload, setWecomMenuPublishPayload] = useState<WeComMenuPublishPayload | null>(null);
+  const [wecomMenuValidationErrors, setWecomMenuValidationErrors] = useState<string[]>([]);
+  const [savingWecomMenu, setSavingWecomMenu] = useState(false);
+  const [publishingWecomMenu, setPublishingWecomMenu] = useState(false);
 
   const [marketConfig, setMarketConfig] = useState<MarketConfig | null>(null);
   const [marketPortfolio, setMarketPortfolio] = useState<MarketPortfolio>(DEFAULT_MARKET_PORTFOLIO);
@@ -292,6 +306,7 @@ export default function App() {
       await Promise.all([
         loadConfig(),
         loadModels(),
+        loadWeComMenu(),
         loadUsers(),
         loadTasks(),
         loadMarketConfig(),
@@ -342,6 +357,14 @@ export default function App() {
     const payload = await request<{ baseUrl: string; models: string[] }>("/admin/api/models");
     const list = Array.isArray(payload.models) ? payload.models.filter(Boolean) : [];
     setModels(list);
+  }
+
+  async function loadWeComMenu(): Promise<void> {
+    const payload = await request<WeComMenuSnapshot>("/admin/api/wecom/menu");
+    setWecomMenuConfig(normalizeWeComMenuConfig(payload.config));
+    setWecomMenuEvents(normalizeWeComMenuEvents(payload.recentEvents));
+    setWecomMenuPublishPayload(payload.publishPayload ?? null);
+    setWecomMenuValidationErrors(normalizeStringList(payload.validationErrors));
   }
 
   async function loadLLMProviders(): Promise<void> {
@@ -904,6 +927,50 @@ export default function App() {
       notifyError("一键部署失败", error);
     } finally {
       updateSystemOperationState("deployingRepo", false);
+    }
+  }
+
+  async function handleSaveWeComMenu(): Promise<void> {
+    setSavingWecomMenu(true);
+    try {
+      const payload = await request<WeComMenuSnapshot>("/admin/api/wecom/menu", {
+        method: "PUT",
+        body: JSON.stringify({ config: wecomMenuConfig })
+      });
+      setWecomMenuConfig(normalizeWeComMenuConfig(payload.config));
+      setWecomMenuEvents(normalizeWeComMenuEvents(payload.recentEvents));
+      setWecomMenuPublishPayload(payload.publishPayload ?? null);
+      setWecomMenuValidationErrors(normalizeStringList(payload.validationErrors));
+      setNotice({
+        type: "success",
+        title: "企业微信菜单配置已保存"
+      });
+    } catch (error) {
+      notifyError("保存企业微信菜单失败", error);
+    } finally {
+      setSavingWecomMenu(false);
+    }
+  }
+
+  async function handlePublishWeComMenu(): Promise<void> {
+    setPublishingWecomMenu(true);
+    try {
+      const payload = await request<WeComMenuSnapshot>("/admin/api/wecom/menu/publish", {
+        method: "POST",
+        body: JSON.stringify({ config: wecomMenuConfig })
+      });
+      setWecomMenuConfig(normalizeWeComMenuConfig(payload.config));
+      setWecomMenuEvents(normalizeWeComMenuEvents(payload.recentEvents));
+      setWecomMenuPublishPayload(payload.publishPayload ?? null);
+      setWecomMenuValidationErrors(normalizeStringList(payload.validationErrors));
+      setNotice({
+        type: "success",
+        title: "企业微信菜单已发布"
+      });
+    } catch (error) {
+      notifyError("发布企业微信菜单失败", error);
+    } finally {
+      setPublishingWecomMenu(false);
     }
   }
 
@@ -2243,6 +2310,21 @@ export default function App() {
               onRunTask={(task) => void handleRunTask(task)}
             />
           ) : null}
+
+          {activeMenu === "wecom" ? (
+            <WeComMenuSection
+              config={wecomMenuConfig}
+              recentEvents={wecomMenuEvents}
+              publishPayload={wecomMenuPublishPayload}
+              validationErrors={wecomMenuValidationErrors}
+              saving={savingWecomMenu}
+              publishing={publishingWecomMenu}
+              onConfigChange={setWecomMenuConfig}
+              onRefresh={() => void loadWeComMenu()}
+              onSave={() => void handleSaveWeComMenu()}
+              onPublish={() => void handlePublishWeComMenu()}
+            />
+          ) : null}
         </section>
       </div>
     </main>
@@ -2662,6 +2744,111 @@ function normalizeTopicProfileId(raw: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeWeComMenuConfig(config: WeComMenuConfig | null | undefined): WeComMenuConfig {
+  const source = config ?? DEFAULT_WECOM_MENU_CONFIG;
+  const rawButtons = Array.isArray(source.buttons) ? source.buttons : [];
+  const lastPublishedAt = String(source.lastPublishedAt ?? "").trim();
+  return {
+    version: 1,
+    buttons: rawButtons.slice(0, 3).map((button, index) => normalizeWeComMenuButton(button, index)),
+    updatedAt: String(source.updatedAt ?? "").trim(),
+    ...(lastPublishedAt ? { lastPublishedAt } : {})
+  };
+}
+
+function normalizeWeComMenuButton(input: Partial<WeComMenuButton> | null | undefined, index: number): WeComMenuButton {
+  const rawSubButtons = Array.isArray(input?.subButtons) ? input.subButtons : [];
+  return {
+    id: normalizeAdminLocalId(String(input?.id ?? `root-${index + 1}`), `root-${index + 1}`),
+    name: String(input?.name ?? "").trim(),
+    key: String(input?.key ?? "").trim(),
+    enabled: typeof input?.enabled === "boolean" ? input.enabled : true,
+    dispatchText: String(input?.dispatchText ?? "").trim(),
+    subButtons: rawSubButtons.slice(0, 5).map((button, subIndex) => normalizeWeComMenuLeafButton(button, `${index + 1}-${subIndex + 1}`))
+  };
+}
+
+function normalizeWeComMenuLeafButton(
+  input: Partial<WeComMenuLeafButton> | null | undefined,
+  fallbackId: string
+): WeComMenuLeafButton {
+  return {
+    id: normalizeAdminLocalId(String(input?.id ?? `leaf-${fallbackId}`), `leaf-${fallbackId}`),
+    name: String(input?.name ?? "").trim(),
+    key: String(input?.key ?? "").trim(),
+    enabled: typeof input?.enabled === "boolean" ? input.enabled : true,
+    dispatchText: String(input?.dispatchText ?? "").trim()
+  };
+}
+
+function normalizeWeComMenuEvents(input: unknown): WeComMenuEventRecord[] {
+  const list = Array.isArray(input) ? input : [];
+  return list
+    .map((item) => normalizeWeComMenuEvent(item as Partial<WeComMenuEventRecord>))
+    .filter((item): item is WeComMenuEventRecord => Boolean(item));
+}
+
+function normalizeWeComMenuEvent(input: Partial<WeComMenuEventRecord> | null | undefined): WeComMenuEventRecord | null {
+  if (!input) {
+    return null;
+  }
+
+  const status = normalizeWeComMenuEventStatus(input.status);
+  if (!status) {
+    return null;
+  }
+
+  const id = String(input.id ?? "").trim();
+  if (!id) {
+    return null;
+  }
+
+  const agentId = String(input.agentId ?? "").trim();
+  const matchedButtonId = String(input.matchedButtonId ?? "").trim();
+  const matchedButtonName = String(input.matchedButtonName ?? "").trim();
+  const dispatchText = String(input.dispatchText ?? "").trim();
+  const error = String(input.error ?? "").trim();
+
+  return {
+    id,
+    source: "wecom",
+    eventType: "click",
+    eventKey: String(input.eventKey ?? "").trim(),
+    fromUser: String(input.fromUser ?? "").trim(),
+    toUser: String(input.toUser ?? "").trim(),
+    ...(agentId ? { agentId } : {}),
+    ...(matchedButtonId ? { matchedButtonId } : {}),
+    ...(matchedButtonName ? { matchedButtonName } : {}),
+    ...(dispatchText ? { dispatchText } : {}),
+    status,
+    ...(error ? { error } : {}),
+    receivedAt: String(input.receivedAt ?? "").trim()
+  };
+}
+
+function normalizeWeComMenuEventStatus(raw: unknown): WeComMenuEventRecord["status"] | "" {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "recorded" || value === "dispatched" || value === "ignored" || value === "failed") {
+    return value;
+  }
+  return "";
+}
+
+function normalizeStringList(input: unknown): string[] {
+  return Array.isArray(input)
+    ? input.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeAdminLocalId(raw: string, fallback: string): string {
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
 }
 
 function isLikelyRestartConnectionDrop(error: unknown): boolean {
