@@ -13,6 +13,8 @@ import { MemoryCompactor, MemoryCompactorInput } from "../memory/memoryCompactor
 import { SummaryMemoryStore } from "../memory/summaryMemoryStore";
 import { SummaryVectorIndex } from "../memory/summaryVectorIndex";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
+import { ObservableMenuService } from "../observable/menuService";
+import { buildWeComClickEventEnvelope } from "../integrations/wecom/eventEnvelope";
 
 class StubSessionMemoryStore {
   public readonly readCalls: string[] = [];
@@ -122,7 +124,8 @@ function createOrchestrator(
   memoryStore: StubSessionMemoryStore,
   rawMemoryStore: StubRawMemoryStore | RawMemoryStore = new StubRawMemoryStore(),
   memoryCompactor: StubMemoryCompactor = new StubMemoryCompactor(),
-  llmEngine: LLMEngine = new StubLLMEngine()
+  llmEngine: LLMEngine = new StubLLMEngine(),
+  observableMenuService?: Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">
 ): Orchestrator {
   const toolRouter = new ToolRouter(registry);
   const skillManager = new SkillManager(path.resolve(process.cwd(), ".orchestrator-reagent-test-skill-missing"));
@@ -136,7 +139,10 @@ function createOrchestrator(
     registry,
     callbackDispatcher,
     rawMemoryStore as unknown as RawMemoryStore,
-    memoryCompactor as unknown as MemoryCompactor
+    memoryCompactor as unknown as MemoryCompactor,
+    undefined,
+    undefined,
+    observableMenuService
   );
 }
 
@@ -255,6 +261,120 @@ test("supports local planning respond path from routing use_planning", async () 
   assert.equal(memoryStore.appendCalls.length, 1);
   assert.equal(rawMemoryStore.appendCalls.length, 1);
   assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+});
+
+test("converts WeCom click events to configured dispatch text inside orchestrator", async () => {
+  const memoryStore = new StubSessionMemoryStore("menu-memory");
+  const registry = new ToolRegistry();
+  let seenInput = "";
+  registry.registerDirectShortcut({
+    command: "/market",
+    execute: async (context) => {
+      seenInput = context.input;
+      return { ok: true, output: { text: `handled:${context.input}` } };
+    }
+  });
+
+  let markFailedCalls = 0;
+  const observableMenuService = {
+    handleWeComClickEvent: () => ({
+      event: {
+        id: "menu-event-1",
+        source: "wecom" as const,
+        eventType: "click" as const,
+        eventKey: "market-close",
+        fromUser: "zhangsan",
+        toUser: "wwcorp",
+        dispatchText: "/market close",
+        status: "dispatched" as const,
+        receivedAt: new Date().toISOString()
+      },
+      dispatchText: "/market close",
+      replyText: ""
+    }),
+    markEventDispatchFailed: () => {
+      markFailedCalls += 1;
+    }
+  };
+
+  const orchestrator = createOrchestrator(
+    registry,
+    memoryStore,
+    new StubRawMemoryStore(),
+    new StubMemoryCompactor(),
+    new StubLLMEngine(),
+    observableMenuService
+  );
+
+  const response = await orchestrator.handle(
+    buildWeComClickEventEnvelope({
+      requestId: "wecom-event-1",
+      fromUser: "zhangsan",
+      toUser: "wwcorp",
+      eventKey: "market-close",
+      receivedAt: new Date().toISOString()
+    })
+  );
+
+  assert.equal(response.text, "handled:/market close");
+  assert.equal(seenInput, "/market close");
+  assert.equal(markFailedCalls, 0);
+  assert.equal(memoryStore.appendCalls.length, 1);
+  assert.match(memoryStore.appendCalls[0]?.entry ?? "", /\/market close/);
+});
+
+test("returns menu reply directly when WeCom click event has no dispatch text", async () => {
+  const memoryStore = new StubSessionMemoryStore("menu-memory");
+  const registry = new ToolRegistry();
+  let directCalls = 0;
+  registry.registerDirectShortcut({
+    command: "/market",
+    execute: async () => {
+      directCalls += 1;
+      return { ok: true, output: { text: "unexpected" } };
+    }
+  });
+
+  const observableMenuService = {
+    handleWeComClickEvent: () => ({
+      event: {
+        id: "menu-event-2",
+        source: "wecom" as const,
+        eventType: "click" as const,
+        eventKey: "status-only",
+        fromUser: "zhangsan",
+        toUser: "wwcorp",
+        status: "recorded" as const,
+        receivedAt: new Date().toISOString()
+      },
+      dispatchText: "",
+      replyText: "已收到菜单事件：状态"
+    }),
+    markEventDispatchFailed: () => {}
+  };
+
+  const orchestrator = createOrchestrator(
+    registry,
+    memoryStore,
+    new StubRawMemoryStore(),
+    new StubMemoryCompactor(),
+    new StubLLMEngine(),
+    observableMenuService
+  );
+
+  const response = await orchestrator.handle(
+    buildWeComClickEventEnvelope({
+      requestId: "wecom-event-2",
+      fromUser: "zhangsan",
+      toUser: "wwcorp",
+      eventKey: "status-only",
+      receivedAt: new Date().toISOString()
+    })
+  );
+
+  assert.equal(response.text, "已收到菜单事件：状态");
+  assert.equal(directCalls, 0);
+  assert.equal(memoryStore.appendCalls.length, 0);
 });
 
 test("routing memory_mode=off skips session memory loading for planning", async () => {

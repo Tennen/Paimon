@@ -5,6 +5,7 @@ import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 import { WeComSender } from "../integrations/wecom/sender";
 import { WeComMediaDownloader } from "../integrations/wecom/mediaDownloader";
+import { buildWeComClickEventEnvelope } from "../integrations/wecom/eventEnvelope";
 
 export class WeComBridgeIngressAdapter implements IngressAdapter {
   private readonly streamUrl: string;
@@ -34,6 +35,31 @@ export class WeComBridgeIngressAdapter implements IngressAdapter {
       log(`message received: ${payload.messageId} session=${payload.sessionId}`);
       this.upsertContext(payload.sessionId, payload.fromUser);
       const msgType = (payload.msgType ?? "text").trim().toLowerCase();
+      const eventType = (payload.event ?? "").trim().toLowerCase();
+      if (msgType === "event") {
+        if (eventType !== "click" || !payload.eventKey) {
+          return;
+        }
+
+        const envelope = buildWeComClickEventEnvelope({
+          requestId: payload.messageId,
+          sessionId: payload.sessionId,
+          fromUser: payload.fromUser,
+          toUser: payload.toUser ?? "",
+          agentId: payload.agentId,
+          eventKey: payload.eventKey,
+          receivedAt: payload.receivedAt
+        });
+
+        try {
+          const response = await sessionManager.enqueue(envelope);
+          await this.sender.sendResponse(payload.fromUser, response);
+        } catch (err: any) {
+          log(`send reply failed: ${(err as Error).message} ${err && err.stack ? err.stack : ""}`);
+        }
+        return;
+      }
+
       const isImage = msgType === "image";
       const isVoice = msgType === "voice";
       let audioPath: string | undefined;
@@ -98,6 +124,9 @@ type BridgePayload = {
   toUser?: string;
   text: string;
   msgType?: string;
+  event?: string;
+  eventKey?: string;
+  agentId?: string;
   mediaId?: string;
   picUrl?: string;
   receivedAt: string;

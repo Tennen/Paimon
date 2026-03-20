@@ -20,6 +20,7 @@ This file defines hard constraints for coding agents working in this repository.
     - `src/ingress/wecomBridge.ts` is the local bridge client. It proactively connects to `WECOM_BRIDGE_URL` SSE, consumes bridge-delivered payloads, and sends outbound replies via `src/integrations/wecom/sender.ts`.
     - `tools/wecom-bridge.go` / `tools/wecom-bridge.js` are the public bridge receivers/proxies. They accept external WeCom callbacks and expose bridge-side proxy endpoints.
     - Do not treat `src/ingress/wecomBridge.ts` as another direct WeCom callback receiver; raw WeCom callback payload/protocol changes belong in `src/ingress/wecom.ts` or `tools/wecom-bridge.*` depending deployment mode.
+    - When a WeCom callback carries `EventKey`, ingress should only normalize it into an internal event envelope. `EventKey -> dispatchText` resolution belongs in core orchestration, not in individual ingress adapters.
 
 - `src/core/`
   - Orchestration and tool routing.

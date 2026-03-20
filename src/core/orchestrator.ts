@@ -7,13 +7,16 @@ import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
 import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
+import { readWeComClickEventContext } from "../integrations/wecom/eventEnvelope";
 import { sttRuntime } from "../engines/stt";
 import { isReAgentCommandInput, parseReAgentCommand } from "./re-agent";
 import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor } from "../memory/memoryCompactor";
 import { HybridMemoryService } from "../memory/hybridMemoryService";
+import { ObservableMenuService } from "../observable/menuService";
 
 export type OrchestratorLLMResolver = (step: LLMExecutionStep) => LLMEngine;
+type ObservableMenuEventResolver = Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">;
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -29,6 +32,7 @@ export class Orchestrator {
   private readonly toolRegistry: ToolRegistry;
   private readonly callbackDispatcher: CallbackDispatcher;
   private readonly asyncDirectQueues = new Map<string, Promise<void>>();
+  private readonly observableMenuService?: ObservableMenuEventResolver;
 
   constructor(
     toolRouter: ToolRouter,
@@ -40,7 +44,8 @@ export class Orchestrator {
     rawMemoryStore: RawMemoryStore = new RawMemoryStore(),
     memoryCompactor?: MemoryCompactor,
     hybridMemoryService?: HybridMemoryService,
-    llmEngineResolver?: OrchestratorLLMResolver
+    llmEngineResolver?: OrchestratorLLMResolver,
+    observableMenuService?: ObservableMenuEventResolver
   ) {
     this.toolRouter = toolRouter;
     this.defaultLLMEngine = llmEngine;
@@ -53,6 +58,7 @@ export class Orchestrator {
     this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
     this.callbackDispatcher = callbackDispatcher;
+    this.observableMenuService = observableMenuService;
   }
 
   private resolveLLMEngine(step: LLMExecutionStep): LLMEngine {
@@ -75,28 +81,38 @@ export class Orchestrator {
       return cached;
     }
 
-    const text = await sttRuntime.transcribe(envelope);
+    let dispatchedMenuEventId: string | undefined;
+    let workingEnvelope = envelope;
     let memoryLoaded = false;
     let memoryCache = "";
     const readSessionMemory = (): string => {
       if (!memoryLoaded) {
-        memoryCache = this.readSessionMemory(envelope.sessionId);
+        memoryCache = this.readSessionMemory(workingEnvelope.sessionId);
         memoryLoaded = true;
       }
       return memoryCache;
     };
 
     try {
-      const directRouteResponse = await this.handleDirectCommandRoute(text, envelope, start, readSessionMemory);
+      const menuEventResolution = this.resolveIngressEvent(workingEnvelope);
+      workingEnvelope = menuEventResolution.envelope;
+      dispatchedMenuEventId = menuEventResolution.dispatchedMenuEventId;
+      if (menuEventResolution.response) {
+        this.processed.set(workingEnvelope.requestId, menuEventResolution.response);
+        return menuEventResolution.response;
+      }
+
+      const text = await sttRuntime.transcribe(workingEnvelope);
+      const directRouteResponse = await this.handleDirectCommandRoute(text, workingEnvelope, start, readSessionMemory);
       if (directRouteResponse) {
         return directRouteResponse;
       }
 
       // Step 1: Routing - Decide direct response / planning / tool-oriented skill path
-      const routingResult = await this.routingStep(text, envelope, start, readSessionMemory);
+      const routingResult = await this.routingStep(text, workingEnvelope, start, readSessionMemory);
       if (routingResult.response) {
-        this.processed.set(envelope.requestId, routingResult.response);
-        this.appendMemory(envelope, text, routingResult.response);
+        this.processed.set(workingEnvelope.requestId, routingResult.response);
+        this.appendMemory(workingEnvelope, text, routingResult.response);
         return routingResult.response;
       }
 
@@ -106,23 +122,23 @@ export class Orchestrator {
         routingResult.planningThinkingBudget,
         text,
         routingResult.memory,
-        envelope,
+        workingEnvelope,
         start
       );
       if (planningResult.response) {
-        this.processed.set(envelope.requestId, planningResult.response);
-        this.appendMemory(envelope, text, planningResult.response);
+        this.processed.set(workingEnvelope.requestId, planningResult.response);
+        this.appendMemory(workingEnvelope, text, planningResult.response);
         return planningResult.response;
       }
 
       // Step 3: Tool Call - Execute the planned tool action
       if (!planningResult.toolExecution) {
         const response = { text: "I don't understand. Please try rephrasing." };
-        this.processed.set(envelope.requestId, response);
-        this.appendMemory(envelope, text, response);
+        this.processed.set(workingEnvelope.requestId, response);
+        this.appendMemory(workingEnvelope, text, response);
         return response;
       }
-      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, routingResult.memory, envelope, start);
+      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, routingResult.memory, workingEnvelope, start);
 
       // Step 4: Respond - Generate final response based on tool result and prepared templates
       const response = await this.respondStep(
@@ -131,15 +147,55 @@ export class Orchestrator {
         planningResult.failureResponse || "Tool execution failed",
         planningResult.preferToolResult ?? false,
         text,
-        envelope,
+        workingEnvelope,
         start
       );
 
       return response;
     } catch (error) {
+      if (dispatchedMenuEventId) {
+        this.observableMenuService?.markEventDispatchFailed(dispatchedMenuEventId, error);
+      }
       console.error("Error in handle method:", error);
       return { text: "Processing failed due to an error" };
     }
+  }
+
+  private resolveIngressEvent(envelope: Envelope): {
+    envelope: Envelope;
+    response?: Response;
+    dispatchedMenuEventId?: string;
+  } {
+    if (!this.observableMenuService) {
+      return { envelope };
+    }
+
+    const wecomClickEvent = readWeComClickEventContext(envelope);
+    if (!wecomClickEvent) {
+      return { envelope };
+    }
+
+    const handled = this.observableMenuService.handleWeComClickEvent(wecomClickEvent);
+    if (!handled.dispatchText) {
+      return {
+        envelope,
+        response: handled.replyText ? { text: handled.replyText } : { text: "" }
+      };
+    }
+
+    return {
+      envelope: {
+        ...envelope,
+        kind: "text",
+        text: handled.dispatchText,
+        meta: {
+          ...(envelope.meta ?? {}),
+          observable_menu_event_id: handled.event.id,
+          observable_menu_dispatch_text: handled.dispatchText
+        }
+      },
+      dispatchedMenuEventId: handled.event.id
+    };
   }
 
   // New step-based processing methods

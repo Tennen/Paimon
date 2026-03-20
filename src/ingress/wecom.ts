@@ -5,7 +5,7 @@ import { IngressAdapter } from "./types";
 import { SessionManager } from "../core/sessionManager";
 import { Envelope } from "../types";
 import { WeComMediaDownloader } from "../integrations/wecom/mediaDownloader";
-import { ObservableMenuService } from "../observable/menuService";
+import { buildWeComClickEventEnvelope } from "../integrations/wecom/eventEnvelope";
 
 const xmlParser = new XMLParser({
   ignoreAttributes: true,
@@ -16,12 +16,10 @@ const xmlParser = new XMLParser({
 export class WeComIngressAdapter implements IngressAdapter {
   private readonly token: string;
   private readonly mediaDownloader: WeComMediaDownloader;
-  private readonly observableMenuService: ObservableMenuService;
 
-  constructor(token?: string, mediaDownloader?: WeComMediaDownloader, observableMenuService?: ObservableMenuService) {
+  constructor(token?: string, mediaDownloader?: WeComMediaDownloader) {
     this.token = token ?? process.env.WECOM_TOKEN ?? "";
     this.mediaDownloader = mediaDownloader ?? new WeComMediaDownloader();
-    this.observableMenuService = observableMenuService ?? new ObservableMenuService();
   }
 
   register(app: Express, sessionManager: SessionManager): void {
@@ -94,58 +92,20 @@ export class WeComIngressAdapter implements IngressAdapter {
           return;
         }
 
-        const handled = this.observableMenuService.handleWeComClickEvent({
-          eventKey,
+        const envelope = buildWeComClickEventEnvelope({
+          requestId: `${fromUser}-${Date.now()}`,
           fromUser,
           toUser,
           agentId,
+          eventKey,
           receivedAt: new Date().toISOString()
-        });
-
-        if (!handled.dispatchText) {
-          if (!handled.replyText) {
-            res.status(200).send("success");
-            return;
-          }
-          const reply = buildTextReply(fromUser, toUser, handled.replyText);
-          res.type("application/xml").send(reply);
-          return;
-        }
-
-        const envelope = buildMenuEventEnvelope({
-          requestId: handled.event.id,
-          fromUser,
-          toUser,
-          agentId,
-          eventKey,
-          dispatchText: handled.dispatchText,
-          receivedAt: handled.event.receivedAt
         });
 
         try {
           const response = await sessionManager.enqueue(envelope);
-          if (hasResponseImages(response)) {
-            const unsupportedReply = buildTextReply(
-              fromUser,
-              toUser,
-              "当前通道不支持图片回复，请使用 WeCom bridge 通道。"
-            );
-            res.type("application/xml").send(unsupportedReply);
-            return;
-          }
-
-          const responseText = String(response.text ?? "").trim();
-          if (!responseText) {
-            res.status(200).send("success");
-            return;
-          }
-          const reply = buildTextReply(fromUser, toUser, responseText);
-          res.type("application/xml").send(reply);
-        } catch (error) {
-          this.observableMenuService.markEventDispatchFailed(handled.event.id, error);
-          console.error(`[wecom] menu event dispatch failed: ${eventKey}`, error);
-          const reply = buildTextReply(fromUser, toUser, "菜单事件处理失败，请稍后重试。");
-          res.type("application/xml").send(reply);
+          sendSyncWeComResponse(res, fromUser, toUser, response);
+        } catch {
+          res.status(500).send("internal error");
         }
         return;
       }
@@ -207,17 +167,7 @@ export class WeComIngressAdapter implements IngressAdapter {
 
       try {
         const response = await sessionManager.enqueue(envelope);
-        if (hasResponseImages(response)) {
-          const unsupportedReply = buildTextReply(
-            fromUser,
-            toUser,
-            "当前通道不支持图片回复，请使用 WeCom bridge 通道。"
-          );
-          res.type("application/xml").send(unsupportedReply);
-          return;
-        }
-        const reply = buildTextReply(fromUser, toUser, response.text);
-        res.type("application/xml").send(reply);
+        sendSyncWeComResponse(res, fromUser, toUser, response);
       } catch {
         res.status(500).send("internal error");
       }
@@ -246,32 +196,6 @@ function buildTextReply(toUser: string, fromUser: string, content: string): stri
   );
 }
 
-function buildMenuEventEnvelope(input: {
-  requestId: string;
-  fromUser: string;
-  toUser: string;
-  agentId?: string;
-  eventKey: string;
-  dispatchText: string;
-  receivedAt: string;
-}): Envelope {
-  return {
-    requestId: input.requestId,
-    source: "wecom",
-    sessionId: input.fromUser,
-    kind: "text",
-    text: input.dispatchText,
-    meta: {
-      callback_to_user: input.fromUser,
-      wecom_msg_type: "event",
-      wecom_event_type: "click",
-      wecom_event_key: input.eventKey,
-      wecom_agent_id: input.agentId || undefined
-    },
-    receivedAt: input.receivedAt
-  };
-}
-
 function hasResponseImages(response: { data?: { image?: unknown; images?: unknown[] } }): boolean {
   if (!response || !response.data) {
     return false;
@@ -280,6 +204,27 @@ function hasResponseImages(response: { data?: { image?: unknown; images?: unknow
     return true;
   }
   return Array.isArray(response.data.images) && response.data.images.length > 0;
+}
+
+function sendSyncWeComResponse(res: ExResponse, toUser: string, fromUser: string, response: { text?: string; data?: { image?: unknown; images?: unknown[] } }): void {
+  if (hasResponseImages(response)) {
+    const unsupportedReply = buildTextReply(
+      toUser,
+      fromUser,
+      "当前通道不支持图片回复，请使用 WeCom bridge 通道。"
+    );
+    res.type("application/xml").send(unsupportedReply);
+    return;
+  }
+
+  const responseText = String(response.text ?? "").trim();
+  if (!responseText) {
+    res.status(200).send("success");
+    return;
+  }
+
+  const reply = buildTextReply(toUser, fromUser, responseText);
+  res.type("application/xml").send(reply);
 }
 
 function rawXmlMiddleware(req: Request, res: ExResponse, next: () => void): void {
