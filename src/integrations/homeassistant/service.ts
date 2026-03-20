@@ -79,7 +79,7 @@ export class HomeAssistantToolService {
       return {
         ok: true,
         output: {
-          text: `已调用 ${resolvedDomain}.${parsed.service} -> ${resolved.entity.name || entityId} (${entityId})`,
+          text: "好的",
           ...(result.output && typeof result.output === "object" ? result.output as Record<string, unknown> : {})
         }
       };

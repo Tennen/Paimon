@@ -38,7 +38,7 @@ test("direct /ha call_service resolves friendly name to entity id and domain", a
   });
 
   assert.equal(result.ok, true);
-  assert.equal((result.output as { text?: string })?.text, "已调用 light.turn_on -> 客厅主灯 (light.living_room_main)");
+  assert.equal((result.output as { text?: string })?.text, "好的");
   assert.deepEqual((result.output as { data?: unknown })?.data, {
     method: "POST",
     path: "/api/services/light/turn_on",
