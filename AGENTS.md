@@ -15,6 +15,11 @@ This file defines hard constraints for coding agents working in this repository.
   - Transport adapters only (HTTP, WeCom callback, bridge stream, admin routes).
   - Parse/validate request and translate to internal envelope/service calls.
   - Do not embed external API client logic here.
+  - WeCom transport split must stay explicit:
+    - `src/ingress/wecom.ts` is the direct public WeCom callback ingress. It receives external WeCom HTTP/XML callbacks and returns synchronous callback replies.
+    - `src/ingress/wecomBridge.ts` is the local bridge client. It proactively connects to `WECOM_BRIDGE_URL` SSE, consumes bridge-delivered payloads, and sends outbound replies via `src/integrations/wecom/sender.ts`.
+    - `tools/wecom-bridge.go` / `tools/wecom-bridge.js` are the public bridge receivers/proxies. They accept external WeCom callbacks and expose bridge-side proxy endpoints.
+    - Do not treat `src/ingress/wecomBridge.ts` as another direct WeCom callback receiver; raw WeCom callback payload/protocol changes belong in `src/ingress/wecom.ts` or `tools/wecom-bridge.*` depending deployment mode.
 
 - `src/core/`
   - Orchestration and tool routing.

@@ -364,6 +364,9 @@ const server = http.createServer(async (req, res) => {
       toUser: msg.toUser,
       text: msg.content,
       msgType: msg.msgType,
+      event: msg.event,
+      eventKey: msg.eventKey,
+      agentId: msg.agentId,
       mediaId: msg.mediaId,
       picUrl: msg.picUrl,
       receivedAt: new Date().toISOString()
@@ -536,9 +539,12 @@ function parseWeComMessage(xml) {
   const doc = parseXml(xml);
   if (!doc) return null;
   const msgType = String(doc.MsgType || "");
+  const event = String(doc.Event || "");
+  const eventKey = String(doc.EventKey || "");
   const content = String(doc.Content || "");
   const fromUser = String(doc.FromUserName || "");
   const toUser = String(doc.ToUserName || "");
+  const agentId = String(doc.AgentID || doc.AgentId || "");
   const msgId = String(doc.MsgId || doc.MsgID || "");
   const mediaId = String(doc.MediaId || "");
   const picUrl = String(doc.PicUrl || "");
@@ -547,9 +553,12 @@ function parseWeComMessage(xml) {
 
   return {
     msgType,
+    event: event || "",
+    eventKey: eventKey || "",
     content: content || "",
     fromUser,
     toUser: toUser || "",
+    agentId: agentId || "",
     msgId: msgId || "",
     mediaId: mediaId || "",
     picUrl: picUrl || ""

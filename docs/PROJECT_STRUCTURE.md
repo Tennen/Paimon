@@ -104,6 +104,10 @@ data/              # Runtime data files
 
 ## WeCom Menu Admin And Callback Routing
 
+- WeCom transport is split across three entry points and should not be conflated:
+  - `src/ingress/wecom.ts`: direct public callback ingress for WeCom HTTP/XML requests.
+  - `src/ingress/wecomBridge.ts`: local bridge client that proactively connects to bridge SSE and uses active send APIs for outbound replies.
+  - `tools/wecom-bridge.go` / `tools/wecom-bridge.js`: public bridge receiver/proxy that accepts external WeCom callbacks and exposes proxy endpoints such as `/stream` and `/proxy/*`.
 - 企业微信菜单配置和事件日志保存在 `src/observable/menuService.ts`，持久化 key 为：
   - `observable.menu_config`
   - `observable.event_log`

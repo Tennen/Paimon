@@ -53,9 +53,13 @@ type bridgeState struct {
 type wecomXML struct {
 	XMLName      xml.Name `xml:"xml"`
 	MsgType      string   `xml:"MsgType"`
+	Event        string   `xml:"Event"`
+	EventKey     string   `xml:"EventKey"`
 	Content      string   `xml:"Content"`
 	FromUserName string   `xml:"FromUserName"`
 	ToUserName   string   `xml:"ToUserName"`
+	AgentID      string   `xml:"AgentID"`
+	AgentId      string   `xml:"AgentId"`
 	MsgId        string   `xml:"MsgId"`
 	MsgID        string   `xml:"MsgID"`
 	MediaId      string   `xml:"MediaId"`
@@ -65,9 +69,12 @@ type wecomXML struct {
 
 type wecomMessage struct {
 	MsgType  string
+	Event    string
+	EventKey string
 	Content  string
 	FromUser string
 	ToUser   string
+	AgentID  string
 	MsgID    string
 	MediaID  string
 	PicURL   string
@@ -351,6 +358,9 @@ func handleWeComPost(w http.ResponseWriter, r *http.Request, cfg bridgeConfig, s
 		"toUser":     msg.ToUser,
 		"text":       msg.Content,
 		"msgType":    msg.MsgType,
+		"event":      msg.Event,
+		"eventKey":   msg.EventKey,
+		"agentId":    msg.AgentID,
 		"mediaId":    msg.MediaID,
 		"picUrl":     msg.PicURL,
 		"receivedAt": time.Now().UTC().Format(time.RFC3339),
@@ -791,9 +801,12 @@ func parseWeComMessage(xmlText string) *wecomMessage {
 	}
 	return &wecomMessage{
 		MsgType:  msgType,
+		Event:    strings.TrimSpace(doc.Event),
+		EventKey: strings.TrimSpace(doc.EventKey),
 		Content:  strings.TrimSpace(doc.Content),
 		FromUser: fromUser,
 		ToUser:   strings.TrimSpace(doc.ToUserName),
+		AgentID:  firstNonEmpty(strings.TrimSpace(doc.AgentID), strings.TrimSpace(doc.AgentId)),
 		MsgID:    msgID,
 		MediaID:  strings.TrimSpace(doc.MediaId),
 		PicURL:   strings.TrimSpace(doc.PicUrl),
