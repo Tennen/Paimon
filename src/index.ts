@@ -23,6 +23,7 @@ import { sttRuntime } from "./engines/stt";
 import { registerSystemShortcuts } from "./core/systemShortcuts";
 import { ReAgentRuntime } from "./core/re-agent/runtime";
 import { ObservableMenuService } from "./observable/menuService";
+import { DirectInputMappingService } from "./config/directInputMappingService";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -36,6 +37,7 @@ const codexConfigService = new CodexConfigService(envStore);
 const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConfigService);
 const reAgentRuntime = new ReAgentRuntime();
 const observableMenuService = new ObservableMenuService();
+const directInputMappingService = new DirectInputMappingService();
 
 const registry = new ToolRegistry();
 loadTools(registry, { skillManager, evolutionService, reAgentRuntime });
@@ -61,7 +63,8 @@ const orchestrator = new Orchestrator(
   undefined,
   undefined,
   mainFlowLLMResolver,
-  observableMenuService
+  observableMenuService,
+  directInputMappingService
 );
 const sessionManager = new SessionManager(orchestrator);
 const scheduler = new SchedulerService(sessionManager);

@@ -15,6 +15,7 @@ import { SummaryVectorIndex } from "../memory/summaryVectorIndex";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { ObservableMenuService } from "../observable/menuService";
 import { buildWeComClickEventEnvelope } from "../integrations/wecom/eventEnvelope";
+import { ResolvedDirectInputMapping } from "../config/directInputMappingService";
 
 class StubSessionMemoryStore {
   public readonly readCalls: string[] = [];
@@ -125,7 +126,8 @@ function createOrchestrator(
   rawMemoryStore: StubRawMemoryStore | RawMemoryStore = new StubRawMemoryStore(),
   memoryCompactor: StubMemoryCompactor = new StubMemoryCompactor(),
   llmEngine: LLMEngine = new StubLLMEngine(),
-  observableMenuService?: Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">
+  observableMenuService?: Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">,
+  directInputResolver?: { resolveInput: (input: string) => ResolvedDirectInputMapping | null }
 ): Orchestrator {
   const toolRouter = new ToolRouter(registry);
   const skillManager = new SkillManager(path.resolve(process.cwd(), ".orchestrator-reagent-test-skill-missing"));
@@ -142,7 +144,8 @@ function createOrchestrator(
     memoryCompactor as unknown as MemoryCompactor,
     undefined,
     undefined,
-    observableMenuService
+    observableMenuService,
+    directInputResolver
   );
 }
 
@@ -219,6 +222,63 @@ test("routes normal dialogue memory to shared memory and global raw memory", asy
   assert.equal(memoryStore.appendCalls.length, 1);
   assert.equal(rawMemoryStore.appendCalls.length, 1);
   assert.equal(memoryCompactor.maybeCompactCalls.length, 1);
+});
+
+test("maps configured text to direct tool call while keeping original memory text", async () => {
+  const memoryStore = new StubSessionMemoryStore("mapped-memory");
+  const rawMemoryStore = new StubRawMemoryStore();
+  const memoryCompactor = new StubMemoryCompactor();
+  const registry = new ToolRegistry();
+  let seenInput = "";
+  registry.register({
+    name: "skill.market-analysis",
+    execute: async (_op, args) => {
+      seenInput = String(args.input ?? "");
+      return {
+        ok: true,
+        output: {
+          text: `handled:${seenInput}`
+        }
+      };
+    }
+  });
+  registry.registerDirectToolCall({
+    command: "/market",
+    tool: "skill.market-analysis",
+    op: "execute",
+    argName: "input",
+    argMode: "full_input",
+    preferToolResult: true
+  });
+
+  const orchestrator = createOrchestrator(
+    registry,
+    memoryStore,
+    rawMemoryStore,
+    memoryCompactor,
+    new StubLLMEngine(),
+    undefined,
+    {
+      resolveInput: (input: string) => {
+        if (input !== "开盘分析") {
+          return null;
+        }
+        return {
+          ruleId: "market-open",
+          pattern: "开盘分析",
+          matchMode: "exact",
+          targetText: "/market open"
+        };
+      }
+    }
+  );
+
+  const response = await orchestrator.handle(createEnvelope("req-mapped", "开盘分析"));
+
+  assert.equal(response.text, "handled:/market open");
+  assert.equal(seenInput, "/market open");
+  assert.match(memoryStore.appendCalls[0]?.entry ?? "", /user: 开盘分析/);
+  assert.equal(rawMemoryStore.appendCalls[0]?.user, "开盘分析");
 });
 
 test("supports local planning respond path from routing use_planning", async () => {

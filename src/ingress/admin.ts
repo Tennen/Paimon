@@ -67,6 +67,7 @@ import {
   upsertSearchEngineProfile
 } from "../integrations/search-engine/store";
 import { ObservableMenuService } from "../observable/menuService";
+import { DirectInputMappingService } from "../config/directInputMappingService";
 
 const execAsync = promisify(exec);
 
@@ -233,6 +234,7 @@ export class AdminIngressAdapter implements IngressAdapter {
   private readonly adminDistCandidates: string[];
   private readonly openAIQuotaManager: OpenAIQuotaManager;
   private readonly observableMenuService: ObservableMenuService;
+  private readonly directInputMappingService: DirectInputMappingService;
 
   constructor(
     envStore: EnvConfigStore,
@@ -251,6 +253,7 @@ export class AdminIngressAdapter implements IngressAdapter {
       : DEFAULT_ADMIN_DIST_CANDIDATES;
     this.openAIQuotaManager = new OpenAIQuotaManager();
     this.observableMenuService = new ObservableMenuService();
+    this.directInputMappingService = new DirectInputMappingService();
   }
 
   register(app: Express, _sessionManager: SessionManager): void {
@@ -490,6 +493,40 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(502).json({
           ok: false,
           error: (error as Error).message ?? "failed to publish wecom menu"
+        });
+      }
+    });
+
+    app.get("/admin/api/direct-input-mappings", (_req: Request, res: ExResponse) => {
+      try {
+        res.json({
+          ok: true,
+          ...this.directInputMappingService.getSnapshot()
+        });
+      } catch (error) {
+        res.status(500).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to read direct input mappings"
+        });
+      }
+    });
+
+    app.put("/admin/api/direct-input-mappings", (req: Request, res: ExResponse) => {
+      const payload = parseDirectInputMappingConfigPayload(req.body);
+      if (payload === null) {
+        res.status(400).json({ ok: false, error: "invalid direct input mapping payload" });
+        return;
+      }
+
+      try {
+        res.json({
+          ok: true,
+          ...this.directInputMappingService.saveConfig(payload)
+        });
+      } catch (error) {
+        res.status(400).json({
+          ok: false,
+          error: (error as Error).message ?? "failed to save direct input mappings"
         });
       }
     });
@@ -2042,6 +2079,15 @@ function parseWeComMenuConfigPayload(
     return undefined;
   }
 
+  return "config" in body ? body.config : rawBody;
+}
+
+function parseDirectInputMappingConfigPayload(rawBody: unknown): unknown | null {
+  if (!rawBody || typeof rawBody !== "object") {
+    return null;
+  }
+
+  const body = rawBody as Record<string, unknown>;
   return "config" in body ? body.config : rawBody;
 }
 

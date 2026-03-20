@@ -14,9 +14,11 @@ import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor } from "../memory/memoryCompactor";
 import { HybridMemoryService } from "../memory/hybridMemoryService";
 import { ObservableMenuService } from "../observable/menuService";
+import { DirectInputMappingService, ResolvedDirectInputMapping } from "../config/directInputMappingService";
 
 export type OrchestratorLLMResolver = (step: LLMExecutionStep) => LLMEngine;
 type ObservableMenuEventResolver = Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">;
+type DirectInputResolver = Pick<DirectInputMappingService, "resolveInput">;
 
 export class Orchestrator {
   private readonly processed = new Map<string, Response>();
@@ -33,6 +35,7 @@ export class Orchestrator {
   private readonly callbackDispatcher: CallbackDispatcher;
   private readonly asyncDirectQueues = new Map<string, Promise<void>>();
   private readonly observableMenuService?: ObservableMenuEventResolver;
+  private readonly directInputResolver?: DirectInputResolver;
 
   constructor(
     toolRouter: ToolRouter,
@@ -45,7 +48,8 @@ export class Orchestrator {
     memoryCompactor?: MemoryCompactor,
     hybridMemoryService?: HybridMemoryService,
     llmEngineResolver?: OrchestratorLLMResolver,
-    observableMenuService?: ObservableMenuEventResolver
+    observableMenuService?: ObservableMenuEventResolver,
+    directInputResolver?: DirectInputResolver
   ) {
     this.toolRouter = toolRouter;
     this.defaultLLMEngine = llmEngine;
@@ -59,6 +63,7 @@ export class Orchestrator {
     this.toolRegistry = toolRegistry;
     this.callbackDispatcher = callbackDispatcher;
     this.observableMenuService = observableMenuService;
+    this.directInputResolver = directInputResolver;
   }
 
   private resolveLLMEngine(step: LLMExecutionStep): LLMEngine {
@@ -102,8 +107,16 @@ export class Orchestrator {
         return menuEventResolution.response;
       }
 
-      const text = await sttRuntime.transcribe(workingEnvelope);
-      const directRouteResponse = await this.handleDirectCommandRoute(text, workingEnvelope, start, readSessionMemory);
+      const originalText = await sttRuntime.transcribe(workingEnvelope);
+      const mapped = this.resolveMappedInput(originalText);
+      const text = mapped?.targetText ?? originalText;
+      const directRouteResponse = await this.handleDirectCommandRoute(
+        text,
+        workingEnvelope,
+        start,
+        readSessionMemory,
+        originalText
+      );
       if (directRouteResponse) {
         return directRouteResponse;
       }
@@ -112,7 +125,7 @@ export class Orchestrator {
       const routingResult = await this.routingStep(text, workingEnvelope, start, readSessionMemory);
       if (routingResult.response) {
         this.processed.set(workingEnvelope.requestId, routingResult.response);
-        this.appendMemory(workingEnvelope, text, routingResult.response);
+        this.appendMemory(workingEnvelope, originalText, routingResult.response);
         return routingResult.response;
       }
 
@@ -127,7 +140,7 @@ export class Orchestrator {
       );
       if (planningResult.response) {
         this.processed.set(workingEnvelope.requestId, planningResult.response);
-        this.appendMemory(workingEnvelope, text, planningResult.response);
+        this.appendMemory(workingEnvelope, originalText, planningResult.response);
         return planningResult.response;
       }
 
@@ -135,7 +148,7 @@ export class Orchestrator {
       if (!planningResult.toolExecution) {
         const response = { text: "I don't understand. Please try rephrasing." };
         this.processed.set(workingEnvelope.requestId, response);
-        this.appendMemory(workingEnvelope, text, response);
+        this.appendMemory(workingEnvelope, originalText, response);
         return response;
       }
       const toolResult = await this.toolCallStep(planningResult.toolExecution, text, routingResult.memory, workingEnvelope, start);
@@ -146,7 +159,7 @@ export class Orchestrator {
         planningResult.successResponse || "Task completed successfully",
         planningResult.failureResponse || "Tool execution failed",
         planningResult.preferToolResult ?? false,
-        text,
+        originalText,
         workingEnvelope,
         start
       );
@@ -203,7 +216,8 @@ export class Orchestrator {
     text: string,
     envelope: Envelope,
     start: number,
-    readSessionMemory: () => string
+    readSessionMemory: () => string,
+    memoryText: string = text
   ): Promise<Response | null> {
     const shortcutMatched = this.toolRegistry.matchDirectShortcut(text);
     if (shortcutMatched) {
@@ -211,7 +225,7 @@ export class Orchestrator {
         const taskId = createAsyncTaskId(shortcutMatched.command);
         const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
         const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
-          this.executeAsyncDirectShortcut(shortcutMatched, text, envelope, taskEnvelope, Date.now())
+          this.executeAsyncDirectShortcut(shortcutMatched, text, envelope, taskEnvelope, Date.now(), memoryText)
         );
 
         try {
@@ -225,7 +239,7 @@ export class Orchestrator {
             text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
           };
           this.processed.set(envelope.requestId, fallback);
-          this.appendMemory(envelope, text, fallback);
+          this.appendMemory(envelope, memoryText, fallback);
           return fallback;
         }
 
@@ -238,7 +252,7 @@ export class Orchestrator {
               text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
             };
             this.processed.set(taskEnvelope.requestId, fallback);
-            this.appendMemory(taskEnvelope, text, fallback);
+            this.appendMemory(taskEnvelope, memoryText, fallback);
             await this.callbackDispatcher.send(taskEnvelope, fallback);
           });
 
@@ -252,11 +266,11 @@ export class Orchestrator {
           }
         };
         this.processed.set(envelope.requestId, acceptedResponse);
-        this.appendMemory(envelope, text, acceptedResponse);
+        this.appendMemory(envelope, memoryText, acceptedResponse);
         return acceptedResponse;
       }
 
-      return this.executeDirectShortcut(shortcutMatched, text, readSessionMemory(), envelope, start);
+      return this.executeDirectShortcut(shortcutMatched, text, readSessionMemory(), envelope, start, memoryText);
     }
 
     const matched = this.toolRegistry.matchDirectToolCall(text);
@@ -268,7 +282,7 @@ export class Orchestrator {
       const taskId = createAsyncTaskId(matched.command);
       const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
       const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
-        this.executeAsyncDirectToolCall(matched, text, envelope, taskEnvelope, Date.now())
+        this.executeAsyncDirectToolCall(matched, text, envelope, taskEnvelope, Date.now(), memoryText)
       );
 
       try {
@@ -282,7 +296,7 @@ export class Orchestrator {
           text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
         };
         this.processed.set(envelope.requestId, fallback);
-        this.appendMemory(envelope, text, fallback);
+        this.appendMemory(envelope, memoryText, fallback);
         return fallback;
       }
 
@@ -295,7 +309,7 @@ export class Orchestrator {
             text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
           };
           this.processed.set(taskEnvelope.requestId, fallback);
-          this.appendMemory(taskEnvelope, text, fallback);
+          this.appendMemory(taskEnvelope, memoryText, fallback);
           await this.callbackDispatcher.send(taskEnvelope, fallback);
         });
 
@@ -310,7 +324,7 @@ export class Orchestrator {
         }
       };
       this.processed.set(envelope.requestId, acceptedResponse);
-      this.appendMemory(envelope, text, acceptedResponse);
+      this.appendMemory(envelope, memoryText, acceptedResponse);
       return acceptedResponse;
     }
 
@@ -325,7 +339,7 @@ export class Orchestrator {
       "",
       "",
       matched.preferToolResult,
-      text,
+      memoryText,
       envelope,
       start
     );
@@ -356,7 +370,8 @@ export class Orchestrator {
     text: string,
     envelope: Envelope,
     taskEnvelope: Envelope,
-    start: number
+    start: number,
+    memoryText: string = text
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
     const latestMemory = this.readSessionMemory(envelope.sessionId);
     const toolExecution: ToolExecution = {
@@ -370,7 +385,7 @@ export class Orchestrator {
       "",
       "",
       matched.preferToolResult,
-      text,
+      memoryText,
       taskEnvelope,
       start
     );
@@ -382,7 +397,8 @@ export class Orchestrator {
     text: string,
     memory: string,
     envelope: Envelope,
-    start: number
+    start: number,
+    memoryText: string = text
   ): Promise<Response> {
     const result = await matched.execute({
       command: matched.command,
@@ -396,7 +412,7 @@ export class Orchestrator {
       "",
       "",
       matched.preferToolResult,
-      text,
+      memoryText,
       envelope,
       start
     );
@@ -407,7 +423,8 @@ export class Orchestrator {
     text: string,
     envelope: Envelope,
     taskEnvelope: Envelope,
-    start: number
+    start: number,
+    memoryText: string = text
   ): Promise<{ taskEnvelope: Envelope; response: Response }> {
     const latestMemory = this.readSessionMemory(envelope.sessionId);
     const response = await this.executeDirectShortcut(
@@ -415,9 +432,28 @@ export class Orchestrator {
       text,
       latestMemory,
       taskEnvelope,
-      start
+      start,
+      memoryText
     );
     return { taskEnvelope, response };
+  }
+
+  private resolveMappedInput(input: string): ResolvedDirectInputMapping | null {
+    if (!this.directInputResolver) {
+      return null;
+    }
+    try {
+      const resolved = this.directInputResolver.resolveInput(input);
+      if (resolved?.targetText) {
+        console.log(
+          `[Orchestrator] direct input mapped by rule=${resolved.ruleId} mode=${resolved.matchMode}: ${JSON.stringify(input)} -> ${JSON.stringify(resolved.targetText)}`
+        );
+      }
+      return resolved;
+    } catch (error) {
+      console.error("[Orchestrator] direct input mapping failed", error);
+      return null;
+    }
   }
 
   private async routingStep(

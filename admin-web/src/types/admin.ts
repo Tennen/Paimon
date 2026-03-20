@@ -313,6 +313,28 @@ export type WeComMenuSnapshot = {
   validationErrors: string[];
 };
 
+export type DirectInputMatchMode = "exact" | "fuzzy";
+
+export type DirectInputMappingRule = {
+  id: string;
+  name: string;
+  pattern: string;
+  targetText: string;
+  matchMode: DirectInputMatchMode;
+  enabled: boolean;
+};
+
+export type DirectInputMappingConfig = {
+  version: 1;
+  rules: DirectInputMappingRule[];
+  updatedAt: string;
+};
+
+export type DirectInputMappingSnapshot = {
+  config: DirectInputMappingConfig;
+  store: DataStoreDescriptor;
+};
+
 export type MarketFundHolding = {
   code: string;
   name: string;
@@ -735,7 +757,7 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "messages" | "wecom" | "market" | "topic" | "writing" | "evolution";
+export type MenuKey = "system" | "messages" | "direct_input" | "wecom" | "market" | "topic" | "writing" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",
@@ -754,6 +776,12 @@ export const EMPTY_TASK_FORM: TaskFormState = {
 export const DEFAULT_WECOM_MENU_CONFIG: WeComMenuConfig = {
   version: 1,
   buttons: [],
+  updatedAt: ""
+};
+
+export const DEFAULT_DIRECT_INPUT_MAPPING_CONFIG: DirectInputMappingConfig = {
+  version: 1,
+  rules: [],
   updatedAt: ""
 };
 

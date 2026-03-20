@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { DirectInputMappingSection } from "@/components/admin/DirectInputMappingSection";
 import { EvolutionSection } from "@/components/admin/EvolutionSection";
 import { FeatureMenu } from "@/components/admin/FeatureMenu";
 import { MarketSection } from "@/components/admin/MarketSection";
@@ -17,11 +18,15 @@ import { WritingOrganizerSection } from "@/components/admin/WritingOrganizerSect
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
+  DEFAULT_DIRECT_INPUT_MAPPING_CONFIG,
   DEFAULT_TOPIC_SUMMARY_CONFIG,
   DEFAULT_TOPIC_SUMMARY_STATE,
   DEFAULT_MARKET_ANALYSIS_CONFIG,
   DEFAULT_MARKET_PORTFOLIO,
   DEFAULT_WECOM_MENU_CONFIG,
+  DirectInputMappingConfig,
+  DirectInputMappingRule,
+  DirectInputMappingSnapshot,
   EMPTY_TASK_FORM,
   EMPTY_USER_FORM,
   EvolutionGoal,
@@ -139,6 +144,8 @@ export default function App() {
   const [taskForm, setTaskForm] = useState<TaskFormState>(EMPTY_TASK_FORM);
 
   const [activeMenu, setActiveMenu] = useState<MenuKey>("system");
+  const [directInputMappingConfig, setDirectInputMappingConfig] = useState<DirectInputMappingConfig>(DEFAULT_DIRECT_INPUT_MAPPING_CONFIG);
+  const [savingDirectInputMappings, setSavingDirectInputMappings] = useState(false);
   const [wecomMenuConfig, setWecomMenuConfig] = useState<WeComMenuConfig>(DEFAULT_WECOM_MENU_CONFIG);
   const [wecomMenuEvents, setWecomMenuEvents] = useState<WeComMenuEventRecord[]>([]);
   const [wecomMenuPublishPayload, setWecomMenuPublishPayload] = useState<WeComMenuPublishPayload | null>(null);
@@ -306,6 +313,7 @@ export default function App() {
       await Promise.all([
         loadConfig(),
         loadModels(),
+        loadDirectInputMappings(),
         loadWeComMenu(),
         loadUsers(),
         loadTasks(),
@@ -365,6 +373,11 @@ export default function App() {
     setWecomMenuEvents(normalizeWeComMenuEvents(payload.recentEvents));
     setWecomMenuPublishPayload(payload.publishPayload ?? null);
     setWecomMenuValidationErrors(normalizeStringList(payload.validationErrors));
+  }
+
+  async function loadDirectInputMappings(): Promise<void> {
+    const payload = await request<DirectInputMappingSnapshot>("/admin/api/direct-input-mappings");
+    setDirectInputMappingConfig(normalizeDirectInputMappingConfig(payload.config));
   }
 
   async function loadLLMProviders(): Promise<void> {
@@ -949,6 +962,25 @@ export default function App() {
       notifyError("保存企业微信菜单失败", error);
     } finally {
       setSavingWecomMenu(false);
+    }
+  }
+
+  async function handleSaveDirectInputMappings(): Promise<void> {
+    setSavingDirectInputMappings(true);
+    try {
+      const payload = await request<DirectInputMappingSnapshot>("/admin/api/direct-input-mappings", {
+        method: "PUT",
+        body: JSON.stringify({ config: directInputMappingConfig })
+      });
+      setDirectInputMappingConfig(normalizeDirectInputMappingConfig(payload.config));
+      setNotice({
+        type: "success",
+        title: "输入映射配置已保存"
+      });
+    } catch (error) {
+      notifyError("保存输入映射失败", error);
+    } finally {
+      setSavingDirectInputMappings(false);
     }
   }
 
@@ -2311,6 +2343,16 @@ export default function App() {
             />
           ) : null}
 
+          {activeMenu === "direct_input" ? (
+            <DirectInputMappingSection
+              config={directInputMappingConfig}
+              saving={savingDirectInputMappings}
+              onConfigChange={setDirectInputMappingConfig}
+              onRefresh={() => void loadDirectInputMappings()}
+              onSave={() => void handleSaveDirectInputMappings()}
+            />
+          ) : null}
+
           {activeMenu === "wecom" ? (
             <WeComMenuSection
               config={wecomMenuConfig}
@@ -2744,6 +2786,45 @@ function normalizeTopicProfileId(raw: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeDirectInputMappingConfig(
+  config: DirectInputMappingConfig | null | undefined
+): DirectInputMappingConfig {
+  const source = config ?? DEFAULT_DIRECT_INPUT_MAPPING_CONFIG;
+  const rawRules = Array.isArray(source.rules) ? source.rules : [];
+  const rules: DirectInputMappingRule[] = [];
+  const idSet = new Set<string>();
+
+  for (let i = 0; i < rawRules.length; i += 1) {
+    const rule = normalizeDirectInputMappingRule(rawRules[i], i);
+    if (idSet.has(rule.id)) {
+      continue;
+    }
+    idSet.add(rule.id);
+    rules.push(rule);
+  }
+
+  return {
+    version: 1,
+    rules,
+    updatedAt: String(source.updatedAt ?? "").trim()
+  };
+}
+
+function normalizeDirectInputMappingRule(
+  input: Partial<DirectInputMappingRule> | null | undefined,
+  index: number
+): DirectInputMappingRule {
+  const matchMode = input?.matchMode === "fuzzy" ? "fuzzy" : "exact";
+  return {
+    id: normalizeAdminLocalId(String(input?.id ?? `mapping-${index + 1}`), `mapping-${index + 1}`),
+    name: String(input?.name ?? "").trim(),
+    pattern: String(input?.pattern ?? "").trim(),
+    targetText: String(input?.targetText ?? "").trim(),
+    matchMode,
+    enabled: typeof input?.enabled === "boolean" ? input.enabled : true
+  };
 }
 
 function normalizeWeComMenuConfig(config: WeComMenuConfig | null | undefined): WeComMenuConfig {

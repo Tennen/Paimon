@@ -78,7 +78,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 ### 3. 工具与业务能力
 
-- `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照
+- `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照，支持 `/ha ...` direct command
 - `terminal`: 执行本机命令
 - `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
 - `writing-organizer`: 材料整理流水线（`Material -> Insight -> Document`），支持增量采集、结构化提炼、版本化 Markdown 文档与回滚
@@ -95,6 +95,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - Admin API 与 Admin Web 界面
 - 模型配置查看与更新
 - 定时任务和推送用户管理
+- Direct Input Mapping 配置（固定文本 -> 目标输入）
 - 企业微信应用 click 菜单配置、发布与最近 `EventKey` 回调查看
 - Topic Summary 配置管理
 - Writing Organizer 主题列表/详情查看与整理操作
@@ -294,6 +295,26 @@ WECOM_AGENT_ID=your_agent_id
 - 菜单发布走 `WECOM_BRIDGE_URL` 对应的 WeCom bridge，不直接从 Paimon 本机请求 `menu/create`
 - 如果企业微信应用启用了 IP 白名单，请把 bridge 部署在白名单允许的出口
 
+#### Direct Input Mapping（Admin 可配文本改写）
+
+可在 Admin 的“输入映射”页面配置一组固定文本规则，把普通输入直接改写成目标文本，再进入现有 orchestrator 处理链路。
+
+对应 Admin API：
+
+- `GET /admin/api/direct-input-mappings`
+- `PUT /admin/api/direct-input-mappings`
+
+说明：
+
+- 规则支持两种匹配模式：
+  - `exact`：标准化后完全相等
+  - `fuzzy`：输入文本包含该片段
+- 解析顺序为“先 exact，后 fuzzy；同模式下按列表顺序匹配”
+- 只处理普通文本，不覆盖用户已经输入的 slash 命令
+- 常见用法：
+  - `盘中分析` -> `/market midday`
+  - `看看门口` -> `/ha camera_snapshot camera.entryway`
+
 #### Evolution 推送通知（可选）
 
 ```env
@@ -326,6 +347,26 @@ STT_FAST_WHISPER_MODEL=small
 - 启动时会自动检查并安装 `fast-whisper` 依赖。
 - 当代理变量（`ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY`）使用 `socks*://` 时，会额外检查并安装 `httpx[socks]`（提供 `socksio`）。
 - 若关闭 `STT_FAST_WHISPER_AUTO_INSTALL`，请手动安装上述 Python 依赖。
+
+#### Home Assistant Direct Commands
+
+除了 LLM 通过 `homeassistant` tool 调用外，也支持直接用 `/ha` 触发固定动作：
+
+- `/ha call_service <service|domain.service> <friendly_name|entity_id>`
+- `/ha camera_snapshot <friendly_name|entity_id>`
+- `/ha get_state <friendly_name|entity_id>`
+
+示例：
+
+- `/ha call_service turn_on 客厅主灯`
+- `/ha call_service light.turn_off light.bedroom_main`
+- `/ha camera_snapshot 入户摄像头`
+
+说明：
+
+- `call_service` 默认会根据目标实体自动反推出 `domain`
+- 若同名 `friendly_name` 对应多个实体，会返回歧义错误，避免误控设备
+- `camera_snapshot` 会把 friendly name 解析为 `camera.*` 实体后抓图
 
 #### Market Analysis（基金主流程）
 

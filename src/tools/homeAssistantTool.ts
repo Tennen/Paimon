@@ -70,8 +70,27 @@ export function registerTool(registry: ToolRegistry, _deps: ToolDependencies): v
           param_descriptions: {
             entity_id: "Camera entity id."
           }
+        },
+        {
+          op: "direct_command",
+          description: "Execute direct `/ha ...` command syntax.",
+          params: {
+            input: "string"
+          },
+          param_descriptions: {
+            input: "Command body after `/ha`, such as `call_service turn_on 客厅主灯`."
+          }
         }
       ]
     }
   );
+
+  registry.registerDirectToolCall({
+    command: "/ha",
+    tool: "homeassistant",
+    op: "direct_command",
+    argName: "input",
+    argMode: "rest",
+    preferToolResult: true
+  });
 }

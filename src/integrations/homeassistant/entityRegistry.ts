@@ -43,6 +43,75 @@ export class HAEntityRegistry {
     return this.entities.has(entityId);
   }
 
+  get(entityId: string): HAEntityInfo | null {
+    const normalized = normalizeEntityLookupText(entityId);
+    if (!normalized) {
+      return null;
+    }
+    return this.entityInfo.find((item) => normalizeEntityLookupText(item.entity_id) === normalized) ?? null;
+  }
+
+  resolveEntityReference(
+    reference: string,
+    options: { preferredDomain?: string } = {}
+  ): HAEntityResolveResult {
+    const normalizedReference = normalizeEntityLookupText(reference);
+    if (!normalizedReference) {
+      return {
+        ok: false,
+        error: "Missing entity reference"
+      };
+    }
+
+    const direct = this.get(reference);
+    if (direct) {
+      return this.ensureDomainMatch(direct, options.preferredDomain);
+    }
+
+    const candidates = this.entityInfo.filter((item) => {
+      if (options.preferredDomain && item.domain !== options.preferredDomain) {
+        return false;
+      }
+      return buildLookupAliases(item).some((alias) => alias === normalizedReference);
+    });
+
+    if (candidates.length === 1) {
+      return {
+        ok: true,
+        entity: { ...candidates[0] }
+      };
+    }
+
+    if (candidates.length > 1) {
+      const labels = candidates
+        .slice(0, 5)
+        .map((item) => `${item.name} (${item.entity_id})`);
+      return {
+        ok: false,
+        error: `Entity reference is ambiguous: ${labels.join(", ")}`
+      };
+    }
+
+    const scopeHint = options.preferredDomain ? ` in domain ${options.preferredDomain}` : "";
+    return {
+      ok: false,
+      error: `Entity not found${scopeHint}: ${reference}`
+    };
+  }
+
+  private ensureDomainMatch(entity: HAEntityInfo, preferredDomain?: string): HAEntityResolveResult {
+    if (!preferredDomain || entity.domain === preferredDomain) {
+      return {
+        ok: true,
+        entity: { ...entity }
+      };
+    }
+    return {
+      ok: false,
+      error: `Entity ${entity.entity_id} is not in domain ${preferredDomain}`
+    };
+  }
+
   private connect(): void {
     const ws = new WebSocket(this.client.getWebSocketUrl());
     this.ws = ws;
@@ -181,3 +250,39 @@ export type HAEntityInfo = {
   device?: string;
   domain?: string;
 };
+
+export type HAEntityResolveResult =
+  | {
+      ok: true;
+      entity: HAEntityInfo;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+function buildLookupAliases(entity: HAEntityInfo): string[] {
+  const aliases = new Set<string>();
+  const name = normalizeEntityLookupText(entity.name);
+  const area = normalizeEntityLookupText(entity.area ?? "");
+  const device = normalizeEntityLookupText(entity.device ?? "");
+
+  if (name) {
+    aliases.add(name);
+  }
+  if (area && name) {
+    aliases.add(`${area} ${name}`);
+  }
+  if (device && name) {
+    aliases.add(`${device} ${name}`);
+  }
+
+  return Array.from(aliases);
+}
+
+function normalizeEntityLookupText(raw: string): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}

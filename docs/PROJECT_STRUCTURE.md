@@ -119,6 +119,18 @@ data/              # Runtime data files
   - `PUT /admin/api/wecom/menu`
   - `POST /admin/api/wecom/menu/publish`
 
+## Direct Input Mapping And `/ha` Direct Route
+
+- 通用“固定文本 -> 目标输入”配置保存在 `src/config/directInputMappingService.ts`，持久化 key 为：
+  - `direct-input.mappings`
+- Orchestrator 在 `src/core/orchestrator.ts` 中会先对普通文本执行这层映射，再进入现有 direct shortcut / direct toolcall 流程。
+- slash 命令本身不经过这层覆盖，避免 admin 配置拦截已有原生命令。
+- Admin API 入口在 `src/ingress/admin.ts`：
+  - `GET /admin/api/direct-input-mappings`
+  - `PUT /admin/api/direct-input-mappings`
+- Home Assistant 的 `/ha` direct toolcall 语法由 `src/tools/homeAssistantTool.ts` 注册，命令解析和真实执行在 `src/integrations/homeassistant/service.ts`。
+- `friendly_name|entity_id -> entity/domain` 的解析由 `src/integrations/homeassistant/entityRegistry.ts` 负责，保持 vendor/runtime 细节留在 integration 层。
+
 ## Market Admin API Entry Points
 
 - Market admin APIs are owned by `src/ingress/admin.ts` and must keep transport/input normalization concerns in ingress.
