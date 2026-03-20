@@ -1,7 +1,5 @@
 import { fetch } from "undici";
 
-const DEFAULT_WECOM_API_BASE_URL = "https://qyapi.weixin.qq.com";
-
 type TokenCache = {
   value: string;
   expiresAt: number;
@@ -38,7 +36,8 @@ export type WeComMenuClientConfig = {
   corpId: string;
   appSecret: string;
   agentId: string;
-  apiBaseUrl: string;
+  bridgeUrl: string;
+  bridgeToken: string;
 };
 
 export class WeComMenuClient {
@@ -50,28 +49,38 @@ export class WeComMenuClient {
       corpId: config?.corpId ?? process.env.WECOM_CORP_ID ?? "",
       appSecret: config?.appSecret ?? process.env.WECOM_APP_SECRET ?? "",
       agentId: config?.agentId ?? process.env.WECOM_AGENT_ID ?? "",
-      apiBaseUrl: normalizeBaseUrl(config?.apiBaseUrl ?? process.env.WECOM_API_BASE_URL ?? DEFAULT_WECOM_API_BASE_URL)
+      bridgeUrl: normalizeBridgeUrl(config?.bridgeUrl ?? process.env.WECOM_BRIDGE_URL ?? ""),
+      bridgeToken: config?.bridgeToken ?? process.env.WECOM_BRIDGE_TOKEN ?? ""
     };
   }
 
   async createMenu(payload: WeComMenuPublishPayload): Promise<void> {
+    if (!this.config.bridgeUrl) {
+      throw new Error("WECOM_BRIDGE_URL missing for menu publish");
+    }
+
     const token = await this.getToken();
-    const url = `${this.config.apiBaseUrl}/cgi-bin/menu/create?access_token=${encodeURIComponent(token)}&agentid=${encodeURIComponent(this.config.agentId)}`;
+    const url = this.config.bridgeUrl.replace(/\/$/, "") + "/proxy/menu/create";
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        ...(this.config.bridgeToken ? { Authorization: `Bearer ${this.config.bridgeToken}` } : {})
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        access_token: token,
+        agentid: this.config.agentId,
+        menu: payload
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`wecom menu create http ${response.status}`);
+      throw new Error(`wecom bridge menu create http ${response.status}`);
     }
 
     const data = (await response.json()) as WeComApiResponse;
     if ((data.errcode ?? 0) !== 0) {
-      throw new Error(`wecom menu create error ${data.errcode ?? "unknown"}: ${data.errmsg ?? ""}`);
+      throw new Error(`wecom bridge menu create error ${data.errcode ?? "unknown"}: ${data.errmsg ?? ""}`);
     }
   }
 
@@ -79,24 +88,35 @@ export class WeComMenuClient {
     if (!this.config.corpId || !this.config.appSecret || !this.config.agentId) {
       throw new Error("WECOM_CORP_ID/WECOM_APP_SECRET/WECOM_AGENT_ID missing");
     }
+    if (!this.config.bridgeUrl) {
+      throw new Error("WECOM_BRIDGE_URL missing for menu publish");
+    }
 
     const now = Date.now();
     if (this.tokenCache && this.tokenCache.expiresAt > now + 5000) {
       return this.tokenCache.value;
     }
 
-    const url = `${this.config.apiBaseUrl}/cgi-bin/gettoken?corpid=${encodeURIComponent(this.config.corpId)}&corpsecret=${encodeURIComponent(this.config.appSecret)}`;
+    const url = this.config.bridgeUrl.replace(/\/$/, "") + "/proxy/gettoken";
     const response = await fetch(url, {
-      method: "GET"
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.config.bridgeToken ? { Authorization: `Bearer ${this.config.bridgeToken}` } : {})
+      },
+      body: JSON.stringify({
+        corpid: this.config.corpId,
+        corpsecret: this.config.appSecret
+      })
     });
 
     if (!response.ok) {
-      throw new Error(`wecom gettoken http ${response.status}`);
+      throw new Error(`wecom bridge gettoken http ${response.status}`);
     }
 
     const data = (await response.json()) as TokenResponse;
     if (!data.access_token) {
-      throw new Error(`wecom gettoken error ${data.errcode ?? "unknown"}: ${data.errmsg ?? ""}`);
+      throw new Error(`wecom bridge gettoken error ${data.errcode ?? "unknown"}: ${data.errmsg ?? ""}`);
     }
 
     const ttlMs = (data.expires_in ?? 7200) * 1000;
@@ -108,10 +128,7 @@ export class WeComMenuClient {
   }
 }
 
-function normalizeBaseUrl(raw: string): string {
+function normalizeBridgeUrl(raw: string): string {
   const normalized = String(raw ?? "").trim();
-  if (!normalized) {
-    return DEFAULT_WECOM_API_BASE_URL;
-  }
   return normalized.replace(/\/+$/, "");
 }

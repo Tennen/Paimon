@@ -101,6 +101,9 @@ func main() {
 	mux.HandleFunc("/proxy/send", func(w http.ResponseWriter, r *http.Request) {
 		handleProxySend(w, r, cfg)
 	})
+	mux.HandleFunc("/proxy/menu/create", func(w http.ResponseWriter, r *http.Request) {
+		handleProxyMenuCreate(w, r, cfg)
+	})
 	mux.HandleFunc("/proxy/media/upload", func(w http.ResponseWriter, r *http.Request) {
 		handleProxyUpload(w, r, cfg)
 	})
@@ -478,6 +481,75 @@ func handleProxySend(w http.ResponseWriter, r *http.Request, cfg bridgeConfig) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
+}
+
+func handleProxyMenuCreate(w http.ResponseWriter, r *http.Request, cfg bridgeConfig) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !checkBridgeAuth(w, r, cfg) {
+		return
+	}
+
+	body, err := readBody(r)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("missing body"))
+		return
+	}
+	var payload struct {
+		AccessToken string          `json:"access_token"`
+		AgentID     string          `json:"agentid"`
+		Menu        json.RawMessage `json:"menu"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("invalid json"))
+		return
+	}
+	if payload.AccessToken == "" || payload.AgentID == "" || len(payload.Menu) == 0 {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("missing access_token/agentid/menu"))
+		return
+	}
+
+	endpoint := fmt.Sprintf(
+		"https://qyapi.weixin.qq.com/cgi-bin/menu/create?access_token=%s&agentid=%s",
+		url.QueryEscape(payload.AccessToken),
+		url.QueryEscape(payload.AgentID),
+	)
+	client := http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload.Menu))
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("menu create failed"))
+		return
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("menu create read failed"))
+		return
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(fmt.Sprintf("menu create http %d", resp.StatusCode)))
+		return
+	}
+
+	var result struct {
+		ErrCode int `json:"errcode"`
+	}
+	_ = json.Unmarshal(data, &result)
+	if result.ErrCode != 0 {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("menu create failed"))
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(data)
 }
 
 func handleProxyUpload(w http.ResponseWriter, r *http.Request, cfg bridgeConfig) {

@@ -126,6 +126,7 @@ Endpoints:
 - `GET /stream` (SSE stream for local agent)
 - `POST /proxy/gettoken` (forward gettoken to WeCom)
 - `POST /proxy/send` (forward send message to WeCom)
+- `POST /proxy/menu/create` (forward app menu create to WeCom)
 - `POST /proxy/media/upload` (forward media upload to WeCom, expects base64)
 - `POST /proxy/media/get` (forward media get from WeCom, returns base64)
 

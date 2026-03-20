@@ -291,6 +291,8 @@ WECOM_AGENT_ID=your_agent_id
 - Admin 里每个按钮都可以额外配置一段会送入 orchestrator 的命令或输入
 - 当某个 `EventKey` 配置了这段命令/输入时，回调会把它送入现有会话处理链路（例如 `/market close`）
 - 当该字段为空时，服务只记录该菜单事件，便于后续接真实 handler
+- 菜单发布走 `WECOM_BRIDGE_URL` 对应的 WeCom bridge，不直接从 Paimon 本机请求 `menu/create`
+- 如果企业微信应用启用了 IP 白名单，请把 bridge 部署在白名单允许的出口
 
 #### Evolution 推送通知（可选）
 
@@ -494,6 +496,10 @@ npm start
 - 包含图片的响应（如 `/market` 解释模式长图）仅支持 bridge 发送；直连回调通道不会降级为纯文本图片说明
 
 这类模式适合家庭网络、本地开发机或 NAS 环境。
+
+补充：
+
+- 菜单发布同样复用 WeCom bridge 的代理能力，因此企业微信有 IP 限制时，Admin 发布菜单也应经过 bridge
 
 ## `/re` 子 Agent 用法
 

@@ -107,7 +107,7 @@ data/              # Runtime data files
 - 企业微信菜单配置和事件日志保存在 `src/observable/menuService.ts`，持久化 key 为：
   - `observable.menu_config`
   - `observable.event_log`
-- 企业微信菜单发布 API client 在 `src/integrations/wecom/menuClient.ts`。
+- 企业微信菜单发布 API client 在 `src/integrations/wecom/menuClient.ts`，并通过 WeCom bridge 的 `/proxy/menu/create` 代理出口访问企业微信。
 - `src/ingress/wecom.ts` 现在除文本/语音外，还负责接收 `MsgType=event` + `Event=click` 的企业微信菜单回调，并将 `EventKey` 转成内部可分发事件。
 - Admin API 入口在 `src/ingress/admin.ts`：
   - `GET /admin/api/wecom/menu`

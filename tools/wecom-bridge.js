@@ -149,6 +149,45 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/proxy/menu/create") {
+    if (BRIDGE_TOKEN) {
+      const auth = req.headers.authorization || "";
+      if (auth !== `Bearer ${BRIDGE_TOKEN}`) {
+        res.writeHead(401);
+        res.end("unauthorized");
+        return;
+      }
+    }
+
+    const body = await readBody(req);
+    if (!body) {
+      res.writeHead(400);
+      res.end("missing body");
+      return;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      res.writeHead(400);
+      res.end("invalid json");
+      return;
+    }
+
+    try {
+      const data = await proxyCreateMenu(payload);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+      return;
+    } catch (err) {
+      res.writeHead(500);
+      console.log("wecom post menu create failed", err);
+      res.end(`menu create failed: ${(err && err.message) || "unknown"}`);
+      return;
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/proxy/media/upload") {
     if (BRIDGE_TOKEN) {
       const auth = req.headers.authorization || "";
@@ -401,6 +440,26 @@ async function proxyUploadMedia(payload) {
   const data = await res.json();
   if (data.errcode && data.errcode !== 0) {
     throw new Error(`upload error ${data.errcode}`);
+  }
+  return data;
+}
+
+async function proxyCreateMenu(payload) {
+  if (!payload || !payload.access_token || !payload.agentid || !payload.menu) {
+    throw new Error("missing access_token/agentid/menu");
+  }
+  const url = `https://qyapi.weixin.qq.com/cgi-bin/menu/create?access_token=${encodeURIComponent(payload.access_token)}&agentid=${encodeURIComponent(payload.agentid)}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload.menu)
+  });
+  if (!res.ok) {
+    throw new Error(`menu create http ${res.status}`);
+  }
+  const data = await res.json();
+  if (data.errcode && data.errcode !== 0) {
+    throw new Error(`menu create error ${data.errcode}`);
   }
   return data;
 }
