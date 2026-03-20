@@ -27,6 +27,7 @@ src/
     evolution-operator/
     homeassistant/
     market-analysis/
+    md2img/
     mcp/
     multiagent/
     openai/
@@ -34,7 +35,6 @@ src/
     system-maintenance/
     terminal/
     topic-summary/
-    user-message/
     writing-organizer/
     wecom/
   memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
@@ -61,7 +61,9 @@ data/              # Runtime data files
 - Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
 - Third-party protocol/client adapters -> `src/integrations/<domain>/`.
 - Shared codex execution/config/markdown-report adapters -> `src/integrations/codex/`.
-- User-facing message/media adapters (markdown-to-image, response media shaping) -> `src/integrations/user-message/`.
+- Markdown-to-image rendering pipeline -> `src/integrations/md2img/`.
+- Other user-facing message/media adapters -> `src/integrations/user-message/` when the repo still needs them.
+- System maintenance command runners for `/sync` `/build` `/restart` `/deploy` and admin repo operations -> `src/integrations/system-maintenance/`; build/deploy flows should install dependencies before `npm run build`.
 - Domain runtime exceptions under integrations are allowed only for explicit runtime domains:
   - `evolution-operator`
   - `topic-summary`
@@ -111,15 +113,15 @@ data/              # Runtime data files
 
 ## Market Analysis Runtime Notes
 
-- `src/integrations/market-analysis/` 现按能力分层：`fund/` 放基金分析主链路，`reporting/` 放 markdown 报告与长图输出 adapter，root 只保留命令入口、运行时编排、格式化与存储。
+- `src/integrations/market-analysis/` 现按能力分层：`fund/` 放基金分析主链路，`reporting/` 放 markdown 报告与图片输出 adapter，root 只保留命令入口、运行时编排、格式化与存储。
 - 基金主流程 prompt 由 `src/integrations/market-analysis/fund/fund_prompt_builder.ts` 统一组装，结构尽量对齐股票分析侧“核心结论 / 数据视角 / 舆情情报 / 执行计划”的决策仪表盘架构，但基金指标改为收益、回撤、相对基准、跟踪偏离、申赎/基金经理事件等基金口径。
 - `src/integrations/market-analysis/fund/fund_analysis_service.ts` 对单基金设置基础数据守卫：基金自身价格/净值序列抓取失败时，只保留 ingestion 审计与失败日志，直接跳过后续 feature/rule/LLM，避免把流程数据异常误判为高风险基金。
 - 基金新闻检索由 `src/integrations/market-analysis/fund/search_adapter.ts` 负责；未配置 `SERPAPI_KEY` 时会标记 `serpapi:disabled_no_key` 并保持 fail-open。
 - 全局搜索引擎 profile 存储在 `src/integrations/search-engine/store.ts`，持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
-- 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/user-message/markdownImageAdapter.ts` 渲染长图。两条链路都应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。
-- markdown 长图渲染适配器位于 `src/integrations/user-message/markdownImageAdapter.ts`，由各业务集成按需调用（例如 market/topic-summary）；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
+- 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/md2img/` 的 unified + Playwright 渲染链路输出移动端图片。两条链路都应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。
+- markdown 图片渲染模块位于 `src/integrations/md2img/`，固定目录为 `markdown/`、`render/`、`styles/` + `index.ts`；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
 
 ## Structural Change Checklist
 

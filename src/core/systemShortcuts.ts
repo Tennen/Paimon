@@ -12,7 +12,7 @@ export function registerSystemShortcuts(registry: ToolRegistry): void {
   registry.registerDirectShortcut({
     command: "/build",
     async: true,
-    acceptedText: "收到，开始执行项目构建，完成后回传结果。",
+    acceptedText: "收到，开始安装依赖并执行项目构建，完成后回传结果。",
     execute: async () => executeAction("build")
   });
 
@@ -26,7 +26,7 @@ export function registerSystemShortcuts(registry: ToolRegistry): void {
   registry.registerDirectShortcut({
     command: "/deploy",
     async: true,
-    acceptedText: "收到，开始执行同步 + 构建 + 重启，完成后回传结果。",
+    acceptedText: "收到，开始执行同步 + 安装依赖 + 构建 + 重启，完成后回传结果。",
     execute: async () => executeAction("deploy")
   });
 

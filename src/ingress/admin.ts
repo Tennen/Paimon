@@ -3275,9 +3275,18 @@ async function pullRepoWithRebase(): Promise<{
 
 async function buildProject(): Promise<{
   cwd: string;
+  installCommand: string;
+  installOutput: string;
   buildOutput: string;
 }> {
   const cwd = process.cwd();
+  const installCommand = "npm install";
+  const installResult = await runCommandWithOutput(installCommand);
+  if (!installResult.ok) {
+    const installOutput = joinCommandOutput(installResult);
+    throw new Error(`npm install failed:\n${installOutput || installResult.error || "unknown error"}`);
+  }
+
   const buildResult = await runCommandWithOutput("npm run build");
   if (!buildResult.ok) {
     const buildOutput = joinCommandOutput(buildResult);
@@ -3285,6 +3294,8 @@ async function buildProject(): Promise<{
   }
   return {
     cwd,
+    installCommand,
+    installOutput: joinCommandOutput(installResult),
     buildOutput: joinCommandOutput(buildResult)
   };
 }
@@ -3293,6 +3304,8 @@ async function pullBuildAndRestart(): Promise<{
   cwd: string;
   pullCommand: string;
   pullOutput: string;
+  installCommand: string;
+  installOutput: string;
   buildOutput: string;
   restartOutput: string;
 }> {
@@ -3303,6 +3316,8 @@ async function pullBuildAndRestart(): Promise<{
     cwd: buildResult.cwd,
     pullCommand: pullResult.pullCommand,
     pullOutput: pullResult.pullOutput,
+    installCommand: buildResult.installCommand,
+    installOutput: buildResult.installOutput,
     buildOutput: buildResult.buildOutput,
     restartOutput
   };

@@ -408,17 +408,17 @@ export function SystemSection(props: SystemSectionProps) {
         <Card>
           <CardHeader>
             <CardTitle>系统运维操作</CardTitle>
-            <CardDescription>先执行一键部署，或按需拆分执行同步、构建、重启</CardDescription>
+            <CardDescription>先执行一键部署，或按需拆分执行同步、安装依赖并构建、重启</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             <Button type="button" disabled={props.operationState.deployingRepo} onClick={props.onDeployRepo}>
-              {props.operationState.deployingRepo ? "部署中..." : "一键部署（gpr + build + pm2 restart）"}
+              {props.operationState.deployingRepo ? "部署中..." : "一键部署（gpr + npm install + build + pm2 restart）"}
             </Button>
             <Button type="button" variant="outline" disabled={props.operationState.pullingRepo} onClick={props.onPullRepo}>
               {props.operationState.pullingRepo ? "同步中..." : "同步远端代码（gpr）"}
             </Button>
             <Button type="button" variant="secondary" disabled={props.operationState.buildingRepo} onClick={props.onBuildRepo}>
-              {props.operationState.buildingRepo ? "构建中..." : "执行项目构建（npm run build）"}
+              {props.operationState.buildingRepo ? "构建中..." : "安装依赖并构建（npm install + npm run build）"}
             </Button>
             <Button type="button" variant="destructive" disabled={props.operationState.restarting} onClick={props.onRestartPm2}>
               {props.operationState.restarting ? "重启中..." : "重启应用进程（pm2）"}

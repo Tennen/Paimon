@@ -39,7 +39,7 @@ This file defines hard constraints for coding agents working in this repository.
   - Encapsulate HTTP/WebSocket/protocol details.
   - Default: no cross-domain orchestration/business workflow state.
   - Shared codex capabilities (CLI adapter/config/markdown report runner) belong in `src/integrations/codex/`.
-  - User-facing message/media adapters (for example markdown-to-image rendering) belong in `src/integrations/user-message/`.
+  - Dedicated markdown-to-image rendering runtime belongs in `src/integrations/md2img/`; other user-facing message/media adapters stay in `src/integrations/user-message/` when needed.
   - Runtime-domain exceptions currently allowed:
     - `src/integrations/evolution-operator/`
     - `src/integrations/topic-summary/`

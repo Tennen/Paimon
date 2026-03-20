@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import test from "node:test";
 import { CodexLLMEngine } from "../../engines/llm/codex";
+import { renderMarkdownToImages } from "../md2img";
 import { getStore, setStore } from "../../storage/persistence";
 import {
   MARKET_CONFIG_STORE,
@@ -9,20 +10,20 @@ import {
   MARKET_RUNS_STORE,
   MARKET_STATE_STORE
 } from "./defaults";
-import { renderMarkdownAsLongImage } from "../user-message/markdownImageAdapter";
 import { runAnalysis } from "./runtime";
 import { execute } from "./service";
 import { ensureStorage } from "./storage";
-
-const childProcess = require("node:child_process") as {
-  spawnSync: typeof import("node:child_process").spawnSync;
-};
 
 const ENV_KEYS = [
   "MARKET_ANALYSIS_LLM_ENABLED",
   "ENABLE_FUND_ANALYSIS",
   "MARKET_ANALYSIS_LLM_MODEL"
 ] as const;
+
+type MockProcessor = {
+  use: (plugin: unknown, options?: unknown) => MockProcessor;
+  process: (markdown: string) => Promise<string>;
+};
 
 function cloneJson<T>(input: T): T {
   return JSON.parse(JSON.stringify(input)) as T;
@@ -32,23 +33,6 @@ function createModuleNotFoundError(moduleName: string): NodeJS.ErrnoException {
   const error = new Error(`Cannot find module '${moduleName}'`) as NodeJS.ErrnoException;
   error.code = "MODULE_NOT_FOUND";
   return error;
-}
-
-function mockSpawnSyncFailure(): () => void {
-  const originalSpawnSync = childProcess.spawnSync;
-  childProcess.spawnSync = (() =>
-    ({
-      pid: 0,
-      output: [],
-      stdout: null,
-      stderr: null,
-      status: 1,
-      signal: null,
-      error: new Error("auto-install disabled in unit test")
-    }) as unknown as ReturnType<typeof childProcess.spawnSync>) as typeof childProcess.spawnSync;
-  return () => {
-    childProcess.spawnSync = originalSpawnSync;
-  };
 }
 
 async function withIsolatedMarketState(run: () => Promise<void>): Promise<void> {
@@ -106,24 +90,30 @@ async function withIsolatedMarketState(run: () => Promise<void>): Promise<void> 
   }
 }
 
-test("renderMarkdownAsLongImage should throw missing dependency error when remark is unavailable", { concurrency: false }, async () => {
+test("renderMarkdownToImages should throw missing dependency error when playwright is unavailable", { concurrency: false }, async () => {
   const originalRequire = Module.prototype.require;
-  const restoreSpawnSync = mockSpawnSyncFailure();
   Module.prototype.require = function patchedRequire(id: string): unknown {
-    if (id === "remark") {
+    if (id === "playwright") {
       throw createModuleNotFoundError(id);
+    }
+    if (id === "unified") {
+      return {
+        unified: () => createMockProcessor()
+      };
+    }
+    if (id === "remark-parse" || id === "remark-gfm" || id === "remark-rehype" || id === "rehype-stringify") {
+      return () => undefined;
     }
     return originalRequire.call(this, id);
   };
 
   try {
     await assert.rejects(
-      () => renderMarkdownAsLongImage({ markdown: "# hi" }),
-      /Missing dependency remark/
+      () => renderMarkdownToImages({ markdown: "# hi", mode: "long-image" }),
+      /Missing dependency playwright/
     );
   } finally {
     Module.prototype.require = originalRequire;
-    restoreSpawnSync();
   }
 });
 
@@ -155,14 +145,21 @@ test("runAnalysis should fail when codex markdown generation fails", { concurren
 test("service execute should not fallback to pure text when markdown image render fails", { concurrency: false }, async () => {
   const originalChat = CodexLLMEngine.prototype.chat;
   const originalRequire = Module.prototype.require;
-  const restoreSpawnSync = mockSpawnSyncFailure();
 
   (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
     return "# 今日结论\n- 测试报告";
   };
   Module.prototype.require = function patchedRequire(id: string): unknown {
-    if (id === "remark") {
+    if (id === "playwright") {
       throw createModuleNotFoundError(id);
+    }
+    if (id === "unified") {
+      return {
+        unified: () => createMockProcessor()
+      };
+    }
+    if (id === "remark-parse" || id === "remark-gfm" || id === "remark-rehype" || id === "rehype-stringify") {
+      return () => undefined;
     }
     return originalRequire.call(this, id);
   };
@@ -186,12 +183,12 @@ test("service execute should not fallback to pure text when markdown image rende
   } finally {
     CodexLLMEngine.prototype.chat = originalChat;
     Module.prototype.require = originalRequire;
-    restoreSpawnSync();
   }
 });
 
 test("service execute should return image-only response when explanation is enabled", { concurrency: false }, async () => {
   const originalChat = CodexLLMEngine.prototype.chat;
+  const originalRequire = Module.prototype.require;
   (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {
     return [
       "# 今日结论",
@@ -205,6 +202,20 @@ test("service execute should return image-only response when explanation is enab
       "## 执行清单（短期/中期）",
       "- 暂不调仓"
     ].join("\n");
+  };
+  Module.prototype.require = function patchedRequire(id: string): unknown {
+    if (id === "unified") {
+      return {
+        unified: () => createMockProcessor()
+      };
+    }
+    if (id === "remark-parse" || id === "remark-gfm" || id === "remark-rehype" || id === "rehype-stringify") {
+      return () => undefined;
+    }
+    if (id === "playwright") {
+      return createMockPlaywright(["market-image"]);
+    }
+    return originalRequire.call(this, id);
   };
 
   try {
@@ -223,5 +234,93 @@ test("service execute should return image-only response when explanation is enab
     });
   } finally {
     CodexLLMEngine.prototype.chat = originalChat;
+    Module.prototype.require = originalRequire;
   }
 });
+
+function createMockProcessor(): MockProcessor {
+  return {
+    use() {
+      return this;
+    },
+    async process(markdown: string): Promise<string> {
+      const safeMarkdown = String(markdown || "").replace(/[<&]/g, (value) => (value === "<" ? "&lt;" : "&amp;"));
+      return [
+        '<section data-block-id="b_1" data-block-type="heading" data-break-inside="avoid" data-keep-with-next="true"><h1>Mock</h1></section>',
+        `<section data-block-id="b_2" data-block-type="paragraph" data-break-inside="auto" data-keep-with-next="false"><p>${safeMarkdown}</p></section>`
+      ].join("");
+    }
+  };
+}
+
+function createMockPlaywright(screenshots: string[]): {
+  chromium: {
+    launch: () => Promise<{
+      newPage: () => Promise<{
+        setContent: () => Promise<void>;
+        evaluate: <T>(fn: () => T | Promise<T>) => Promise<T | undefined>;
+        waitForTimeout: () => Promise<void>;
+        locator: (selector: string) => unknown;
+      }>;
+      close: () => Promise<void>;
+    }>;
+  };
+} {
+  return {
+    chromium: {
+      launch: async () => ({
+        newPage: async () => ({
+          async setContent(): Promise<void> {
+            return undefined;
+          },
+          async evaluate<T>(pageFunction: () => T | Promise<T>): Promise<T | undefined> {
+            const source = String(pageFunction);
+            if (source.includes('querySelectorAll("[data-block-id]")')) {
+              return [
+                {
+                  id: "b_1",
+                  type: "heading",
+                  top: 24,
+                  height: 48,
+                  breakInside: "avoid",
+                  keepWithNext: true
+                },
+                {
+                  id: "b_2",
+                  type: "paragraph",
+                  top: 84,
+                  height: 120,
+                  breakInside: "auto",
+                  keepWithNext: false
+                }
+              ] as T;
+            }
+            return undefined;
+          },
+          async waitForTimeout(): Promise<void> {
+            return undefined;
+          },
+          locator(selector: string): unknown {
+            if (selector === ".mobile-canvas") {
+              return {
+                screenshot: async () => Buffer.from(screenshots[0] || "mock-image")
+              };
+            }
+            if (selector === ".mobile-page") {
+              return {
+                count: async () => screenshots.length,
+                nth: (index: number) => ({
+                  screenshot: async () => Buffer.from(screenshots[index] || `mock-page-${index + 1}`)
+                })
+              };
+            }
+            throw new Error(`Unexpected selector: ${selector}`);
+          }
+        }),
+        async close(): Promise<void> {
+          return undefined;
+        }
+      })
+    }
+  };
+}

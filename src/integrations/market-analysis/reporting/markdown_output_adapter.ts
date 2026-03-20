@@ -1,4 +1,5 @@
-import { renderMarkdownAsLongImage } from "../../user-message/markdownImageAdapter";
+import { Image } from "../../../types";
+import { renderMarkdownToImages } from "../../md2img";
 import { createMarketImagePipelineError } from "./pipeline_errors";
 
 type ExplanationRecord = Record<string, unknown>;
@@ -18,12 +19,11 @@ export function requireExplanationMarkdown(explanation: unknown, reason = "markd
 
 export async function renderMarketExplanationImage(input: { phase: string; markdown: string }) {
   try {
-    const image = await renderMarkdownAsLongImage({
+    const rendered = await renderMarkdownToImages({
       markdown: input.markdown,
-      title: buildMarketImageTitle(input.phase),
-      filenamePrefix: `market-${input.phase}`,
-      layoutPreset: "mobile"
+      mode: "long-image"
     });
+    const image = toUserImage(rendered.images[0], input.phase);
     if (!image || !image.data) {
       throw createMarketImagePipelineError("rendered image payload is empty");
     }
@@ -37,17 +37,6 @@ export async function renderMarketExplanationImage(input: { phase: string; markd
   }
 }
 
-function buildMarketImageTitle(phase: string): string {
-  const normalized = String(phase || "").trim().toLowerCase();
-  if (normalized === "midday") {
-    return "基金分析 盘中";
-  }
-  if (normalized === "close") {
-    return "基金分析 收盘";
-  }
-  return "基金分析";
-}
-
 function isRecord(value: unknown): value is ExplanationRecord {
   return Boolean(value) && typeof value === "object";
 }
@@ -57,4 +46,17 @@ function isMarketPipelineError(error: unknown): error is Error & { code: string 
     && typeof error === "object"
     && "code" in error
     && (error as { code?: unknown }).code === "MARKET_IMAGE_PIPELINE_FAILED";
+}
+
+function toUserImage(buffer: Buffer | undefined, phase: string): Image {
+  if (!buffer || buffer.length === 0) {
+    throw createMarketImagePipelineError("rendered image payload is empty");
+  }
+
+  const normalizedPhase = String(phase || "").trim().toLowerCase() || "report";
+  return {
+    data: buffer.toString("base64"),
+    contentType: "image/png",
+    filename: `market-${normalizedPhase}-${Date.now()}.png`
+  };
 }

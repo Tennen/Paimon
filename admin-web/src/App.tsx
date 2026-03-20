@@ -841,6 +841,8 @@ export default function App() {
       const payload = await request<{
         ok: boolean;
         cwd: string;
+        installCommand: string;
+        installOutput: string;
         buildOutput: string;
       }>("/admin/api/repo/build", {
         method: "POST",
@@ -849,9 +851,11 @@ export default function App() {
 
       setNotice({
         type: "success",
-        title: "项目构建完成",
+        title: "依赖安装 + 项目构建完成",
         text: [
           `工作目录: ${payload.cwd}`,
+          `执行命令: ${payload.installCommand}`,
+          payload.installOutput,
           payload.buildOutput
         ]
           .filter(Boolean)
@@ -872,6 +876,8 @@ export default function App() {
         cwd: string;
         pullCommand: string;
         pullOutput: string;
+        installCommand: string;
+        installOutput: string;
         buildOutput: string;
         restartOutput: string;
       }>("/admin/api/repo/deploy", {
@@ -886,6 +892,8 @@ export default function App() {
           `执行命令: ${payload.pullCommand}`,
           `工作目录: ${payload.cwd}`,
           payload.pullOutput,
+          `执行命令: ${payload.installCommand}`,
+          payload.installOutput,
           payload.buildOutput,
           payload.restartOutput
         ]

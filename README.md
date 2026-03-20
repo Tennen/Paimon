@@ -85,6 +85,8 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
 - `re-agent modules`: 子 agent 可调用 `rag`、`mcp`、`multiagent` 三类模块
 - `system shortcuts`: 内置 `/sync`、`/build`、`/restart`、`/deploy` 等运维捷径
+  - `/build` 会先执行 `npm install`，再执行 `npm run build`
+  - `/deploy` 会执行同步代码 + `npm install` + `npm run build` + `pm2 restart 0`
 
 ### 4. 运维与后台能力
 
@@ -109,7 +111,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 - `Ollama`、`llama-server`、OpenAI API 或 Codex CLI，作为 LLM provider
 - `Python 3`，如果要启用 `fast-whisper` 语音转写
-- `satori`、`@resvg/resvg-js`、`remark`，如果要启用 `/market` markdown 长图推送链路
+- `unified`、`remark-parse`、`remark-gfm`、`remark-rehype`、`rehype-stringify`、`playwright`，如果要启用 `/market` markdown 图片推送链路
 - `Home Assistant`，如果要启用智能家居能力
 - 企业微信应用配置，若要通过 WeCom 收发消息
 - 一台可公网访问的 VPS，若要使用 WeCom bridge 模式
@@ -120,18 +122,21 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 npm install
 ```
 
-若你基于旧依赖版本升级，请额外确认 market 生图依赖已安装：
+默认情况下，`npm install` 会通过 `postinstall` 自动执行 `playwright install chromium`。
+
+若你基于旧依赖版本升级、禁用了 install scripts，或需要手动修复浏览器依赖，可额外执行：
 
 ```bash
-npm install satori @resvg/resvg-js remark
+npm install unified remark-parse remark-gfm remark-rehype rehype-stringify playwright
+npm run playwright:install
 ```
 
-离线部署环境不会自动拉取缺失包，需预装上述依赖后再启动服务。
+离线部署环境不会自动拉取缺失包或浏览器，需预装上述依赖和 Chromium 后再启动服务。
 
 排障时可检查依赖是否被当前项目正确识别：
 
 ```bash
-npm ls satori @resvg/resvg-js remark
+npm ls playwright unified remark-parse remark-gfm remark-rehype rehype-stringify
 ```
 
 ### 2. 配置环境变量
@@ -313,15 +318,15 @@ STT_FAST_WHISPER_MODEL=small
 
 基金流程会在数据层做分层降级：新闻与 LLM 失败默认不终止主流程，但若单只基金的基础行情/净值序列获取失败，则直接跳过该基金后续特征、规则与 LLM 分析，并在日志中记录基础数据接口错误；这种情况代表流程数据异常，不会被误判为基金高风险。输出仍统一为结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。基金 prompt 与报告结构会尽量贴近股票分析侧的“核心结论 / 数据视角 / 舆情情报 / 执行计划”四块架构，只是把股票指标替换为基金适用指标（收益、回撤、相对基准、跟踪偏离、申赎与基金经理事件等）。
 
-当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染长图用于推送。
+当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染图片用于推送。
 
-解释模式下会先组装基金分析 markdown 上下文，再交给 codex 生成最终报告并渲染长图，不再维护股票旧链路或旧版补充段落。
+解释模式下会先组装基金分析 markdown 上下文，再交给 codex 生成最终报告并通过 unified + Playwright 管线渲染移动端图片，不再维护股票旧链路或旧版补充段落。
 
 该链路为强制模式，不再向下兼容纯文本解释回退：
 
 - `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
-- 缺失依赖识别覆盖 `MODULE_NOT_FOUND`、ESM `ERR_MODULE_NOT_FOUND` 与 “Cannot find package/module” 消息；运行环境缺少 `satori`、`@resvg/resvg-js` 或 `remark` 时会直接报错（不会发送纯文本兜底）
-- 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls satori @resvg/resvg-js remark`
+- 缺失依赖识别覆盖 `MODULE_NOT_FOUND`、ESM `ERR_MODULE_NOT_FOUND` 与 “Cannot find package/module” 消息；运行环境缺少 `playwright`、`unified` 或 remark/rehype 渲染依赖时会直接报错（不会发送纯文本兜底）
+- 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls playwright unified remark-parse remark-gfm remark-rehype rehype-stringify`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
 
 纯文本输出（例如 `--no-llm`）会按单基金展示：

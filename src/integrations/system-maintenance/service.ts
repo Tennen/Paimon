@@ -32,8 +32,10 @@ export async function executeAction(action: SystemMaintenanceAction): Promise<To
         ok: true,
         output: {
           text: [
-            "项目构建完成",
+            "依赖安装 + 项目构建完成",
             `cwd: ${result.cwd}`,
+            `install_command: ${result.installCommand}`,
+            result.installOutput ? `install_output:\n${result.installOutput}` : "",
             result.buildOutput ? `output:\n${result.buildOutput}` : ""
           ]
             .filter(Boolean)
@@ -64,10 +66,12 @@ export async function executeAction(action: SystemMaintenanceAction): Promise<To
       ok: true,
       output: {
         text: [
-          "同步 + 构建 + 重启完成",
+          "同步 + 安装依赖 + 构建 + 重启完成",
           `cwd: ${sync.cwd}`,
           `sync_command: ${sync.pullCommand}`,
           sync.pullOutput ? `sync_output:\n${sync.pullOutput}` : "",
+          `install_command: ${build.installCommand}`,
+          build.installOutput ? `install_output:\n${build.installOutput}` : "",
           build.buildOutput ? `build_output:\n${build.buildOutput}` : "",
           restart ? `restart_output:\n${restart}` : ""
         ]
@@ -87,9 +91,9 @@ export function buildHelpText(): string {
   return [
     "系统快捷命令：",
     "- /sync: 同步代码（优先 gpr，失败自动回退 git pull --rebase）",
-    "- /build: 执行项目构建（npm run build）",
+    "- /build: 安装依赖并构建项目（npm install + npm run build）",
     "- /restart: 重启服务（pm2 restart 0）",
-    "- /deploy: 同步 + 构建 + 重启",
+    "- /deploy: 同步 + 安装依赖 + 构建 + 重启",
     "- /system help: 查看帮助"
   ].join("\n");
 }
@@ -142,9 +146,18 @@ async function syncRepoWithRebase(): Promise<{
 
 async function buildProject(): Promise<{
   cwd: string;
+  installCommand: string;
+  installOutput: string;
   buildOutput: string;
 }> {
   const cwd = process.cwd();
+  const installCommand = "npm install";
+  const installResult = await runCommandWithOutput(installCommand);
+  if (!installResult.ok) {
+    const installOutput = joinCommandOutput(installResult);
+    throw new Error(`npm install failed:\n${installOutput || installResult.error || "unknown error"}`);
+  }
+
   const buildResult = await runCommandWithOutput("npm run build");
   if (!buildResult.ok) {
     const buildOutput = joinCommandOutput(buildResult);
@@ -152,6 +165,8 @@ async function buildProject(): Promise<{
   }
   return {
     cwd,
+    installCommand,
+    installOutput: joinCommandOutput(installResult),
     buildOutput: joinCommandOutput(buildResult)
   };
 }
