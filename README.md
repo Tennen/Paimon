@@ -424,9 +424,16 @@ Content-Type: application/json
 ```env
 ENABLE_FUND_ANALYSIS=true
 
-# 新闻检索（基金事件/公告/经理变更）优先走 SERPAPI
+# 新闻检索（基金事件/公告/经理变更）优先走全局 Search Engine Profiles
 SERPAPI_KEY=
 SERPAPI_ENDPOINT=https://serpapi.com/search.json
+QIANFAN_SEARCH_API_KEY=
+QIANFAN_SEARCH_ENDPOINT=https://qianfan.baidubce.com/v2/ai_search/web_search
+QIANFAN_SEARCH_SOURCE=baidu_search_v2
+QIANFAN_SEARCH_EDITION=standard
+QIANFAN_SEARCH_TOP_K=10
+QIANFAN_SEARCH_RECENCY_FILTER=month
+QIANFAN_SEARCH_SAFE_SEARCH=false
 
 # 基金分析默认跟随 market provider（可在 admin 的 Market Analysis 中直接选择 provider-id）
 MARKET_ANALYSIS_FUND_LOCAL_MODEL=
@@ -437,7 +444,7 @@ MARKET_ANALYSIS_GEMINI_MODEL=gemini-2.0-flash
 MARKET_ANALYSIS_GEMINI_TIMEOUT_MS=15000
 ```
 
-`SERPAPI_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置（优先使用 Provider 配置页统一管理）。
+`SERPAPI_KEY`、`QIANFAN_SEARCH_API_KEY` 和 `GEMINI_API_KEY` 建议通过 `.env` 配置（优先使用 System -> Search Engine Profiles / LLM Providers 统一管理）。
 
 Market Analysis timeout 优先级：
 
@@ -451,12 +458,15 @@ Market Analysis timeout 优先级：
 - 使用 codex 建议 `MARKET_ANALYSIS_LLM_TIMEOUT_MS>=60000`，避免常见 `codex timeout after 15000ms`。
 - `fund.llmRetryMax` 在 Admin 的 `Market Analysis` 配置中维护，值越大总执行时长越长，近似为 `(llmRetryMax + 1) * timeoutMs`。
 
-当 `SERPAPI_KEY` 未配置时，基金流程不会中断，会在审计链路中标记 `serpapi:disabled_no_key` 并继续走回退新闻源（若已配置 `MARKET_ANALYSIS_NEWS_API`）。
+当所选 Search Engine 未配置可用密钥、已禁用或请求失败时，基金流程不会中断；会在审计链路中记录 `search_status:*` 与 provider/source 信息，并继续走回退新闻源（若已配置 `MARKET_ANALYSIS_NEWS_API`）。
 
 Admin 侧新增全局 `Search Engine Profiles`（System 模块）：
 
-- 支持维护多套 SerpAPI 配置（`id/name/enabled/endpoint/apiKey/engine/hl/gl/num`）
+- 支持维护多套 Search Engine 配置，当前支持：
+- `serpapi`: `id/name/enabled/endpoint/apiKey/engine/hl/gl/num`
+- `qianfan`: `id/name/enabled/endpoint/apiKey/searchSource/edition/topK/recencyFilter/safeSearch`
 - `Market Analysis` 配置中可选择 `News Search Engine`，并单独配置业务侧 `fund.newsQuerySuffix`
+- Search Engine runtime 位于 `src/integrations/search-engine/`；`market-analysis` 只负责基金检索词规划与回退源，不再感知具体 provider 协议
 - 默认 profile 持久化在 `search-engines/profiles.json`
 
 相关接口：

@@ -14,7 +14,11 @@ test("buildRunResponseText should format fund output as dashboard-style sections
               { date: "2026-03-14", value: 4.12 },
               { date: "2026-03-17", value: 4.28 }
             ],
-            source_chain: ["serpapi:google_news"],
+            source_chain: [
+              "search_provider:serpapi",
+              "search_provider_variant:serpapi:google_news",
+              "search_status:hit"
+            ],
             errors: [],
             reference_context: {
               comparison_reference: "同类基金百分位",

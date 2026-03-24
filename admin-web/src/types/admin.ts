@@ -159,7 +159,7 @@ export type LLMProvidersPayload = {
   defaultProvider: LLMProviderProfile;
 };
 
-export type SearchEngineType = "serpapi";
+export type SearchEngineType = "serpapi" | "qianfan";
 
 export type SerpApiSearchEngineConfig = {
   endpoint: string;
@@ -170,13 +170,27 @@ export type SerpApiSearchEngineConfig = {
   num: number;
 };
 
-export type SearchEngineProfile = {
+export type QianfanSearchEngineConfig = {
+  endpoint: string;
+  apiKey: string;
+  searchSource: string;
+  edition: "standard" | "lite";
+  topK: number;
+  recencyFilter: "week" | "month" | "semiyear" | "year" | "";
+  safeSearch: boolean;
+};
+
+type BaseSearchEngineProfile<TType extends SearchEngineType, TConfig> = {
   id: string;
   name: string;
-  type: SearchEngineType;
+  type: TType;
   enabled: boolean;
-  config: SerpApiSearchEngineConfig;
+  config: TConfig;
 };
+
+export type SearchEngineProfile =
+  | BaseSearchEngineProfile<"serpapi", SerpApiSearchEngineConfig>
+  | BaseSearchEngineProfile<"qianfan", QianfanSearchEngineConfig>;
 
 export type SearchEngineStore = {
   version: number;

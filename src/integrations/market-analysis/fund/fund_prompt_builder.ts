@@ -1,6 +1,7 @@
 import { FundFeatureContext, FundNewsItem, FundRawContext } from "./fund_types";
 import { FundRuleOutput } from "./fund_rule_engine";
 import { buildFundReportContext } from "./fund_report_context";
+import { hasSearchStatus } from "../../search-engine/types";
 
 const PROMPT_VERSION = "fund_dashboard_v4";
 const MAX_NEWS_ITEMS = 8;
@@ -263,17 +264,23 @@ function inferNewsSearchStatus(raw: FundRawContext): string {
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
     return "manual_env_context";
   }
-  if (sourceChain.includes("serpapi:disabled_no_key")) {
-    return "serpapi_disabled_no_key";
+  if (sourceChain.some((item) => /^search_engine:.+:disabled$/.test(String(item || "")))) {
+    return "search_engine_disabled";
   }
-  if (sourceChain.includes("serpapi:google_news")) {
-    return raw.events.market_news.length > 0 ? "serpapi_hit" : "serpapi_no_hit";
-  }
-  if (errors.some((item) => /serpapi/i.test(String(item || "")))) {
-    return "serpapi_error";
+  if (hasSearchStatus(sourceChain, "disabled_no_key")) {
+    return "search_engine_disabled_no_key";
   }
   if (sourceChain.some((item) => String(item).startsWith("fallback:"))) {
     return raw.events.market_news.length > 0 ? "fallback_hit" : "fallback_no_hit";
+  }
+  if (hasSearchStatus(sourceChain, "hit")) {
+    return raw.events.market_news.length > 0 ? "search_engine_hit" : "search_engine_no_hit";
+  }
+  if (hasSearchStatus(sourceChain, "no_hit")) {
+    return "search_engine_no_hit";
+  }
+  if (hasSearchStatus(sourceChain, "error") || errors.length > 0) {
+    return "search_engine_error";
   }
   return "news_unavailable";
 }
@@ -458,14 +465,16 @@ function formatNewsSearchStatusLabel(value: string): string {
   switch (value) {
     case "manual_env_context":
       return "使用环境变量注入的新闻上下文";
-    case "serpapi_hit":
-      return "SerpAPI 已命中相关公开信息";
-    case "serpapi_no_hit":
-      return "SerpAPI 本次未命中相关公开信息";
-    case "serpapi_disabled_no_key":
-      return "SerpAPI 未配置可用密钥";
-    case "serpapi_error":
-      return "SerpAPI 请求失败";
+    case "search_engine_hit":
+      return "Search Engine 已命中相关公开信息";
+    case "search_engine_no_hit":
+      return "Search Engine 本次未命中相关公开信息";
+    case "search_engine_disabled":
+      return "Search Engine 当前已禁用";
+    case "search_engine_disabled_no_key":
+      return "Search Engine 未配置可用密钥";
+    case "search_engine_error":
+      return "Search Engine 请求失败";
     case "fallback_hit":
       return "已由回退新闻源补齐";
     case "fallback_no_hit":

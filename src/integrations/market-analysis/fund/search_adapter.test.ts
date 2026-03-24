@@ -1,24 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SearchEngineProfile } from "../../search-engine/store";
-import { buildSerpApiSearchPlans, normalizeFundNewsQuerySuffix } from "./search_adapter";
-
-function buildSerpApiProfile(engine = "google_news"): SearchEngineProfile {
-  return {
-    id: "serpapi-default",
-    name: "SerpAPI Default",
-    type: "serpapi",
-    enabled: true,
-    config: {
-      endpoint: "https://serpapi.com/search.json",
-      apiKey: "test-key",
-      engine,
-      hl: "zh-cn",
-      gl: "cn",
-      num: 10
-    }
-  };
-}
+import { buildFundNewsSearchPlans, normalizeFundNewsQuerySuffix } from "./search_adapter";
 
 test("normalizeFundNewsQuerySuffix should expand shorthand and inject fund-specific keywords", () => {
   const etfSuffix = normalizeFundNewsQuerySuffix("基金 公告 经理 申赎 风险", "沪深300ETF", "etf", "index");
@@ -44,8 +26,8 @@ test("normalizeFundNewsQuerySuffix should switch keywords for bond and qdii fund
   assert.match(qdiiSuffix, /汇率/);
 });
 
-test("buildSerpApiSearchPlans should include relaxed chinese fund queries and google news fallback", () => {
-  const plans = buildSerpApiSearchPlans(buildSerpApiProfile(), {
+test("buildFundNewsSearchPlans should include relaxed chinese fund queries and site-focused fallback", () => {
+  const plans = buildFundNewsSearchPlans({
     fundCode: "510300",
     fundName: "沪深300ETF",
     fundType: "etf",
@@ -54,21 +36,20 @@ test("buildSerpApiSearchPlans should include relaxed chinese fund queries and go
   });
 
   assert.ok(plans.length >= 4);
-  assert.equal(plans[0].engine, "google_news");
+  assert.equal(plans[0].label, "name_keywords");
   assert.match(plans[0].query, /沪深300ETF/);
   assert.doesNotMatch(plans[0].query, /510300/);
   assert.match(plans[0].query, /基金经理/);
   assert.match(plans[0].query, /申购/);
   assert.match(plans[0].query, /赎回/);
+  assert.equal(plans[0].recency, "month");
 
-  const googleFallback = plans.find((item) => item.label === "google_nws:name_keywords");
-  assert.ok(googleFallback);
-  assert.equal(googleFallback?.engine, "google");
-  assert.equal(googleFallback?.extraParams?.tbm, "nws");
-  assert.equal(googleFallback?.extraParams?.google_domain, "google.com.hk");
-  assert.equal(googleFallback?.extraParams?.tbs, "qdr:m");
+  const codePlan = plans.find((item) => item.label === "name_code_keywords");
+  assert.ok(codePlan);
+  assert.match(codePlan?.query || "", /510300/);
 
-  const eastmoneyFallback = plans.find((item) => item.label === "google_nws:eastmoney_focus");
-  assert.ok(eastmoneyFallback);
-  assert.match(eastmoneyFallback?.query || "", /site:eastmoney\.com/);
+  const eastmoneyPlan = plans.find((item) => item.label === "eastmoney_focus");
+  assert.ok(eastmoneyPlan);
+  assert.deepEqual(eastmoneyPlan?.sites, ["eastmoney.com"]);
+  assert.doesNotMatch(eastmoneyPlan?.query || "", /site:eastmoney\.com/);
 });

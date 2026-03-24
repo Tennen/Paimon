@@ -139,7 +139,11 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
               ],
               current_managers: ["张三", "李四"]
             },
-            source_chain: ["serpapi:google_news"],
+            source_chain: [
+              "search_provider:serpapi",
+              "search_provider_variant:serpapi:google_news",
+              "search_status:hit"
+            ],
             errors: [],
             account_context: {
               current_position: 100,

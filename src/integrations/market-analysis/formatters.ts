@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { buildFundReportContext, createEmptyFundReportContext } from "./fund/fund_report_context";
+import { hasSearchStatus, readSearchProviderDescriptor } from "../search-engine/types";
 import {
   MARKET_CONFIG_STORE,
   MARKET_PORTFOLIO_STORE,
@@ -497,18 +498,22 @@ function describeNewsStatus(rawContext) {
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
     return `使用环境变量新闻上下文 (${newsCount}条)`;
   }
-  const serpApiSource = sourceChain.find((item) => String(item || "").startsWith("serpapi:"));
-  if (serpApiSource) {
-    const serpApiEngine = String(serpApiSource).replace(/^serpapi:/, "") || "unknown";
-    return `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`;
+  const provider = readSearchProviderDescriptor(sourceChain);
+  if (hasSearchStatus(sourceChain, "disabled_no_key")) {
+    return `${provider?.label || "Search Engine"} 未配置可用密钥`;
+  }
+  if (provider && hasSearchStatus(sourceChain, "hit")) {
+    return `${provider.label} 命中 ${newsCount} 条`;
   }
   const fallbackSource = sourceChain.find((item) => String(item).startsWith("fallback:"));
   if (fallbackSource) {
     return `回退新闻源命中 ${newsCount} 条`;
   }
-  const serpError = errors.find((item) => /serpapi/i.test(String(item || "")));
-  if (serpError) {
-    return `SerpAPI 失败: ${serpError}`;
+  if (provider && hasSearchStatus(sourceChain, "no_hit")) {
+    return `${provider.label} 本次未命中明确新闻`;
+  }
+  if (provider && hasSearchStatus(sourceChain, "error") && errors.length > 0) {
+    return `${provider.label} 失败: ${errors[0]}`;
   }
 
   return `新闻命中 ${newsCount} 条`;

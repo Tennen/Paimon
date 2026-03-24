@@ -73,7 +73,13 @@ function buildRawContext(partial?: Partial<FundRawContext>): FundRawContext {
       risk_preference: "balanced",
       holding_horizon: "medium_term"
     },
-    source_chain: ["eastmoney:fund_lsjz", "eastmoney:fund_pingzhongdata", "serpapi:google_news"],
+    source_chain: [
+      "eastmoney:fund_lsjz",
+      "eastmoney:fund_pingzhongdata",
+      "search_provider:serpapi",
+      "search_provider_variant:serpapi:google_news",
+      "search_status:hit"
+    ],
     errors: [],
     ...(partial || {})
   };
@@ -166,7 +172,7 @@ test("fund user prompt should include natural-language sections and structured s
   assert.match(prompt, /### 决策仪表盘四块结构（必须吸收）/);
   assert.match(prompt, /持仓者\.\.\.；未持仓者\.\.\./);
   assert.match(prompt, /近7日未抓到高置信度公开新闻|1\. 沪深300ETF份额增长/);
-  assert.equal(newsAndEvents.news_search_status, "serpapi_hit");
+  assert.equal(newsAndEvents.news_search_status, "search_engine_hit");
   assert.equal((marketSnapshot.fund_series_summary as Record<string, unknown>).latest_value, 4.35);
   assert.deepEqual((marketSnapshot.raw_context_summary as Record<string, unknown>).reference_context, {
     comparison_reference: "同类基金百分位",

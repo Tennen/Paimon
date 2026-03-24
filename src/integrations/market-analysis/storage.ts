@@ -348,6 +348,9 @@ function normalizeMarketSearchEngine(raw: string): string {
   if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
     return "serpapi";
   }
+  if (["qianfan", "baidu", "baidu-search", "baidu_search", "qianfan-baidu", "qianfan_baidu"].includes(value)) {
+    return "qianfan";
+  }
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
 

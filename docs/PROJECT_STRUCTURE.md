@@ -147,8 +147,10 @@ data/              # Runtime data files
 - `src/integrations/market-analysis/` 现按能力分层：`fund/` 放基金分析主链路，`reporting/` 放 markdown 报告与图片输出 adapter，root 只保留命令入口、运行时编排、格式化与存储。
 - 基金主流程 prompt 由 `src/integrations/market-analysis/fund/fund_prompt_builder.ts` 统一组装，结构尽量对齐股票分析侧“核心结论 / 数据视角 / 舆情情报 / 执行计划”的决策仪表盘架构，但基金指标改为收益、回撤、相对基准、跟踪偏离、申赎/基金经理事件等基金口径。
 - `src/integrations/market-analysis/fund/fund_analysis_service.ts` 对单基金设置基础数据守卫：基金自身价格/净值序列抓取失败时，只保留 ingestion 审计与失败日志，直接跳过后续 feature/rule/LLM，避免把流程数据异常误判为高风险基金。
-- 基金新闻检索由 `src/integrations/market-analysis/fund/search_adapter.ts` 负责；未配置 `SERPAPI_KEY` 时会标记 `serpapi:disabled_no_key` 并保持 fail-open。
-- 全局搜索引擎 profile 存储在 `src/integrations/search-engine/store.ts`，持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
+- 基金新闻检索现分两层：`src/integrations/market-analysis/fund/search_adapter.ts` 只负责基金 query 规划、静态上下文与回退新闻源；真正的搜索引擎执行、provider 协议、结果归一化位于 `src/integrations/search-engine/`。
+- `src/integrations/search-engine/store.ts` 管全局 profile 持久化与 selector 解析，`src/integrations/search-engine/service.ts` 暴露统一执行入口，provider 实现当前包括 `serpapi.ts` 与 `qianfan.ts`。
+- 当所选 Search Engine 未配置可用密钥、被禁用或调用失败时，主流程保持 fail-open，并在 `source_chain/errors` 中记录通用 `search_status:*` 与 provider 信息。
+- 全局搜索引擎 profile 持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
 - 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/md2img/` 的 unified + Playwright 渲染链路输出移动端图片。两条链路都应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。

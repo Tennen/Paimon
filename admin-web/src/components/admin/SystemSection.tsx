@@ -27,6 +27,7 @@ import {
   LLMProviderStore,
   LLMProviderType,
   SearchEngineProfile,
+  SearchEngineType,
   SearchEngineStore
 } from "@/types/admin";
 
@@ -137,6 +138,7 @@ const MODULE_ITEMS: Array<{ key: SystemModule; label: string }> = [
 ];
 
 type SystemSearchEngineDraft = {
+  type: SearchEngineType;
   id: string;
   name: string;
   endpoint: string;
@@ -145,10 +147,16 @@ type SystemSearchEngineDraft = {
   hl: string;
   gl: string;
   num: string;
+  searchSource: string;
+  edition: "standard" | "lite";
+  topK: string;
+  recencyFilter: "week" | "month" | "semiyear" | "year" | "";
+  safeSearch: boolean;
   enabled: boolean;
 };
 
 const EMPTY_SEARCH_ENGINE_DRAFT: SystemSearchEngineDraft = {
+  type: "serpapi",
   id: "",
   name: "",
   endpoint: "https://serpapi.com/search.json",
@@ -157,6 +165,11 @@ const EMPTY_SEARCH_ENGINE_DRAFT: SystemSearchEngineDraft = {
   hl: "zh-cn",
   gl: "cn",
   num: "10",
+  searchSource: "baidu_search_v2",
+  edition: "standard",
+  topK: "10",
+  recencyFilter: "month",
+  safeSearch: false,
   enabled: true
 };
 
@@ -310,33 +323,32 @@ export function SystemSection(props: SystemSectionProps) {
 
   function startCreateSearchEngine(): void {
     setEditingSearchEngineId("");
-    setSearchEngineDraft({
-      ...EMPTY_SEARCH_ENGINE_DRAFT,
+    setSearchEngineDraft(createSearchEngineDraft(searchEngineDraft.type, {
       apiKey: searchEngineDraft.apiKey
-    });
+    }));
     setSearchEngineDraftError("");
   }
 
   function startEditSearchEngine(engine: SearchEngineProfile): void {
     setEditingSearchEngineId(engine.id);
-    setSearchEngineDraft({
-      id: engine.id,
-      name: engine.name,
-      endpoint: engine.config.endpoint,
-      apiKey: engine.config.apiKey,
-      engine: engine.config.engine,
-      hl: engine.config.hl,
-      gl: engine.config.gl,
-      num: String(engine.config.num),
-      enabled: engine.enabled
-    });
+    setSearchEngineDraft(convertSearchEngineToDraft(engine));
+    setSearchEngineDraftError("");
+  }
+
+  function handleSearchEngineTypeChange(nextTypeRaw: string): void {
+    const nextType = normalizeSearchEngineType(nextTypeRaw);
+    setSearchEngineDraft((prev) => createSearchEngineDraft(nextType, {
+      id: prev.id,
+      name: prev.name,
+      apiKey: prev.apiKey,
+      enabled: prev.enabled
+    }));
     setSearchEngineDraftError("");
   }
 
   function handleSaveSearchEngine(): void {
     const normalizedId = normalizeSearchEngineId(searchEngineDraft.id);
     const normalizedName = searchEngineDraft.name.trim();
-    const num = Number(searchEngineDraft.num);
     if (!normalizedId) {
       setSearchEngineDraftError("Search Engine id 不能为空");
       return;
@@ -345,12 +357,38 @@ export function SystemSection(props: SystemSectionProps) {
       setSearchEngineDraftError("Search Engine 名称不能为空");
       return;
     }
+
+    setSearchEngineDraftError("");
+    if (searchEngineDraft.type === "qianfan") {
+      const topK = Number(searchEngineDraft.topK);
+      if (!Number.isFinite(topK) || topK <= 0) {
+        setSearchEngineDraftError("topK 必须是正整数");
+        return;
+      }
+      props.onUpsertSearchEngine({
+        id: normalizedId,
+        name: normalizedName,
+        type: "qianfan",
+        enabled: searchEngineDraft.enabled,
+        config: {
+          endpoint: searchEngineDraft.endpoint.trim() || "https://qianfan.baidubce.com/v2/ai_search/web_search",
+          apiKey: searchEngineDraft.apiKey.trim(),
+          searchSource: searchEngineDraft.searchSource.trim() || "baidu_search_v2",
+          edition: searchEngineDraft.edition,
+          topK: Math.max(1, Math.min(50, Math.floor(topK))),
+          recencyFilter: searchEngineDraft.recencyFilter,
+          safeSearch: searchEngineDraft.safeSearch
+        }
+      });
+      return;
+    }
+
+    const num = Number(searchEngineDraft.num);
     if (!Number.isFinite(num) || num <= 0) {
       setSearchEngineDraftError("num 必须是正整数");
       return;
     }
 
-    setSearchEngineDraftError("");
     props.onUpsertSearchEngine({
       id: normalizedId,
       name: normalizedName,
@@ -921,7 +959,7 @@ export function SystemSection(props: SystemSectionProps) {
           <Card>
             <CardHeader>
               <CardTitle>Search Engine Profiles</CardTitle>
-              <CardDescription>全局搜索引擎配置（当前支持 SerpAPI），供各业务模块复用。</CardDescription>
+              <CardDescription>全局搜索引擎配置（支持 SerpAPI / 百度千帆），供各业务模块复用。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {searchEngineItems.length === 0 ? (
@@ -930,17 +968,17 @@ export function SystemSection(props: SystemSectionProps) {
                 searchEngineItems.map((engine) => (
                   <div key={engine.id} className="rounded-md border p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{engine.name}</span>
-                          <Badge variant="outline">{engine.type}</Badge>
-                          <Badge variant="secondary">{engine.id}</Badge>
-                          {engine.id === defaultSearchEngineId ? <Badge>default</Badge> : null}
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{engine.name}</span>
+                            <Badge variant="outline">{engine.type}</Badge>
+                            <Badge variant="secondary">{engine.id}</Badge>
+                            {engine.id === defaultSearchEngineId ? <Badge>default</Badge> : null}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {describeSearchEngineProfile(engine)}
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          endpoint={engine.config.endpoint} | enabled={String(engine.enabled)}
-                        </div>
-                      </div>
                       <div className="flex flex-wrap gap-2">
                         <Button type="button" size="sm" variant="outline" onClick={() => startEditSearchEngine(engine)}>
                           编辑
@@ -1008,11 +1046,25 @@ export function SystemSection(props: SystemSectionProps) {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label>Search Engine 类型</Label>
+                  <Select value={searchEngineDraft.type} onValueChange={handleSearchEngineTypeChange}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="serpapi">serpapi</SelectItem>
+                      <SelectItem value="qianfan">qianfan</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label>endpoint</Label>
                   <Input
                     value={searchEngineDraft.endpoint}
                     onChange={(event) => updateSearchEngineDraft("endpoint", event.target.value)}
-                    placeholder="https://serpapi.com/search.json"
+                    placeholder={searchEngineDraft.type === "qianfan"
+                      ? "https://qianfan.baidubce.com/v2/ai_search/web_search"
+                      : "https://serpapi.com/search.json"}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1021,43 +1073,111 @@ export function SystemSection(props: SystemSectionProps) {
                     type="password"
                     value={searchEngineDraft.apiKey}
                     onChange={(event) => updateSearchEngineDraft("apiKey", event.target.value)}
-                    placeholder="serpapi key"
+                    placeholder={searchEngineDraft.type === "qianfan" ? "qianfan api key" : "serpapi key"}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>engine</Label>
-                  <Input
-                    value={searchEngineDraft.engine}
-                    onChange={(event) => updateSearchEngineDraft("engine", event.target.value)}
-                    placeholder="google_news"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>num</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={searchEngineDraft.num}
-                    onChange={(event) => updateSearchEngineDraft("num", event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>hl</Label>
-                  <Input
-                    value={searchEngineDraft.hl}
-                    onChange={(event) => updateSearchEngineDraft("hl", event.target.value)}
-                    placeholder="zh-cn"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>gl</Label>
-                  <Input
-                    value={searchEngineDraft.gl}
-                    onChange={(event) => updateSearchEngineDraft("gl", event.target.value)}
-                    placeholder="cn"
-                  />
-                </div>
+                {searchEngineDraft.type === "qianfan" ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>searchSource</Label>
+                      <Input
+                        value={searchEngineDraft.searchSource}
+                        onChange={(event) => updateSearchEngineDraft("searchSource", event.target.value)}
+                        placeholder="baidu_search_v2"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>edition</Label>
+                      <Select
+                        value={searchEngineDraft.edition}
+                        onValueChange={(value) => updateSearchEngineDraft("edition", value as "standard" | "lite")}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="standard">standard</SelectItem>
+                          <SelectItem value="lite">lite</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>topK</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={searchEngineDraft.topK}
+                        onChange={(event) => updateSearchEngineDraft("topK", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>recencyFilter</Label>
+                      <Select
+                        value={searchEngineDraft.recencyFilter || "none"}
+                        onValueChange={(value) => updateSearchEngineDraft("recencyFilter", value === "none" ? "" : value as "week" | "month" | "semiyear" | "year")}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">none</SelectItem>
+                          <SelectItem value="week">week</SelectItem>
+                          <SelectItem value="month">month</SelectItem>
+                          <SelectItem value="semiyear">semiyear</SelectItem>
+                          <SelectItem value="year">year</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label>safeSearch</Label>
+                      <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
+                        <span className="text-sm text-muted-foreground">开启后会采用更严格的搜索结果过滤</span>
+                        <Switch
+                          checked={searchEngineDraft.safeSearch}
+                          onCheckedChange={(value) => updateSearchEngineDraft("safeSearch", value)}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>engine</Label>
+                      <Input
+                        value={searchEngineDraft.engine}
+                        onChange={(event) => updateSearchEngineDraft("engine", event.target.value)}
+                        placeholder="google_news"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>num</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={searchEngineDraft.num}
+                        onChange={(event) => updateSearchEngineDraft("num", event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>hl</Label>
+                      <Input
+                        value={searchEngineDraft.hl}
+                        onChange={(event) => updateSearchEngineDraft("hl", event.target.value)}
+                        placeholder="zh-cn"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>gl</Label>
+                      <Input
+                        value={searchEngineDraft.gl}
+                        onChange={(event) => updateSearchEngineDraft("gl", event.target.value)}
+                        placeholder="cn"
+                      />
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2 md:col-span-2">
                   <Label>enabled</Label>
                   <div className="flex min-h-10 items-center justify-between rounded-md border px-3">
@@ -1206,6 +1326,80 @@ function normalizeSearchEngineId(raw: string): string {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 64);
+}
+
+function normalizeSearchEngineType(raw: string): SearchEngineType {
+  return raw === "qianfan" ? "qianfan" : "serpapi";
+}
+
+function createSearchEngineDraft(
+  type: SearchEngineType,
+  overrides: Partial<SystemSearchEngineDraft> = {}
+): SystemSearchEngineDraft {
+  if (type === "qianfan") {
+    return {
+      ...EMPTY_SEARCH_ENGINE_DRAFT,
+      type: "qianfan",
+      endpoint: "https://qianfan.baidubce.com/v2/ai_search/web_search",
+      searchSource: "baidu_search_v2",
+      edition: "standard",
+      topK: "10",
+      recencyFilter: "month",
+      safeSearch: false,
+      engine: "",
+      hl: "",
+      gl: "",
+      num: "",
+      ...overrides
+    };
+  }
+
+  return {
+    ...EMPTY_SEARCH_ENGINE_DRAFT,
+    type: "serpapi",
+    endpoint: "https://serpapi.com/search.json",
+    engine: "google_news",
+    hl: "zh-cn",
+    gl: "cn",
+    num: "10",
+    ...overrides
+  };
+}
+
+function convertSearchEngineToDraft(profile: SearchEngineProfile): SystemSearchEngineDraft {
+  if (profile.type === "qianfan") {
+    return createSearchEngineDraft("qianfan", {
+      id: profile.id,
+      name: profile.name,
+      endpoint: profile.config.endpoint,
+      apiKey: profile.config.apiKey,
+      searchSource: profile.config.searchSource,
+      edition: profile.config.edition,
+      topK: String(profile.config.topK),
+      recencyFilter: profile.config.recencyFilter,
+      safeSearch: profile.config.safeSearch,
+      enabled: profile.enabled
+    });
+  }
+
+  return createSearchEngineDraft("serpapi", {
+    id: profile.id,
+    name: profile.name,
+    endpoint: profile.config.endpoint,
+    apiKey: profile.config.apiKey,
+    engine: profile.config.engine,
+    hl: profile.config.hl,
+    gl: profile.config.gl,
+    num: String(profile.config.num),
+    enabled: profile.enabled
+  });
+}
+
+function describeSearchEngineProfile(profile: SearchEngineProfile): string {
+  if (profile.type === "qianfan") {
+    return `endpoint=${profile.config.endpoint} | searchSource=${profile.config.searchSource} | enabled=${String(profile.enabled)}`;
+  }
+  return `endpoint=${profile.config.endpoint} | engine=${profile.config.engine} | enabled=${String(profile.enabled)}`;
 }
 
 function convertProviderToDraft(profile: LLMProviderProfile): SystemProviderDraft {

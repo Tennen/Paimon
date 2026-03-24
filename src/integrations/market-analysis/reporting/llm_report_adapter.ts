@@ -8,6 +8,7 @@ import {
 import type { RunFundAnalysisOutput } from "../fund/fund_analysis_service";
 import type { FundAnalysisOutput, MarketPhase, MarketPortfolio } from "../fund/fund_types";
 import { isCodexProvider, runCodexMarkdownReport } from "../../codex/markdownReport";
+import { hasSearchStatus, readSearchProviderDescriptor } from "../../search-engine/types";
 
 export type MarketReportPayload = {
   phase: MarketPhase;
@@ -66,7 +67,7 @@ export function buildMarketReportSystemPrompt(): string {
     "持仓逐项建议中，每个标的都按“核心结论 / 数据视角 / 情报观察 / 执行计划”四段展开，再补充结构化表格。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
     "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文，指标名称改成人能读懂的表达；宽表最多 4 列，超过时拆成多段短列表。",
-    "除专有名词（如 ETF、LOF、SerpAPI）外，尽量保持中文表达一致，避免中英文混写。",
+    "除专有名词（如 ETF、LOF、Search Engine 名称）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
     "关键信号值需转换为人类可读语言：",
     "- 决策动作: BUY→买入, ADD→加仓, HOLD→持有, REDUCE→减仓, REDEEM→赎回, WATCH→观察",
@@ -745,12 +746,14 @@ function describeNewsStatus(reportContext: FundReportContext): string {
   if (sourceChain.includes("env:MARKET_ANALYSIS_NEWS_CONTEXT")) {
     return `使用环境变量新闻上下文 (${newsCount}条)`;
   }
-  const serpApiSource = sourceChain.find((item) => item.startsWith("serpapi:"));
-  if (serpApiSource) {
-    const serpApiEngine = serpApiSource.replace(/^serpapi:/, "") || "unknown";
+  const provider = readSearchProviderDescriptor(sourceChain);
+  if (hasSearchStatus(sourceChain, "disabled_no_key")) {
+    return `${provider?.label || "Search Engine"} 未配置可用密钥`;
+  }
+  if (provider && hasSearchStatus(sourceChain, "hit")) {
     return newsCount > 0
-      ? `SerpAPI(${serpApiEngine}) 命中 ${newsCount} 条`
-      : `SerpAPI(${serpApiEngine}) 本次未命中明确新闻`;
+      ? `${provider.label} 命中 ${newsCount} 条`
+      : `${provider.label} 本次未命中明确新闻`;
   }
   const fallbackSource = sourceChain.find((item) => item.startsWith("fallback:"));
   if (fallbackSource) {
@@ -758,9 +761,11 @@ function describeNewsStatus(reportContext: FundReportContext): string {
       ? `回退新闻源命中 ${newsCount} 条`
       : "回退新闻源未命中";
   }
-  const serpError = errors.find((item) => /serpapi/i.test(item));
-  if (serpError) {
-    return `SerpAPI 失败: ${serpError}`;
+  if (provider && hasSearchStatus(sourceChain, "no_hit")) {
+    return `${provider.label} 本次未命中明确新闻`;
+  }
+  if (provider && hasSearchStatus(sourceChain, "error") && errors.length > 0) {
+    return `${provider.label} 失败: ${errors[0]}`;
   }
 
   if (newsCount === 0) {

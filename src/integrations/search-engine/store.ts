@@ -6,41 +6,32 @@ import {
   resolveDataPath,
   setStore
 } from "../../storage/persistence";
-
-export type SearchEngineType = "serpapi";
-
-export type SerpApiSearchEngineConfig = {
-  endpoint: string;
-  apiKey: string;
-  engine: string;
-  hl: string;
-  gl: string;
-  num: number;
-};
-
-export type SearchEngineProfile = {
-  id: string;
-  name: string;
-  type: SearchEngineType;
-  enabled: boolean;
-  config: SerpApiSearchEngineConfig;
-};
-
-export type SearchEngineStore = {
-  version: 1;
-  defaultEngineId: string;
-  engines: SearchEngineProfile[];
-};
+import type {
+  QianfanSearchEngineConfig,
+  QianfanSearchEngineProfile,
+  SearchEngineProfile,
+  SearchEngineStore,
+  SearchEngineType,
+  SearchRecencyFilter,
+  SerpApiSearchEngineConfig,
+  SerpApiSearchEngineProfile
+} from "./types";
 
 const SEARCH_ENGINE_STORE = DATA_STORE.SEARCH_ENGINES;
 const LEGACY_MARKET_SEARCH_ENGINE_FILE = resolveDataPath("market-analysis/search-engines.json");
 
-const DEFAULT_ENGINE_ID = "serpapi-default";
-const DEFAULT_ENDPOINT = "https://serpapi.com/search.json";
-const DEFAULT_ENGINE = "google_news";
-const DEFAULT_HL = "zh-cn";
-const DEFAULT_GL = "cn";
-const DEFAULT_NUM = 10;
+const DEFAULT_SERPAPI_ENGINE_ID = "serpapi-default";
+const DEFAULT_SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
+const DEFAULT_SERPAPI_ENGINE = "google_news";
+const DEFAULT_SERPAPI_HL = "zh-cn";
+const DEFAULT_SERPAPI_GL = "cn";
+const DEFAULT_SERPAPI_NUM = 10;
+const DEFAULT_QIANFAN_ENGINE_ID = "qianfan-default";
+const DEFAULT_QIANFAN_ENDPOINT = "https://qianfan.baidubce.com/v2/ai_search/web_search";
+const DEFAULT_QIANFAN_SOURCE = "baidu_search_v2";
+const DEFAULT_QIANFAN_EDITION = "standard";
+const DEFAULT_QIANFAN_TOP_K = 10;
+const DEFAULT_QIANFAN_RECENCY = "month";
 
 let searchEngineStoreRegistered = false;
 
@@ -84,7 +75,7 @@ export function getDefaultSearchEngineProfile(): SearchEngineProfile {
   if (selected) {
     return selected;
   }
-  return store.engines[0] ?? createDefaultSearchEngineProfileFromEnv();
+  return store.engines[0] ?? buildDefaultSearchEngineProfilesFromEnv()[0];
 }
 
 export function upsertSearchEngineProfile(input: unknown): SearchEngineStore {
@@ -160,6 +151,13 @@ export function resolveSearchEngineSelector(raw: unknown): string {
     return serpApiEngine?.id ?? resolveDefaultEngineId(store);
   }
 
+  if (normalized === "qianfan") {
+    const qianfanEngine = store.engines.find((item) => item.type === "qianfan" && item.enabled)
+      ?? store.engines.find((item) => item.type === "qianfan")
+      ?? store.engines[0];
+    return qianfanEngine?.id ?? resolveDefaultEngineId(store);
+  }
+
   if (store.engines.some((item) => item.id === normalized)) {
     return normalized;
   }
@@ -191,7 +189,12 @@ function readLegacyMarketSearchEngineStore(): SearchEngineStore | null {
       return null;
     }
     return normalized;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[SearchEngine][store] legacy_migration_failed`
+      + ` file=${LEGACY_MARKET_SEARCH_ENGINE_FILE} fallback=default_store error=${message}`
+    );
     return null;
   }
 }
@@ -200,31 +203,66 @@ function resolveDefaultEngineId(store: SearchEngineStore): string {
   if (store.defaultEngineId && store.engines.some((item) => item.id === store.defaultEngineId)) {
     return store.defaultEngineId;
   }
-  return store.engines[0]?.id ?? DEFAULT_ENGINE_ID;
+  return store.engines[0]?.id ?? DEFAULT_SERPAPI_ENGINE_ID;
 }
 
 function createDefaultSearchEngineStoreFromEnv(): SearchEngineStore {
-  const profile = createDefaultSearchEngineProfileFromEnv();
+  const engines = buildDefaultSearchEngineProfilesFromEnv();
   return {
     version: 1,
-    defaultEngineId: profile.id,
-    engines: [profile]
+    defaultEngineId: engines[0].id,
+    engines
   };
 }
 
-function createDefaultSearchEngineProfileFromEnv(): SearchEngineProfile {
+function buildDefaultSearchEngineProfilesFromEnv(): SearchEngineProfile[] {
+  const serpApi = createDefaultSerpApiSearchEngineProfileFromEnv();
+  const qianfan = createDefaultQianfanSearchEngineProfileFromEnv();
+
+  if (serpApi.config.apiKey && qianfan.config.apiKey) {
+    return [serpApi, qianfan];
+  }
+
+  if (qianfan.config.apiKey) {
+    return [qianfan, serpApi];
+  }
+
+  return [serpApi];
+}
+
+function createDefaultSerpApiSearchEngineProfileFromEnv(): SerpApiSearchEngineProfile {
   return {
-    id: DEFAULT_ENGINE_ID,
+    id: DEFAULT_SERPAPI_ENGINE_ID,
     name: "SerpAPI Default",
     type: "serpapi",
     enabled: true,
     config: {
-      endpoint: normalizeUrlOrDefault(process.env.SERPAPI_ENDPOINT, DEFAULT_ENDPOINT),
+      endpoint: normalizeUrlOrDefault(process.env.SERPAPI_ENDPOINT, DEFAULT_SERPAPI_ENDPOINT),
       apiKey: normalizeText(process.env.SERPAPI_KEY),
-      engine: DEFAULT_ENGINE,
-      hl: DEFAULT_HL,
-      gl: DEFAULT_GL,
-      num: DEFAULT_NUM
+      engine: DEFAULT_SERPAPI_ENGINE,
+      hl: DEFAULT_SERPAPI_HL,
+      gl: DEFAULT_SERPAPI_GL,
+      num: DEFAULT_SERPAPI_NUM
+    }
+  };
+}
+
+function createDefaultQianfanSearchEngineProfileFromEnv(): QianfanSearchEngineProfile {
+  return {
+    id: DEFAULT_QIANFAN_ENGINE_ID,
+    name: "Qianfan Default",
+    type: "qianfan",
+    enabled: true,
+    config: {
+      endpoint: normalizeUrlOrDefault(process.env.QIANFAN_SEARCH_ENDPOINT, DEFAULT_QIANFAN_ENDPOINT),
+      apiKey: normalizeText(process.env.QIANFAN_SEARCH_API_KEY),
+      searchSource: normalizeText(process.env.QIANFAN_SEARCH_SOURCE) || DEFAULT_QIANFAN_SOURCE,
+      edition: normalizeEdition(process.env.QIANFAN_SEARCH_EDITION),
+      topK: clampInt(process.env.QIANFAN_SEARCH_TOP_K, DEFAULT_QIANFAN_TOP_K, 1, 50),
+      recencyFilter: normalizeRecencyFilter(
+        normalizeText(process.env.QIANFAN_SEARCH_RECENCY_FILTER) || DEFAULT_QIANFAN_RECENCY
+      ),
+      safeSearch: parseBooleanOrDefault(process.env.QIANFAN_SEARCH_SAFE_SEARCH, false)
     }
   };
 }
@@ -242,7 +280,7 @@ function normalizeSearchEngineStore(input: unknown): SearchEngineStore {
   });
 
   if (engines.length === 0) {
-    engines.push(createDefaultSearchEngineProfileFromEnv());
+    engines.push(...buildDefaultSearchEngineProfilesFromEnv());
   }
 
   const defaultEngineIdRaw = normalizeEngineId(source.defaultEngineId);
@@ -272,6 +310,16 @@ function normalizeSearchEngineProfile(input: unknown, index: number): SearchEngi
     ? source.config as Record<string, unknown>
     : source;
 
+  if (type === "qianfan") {
+    return {
+      id,
+      name,
+      type,
+      enabled,
+      config: normalizeQianfanConfig(configSource)
+    };
+  }
+
   return {
     id,
     name,
@@ -283,12 +331,27 @@ function normalizeSearchEngineProfile(input: unknown, index: number): SearchEngi
 
 function normalizeSerpApiConfig(source: Record<string, unknown>): SerpApiSearchEngineConfig {
   return {
-    endpoint: normalizeUrlOrDefault(source.endpoint, DEFAULT_ENDPOINT),
+    endpoint: normalizeUrlOrDefault(source.endpoint, DEFAULT_SERPAPI_ENDPOINT),
     apiKey: normalizeText(source.apiKey),
-    engine: normalizeText(source.engine) || DEFAULT_ENGINE,
-    hl: normalizeText(source.hl) || DEFAULT_HL,
-    gl: normalizeText(source.gl) || DEFAULT_GL,
-    num: clampInt(source.num, DEFAULT_NUM, 1, 20)
+    engine: normalizeText(source.engine) || DEFAULT_SERPAPI_ENGINE,
+    hl: normalizeText(source.hl) || DEFAULT_SERPAPI_HL,
+    gl: normalizeText(source.gl) || DEFAULT_SERPAPI_GL,
+    num: clampInt(source.num, DEFAULT_SERPAPI_NUM, 1, 20)
+  };
+}
+
+function normalizeQianfanConfig(source: Record<string, unknown>): QianfanSearchEngineConfig {
+  const recencyRaw = source.recencyFilter ?? source.searchRecencyFilter ?? source.search_recency_filter;
+  return {
+    endpoint: normalizeUrlOrDefault(source.endpoint, DEFAULT_QIANFAN_ENDPOINT),
+    apiKey: normalizeText(source.apiKey),
+    searchSource: normalizeText(source.searchSource ?? source.search_source) || DEFAULT_QIANFAN_SOURCE,
+    edition: normalizeEdition(source.edition),
+    topK: clampInt(source.topK ?? source.top_k, DEFAULT_QIANFAN_TOP_K, 1, 50),
+    recencyFilter: recencyRaw === ""
+      ? ""
+      : normalizeRecencyFilter(recencyRaw),
+    safeSearch: parseBooleanOrDefault(source.safeSearch ?? source.safe_search, false)
   };
 }
 
@@ -296,6 +359,9 @@ function normalizeEngineType(raw: unknown): SearchEngineType {
   const value = String(raw ?? "").trim().toLowerCase();
   if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
     return "serpapi";
+  }
+  if (["qianfan", "baidu", "baidu-search", "baidu_search", "qianfan-baidu", "qianfan_baidu"].includes(value)) {
+    return "qianfan";
   }
   return "serpapi";
 }
@@ -307,6 +373,9 @@ function normalizeSearchEngineSelector(raw: unknown): string {
   }
   if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
     return "serpapi";
+  }
+  if (["qianfan", "baidu", "baidu-search", "baidu_search", "qianfan-baidu", "qianfan_baidu"].includes(value)) {
+    return "qianfan";
   }
   return normalizeEngineId(value);
 }
@@ -349,6 +418,18 @@ function parseBooleanOrDefault(raw: unknown, fallback: boolean): boolean {
 
 function normalizeText(raw: unknown): string {
   return String(raw ?? "").trim();
+}
+
+function normalizeEdition(raw: unknown): "standard" | "lite" {
+  return String(raw ?? "").trim().toLowerCase() === "lite" ? "lite" : "standard";
+}
+
+function normalizeRecencyFilter(raw: unknown): SearchRecencyFilter | "" {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (value === "week" || value === "month" || value === "semiyear" || value === "year") {
+    return value;
+  }
+  return "";
 }
 
 function clampInt(raw: unknown, fallback: number, min: number, max: number): number {
