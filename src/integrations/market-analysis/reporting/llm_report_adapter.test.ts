@@ -15,6 +15,8 @@ test("buildMarketReportSystemPrompt should require dashboard-style markdown repo
   assert.match(prompt, /宽表最多 4 列/);
   assert.match(prompt, /素材包/);
   assert.match(prompt, /核心结论 \/ 数据视角 \/ 情报观察 \/ 执行计划/);
+  assert.match(prompt, /不要为了简短主动省略/);
+  assert.match(prompt, /内部校准口径/);
 });
 
 test("buildMarketReportSourceMarkdown should include fund dashboard context", () => {
@@ -239,6 +241,7 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
   assert.match(sourceMarkdown, /#### 核心结论/);
   assert.match(sourceMarkdown, /当前动作: 持有/);
   assert.match(sourceMarkdown, /一句话判断: 保持仓位，等待趋势确认。/);
+  assert.match(sourceMarkdown, /信号概览: 信号偏积极，证据支撑尚可/);
   assert.match(sourceMarkdown, /#### 数据视角/);
   assert.match(sourceMarkdown, /净值快照: 基金最新值 4\.28 \(2026-03-17\)；同类百分位 88\.2 \(2026-03-17\)；基金近60日区间 4\.05 - 4\.28/);
   assert.match(sourceMarkdown, /收益表现: 近1日回报\+0\.45%；近5日回报\+1\.56%；近20日回报\+1\.23%；近60日回报\+3\.45%；近120日回报\+6\.78%/);
@@ -254,7 +257,7 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
   assert.match(sourceMarkdown, /新闻检索: SerpAPI\(google_news\) 命中 1 条/);
   assert.match(sourceMarkdown, /#### 执行计划/);
   assert.match(sourceMarkdown, /操作建议: 保持持有/);
-  assert.match(sourceMarkdown, /规则约束: 禁止动作 buy；风控标记 subscription_redemption_restriction；规则调整分 61分/);
+  assert.match(sourceMarkdown, /规则约束: 当前不宜做 买入；需要留意 存在申购赎回限制；规则倾向 偏稳健/);
   assert.match(sourceMarkdown, /持仓背景: 当前持仓 100；持仓成本 4\.2；估算市值 428；浮动盈亏 \+1\.9%；可用预算 1000；风险偏好 均衡；持有周期 中期/);
   assert.match(sourceMarkdown, /检查清单: /);
   assert.match(sourceMarkdown, /### 组合层判断/);

@@ -2,6 +2,13 @@
 import { buildFundReportContext, createEmptyFundReportContext } from "./fund/fund_report_context";
 import { hasSearchStatus, readSearchProviderDescriptor } from "../search-engine/types";
 import {
+  describeSignalStrength,
+  formatActionLabel,
+  formatActionList,
+  formatInvestorReadableList,
+  formatRuleFlagList
+} from "./readable_labels";
+import {
   MARKET_CONFIG_STORE,
   MARKET_PORTFOLIO_STORE,
   MARKET_RUNS_STORE,
@@ -106,13 +113,13 @@ export function buildRunResponseText(result) {
       const code = String(dashboard.fund_code || "").trim();
       const name = String(dashboard.fund_name || "").trim();
       const label = name && code ? `${name}(${code})` : (name || code || "-");
-      const decision = String(dashboard.decision_type || "watch").trim();
+      const decision = formatActionLabel(dashboard.decision_type || "watch");
       const score = Number.isFinite(Number(dashboard.sentiment_score))
         ? Math.round(Number(dashboard.sentiment_score))
-        : 0;
+        : null;
       const confidence = Number.isFinite(Number(dashboard.confidence))
-        ? Number(dashboard.confidence).toFixed(2)
-        : "0.00";
+        ? Number(dashboard.confidence)
+        : null;
       const conclusion = dashboard.core_conclusion && dashboard.core_conclusion.one_sentence
         ? String(dashboard.core_conclusion.one_sentence).trim()
         : "未提供";
@@ -129,14 +136,14 @@ export function buildRunResponseText(result) {
       const metricSummary = buildFundMetricSummary(dashboard, reportContext);
       const newsStatus = describeNewsStatus(reportContext);
       const newsHeadline = pickTopNewsHeadline(reportContext);
-      const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
+      const risks = formatInvestorReadableList(dashboard.risk_alerts, 3);
       const intelligenceSummary = buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, newsHeadline);
       const executionContext = buildFundExecutionContext(dashboard, reportContext);
       const checklist = buildFundChecklistText(dashboard, reportContext);
 
       lines.push(`- ${label}`);
       lines.push(`  核心结论: ${decision}。${conclusion}`);
-      lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号强弱=${score}/100，置信度=${confidence}`);
+      lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号概览=${describeSignalStrength(score, confidence)}`);
       lines.push(`  情报观察: ${intelligenceSummary.length > 0 ? intelligenceSummary.join("；") : (risks.length > 0 ? risks.join("；") : "暂无新增重点风险")}`);
       if (actionSuggestion || positionChange || executionContext) {
         lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}${executionContext ? `；${executionContext}` : ""}`);
@@ -284,7 +291,7 @@ function buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, news
   const events = reportContext && reportContext.events ? reportContext.events : {};
   const reference = reportContext && reportContext.reference_context ? reportContext.reference_context : {};
   const holdings = reportContext && reportContext.holdings_style ? reportContext.holdings_style : {};
-  const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
+  const riskAlerts = formatInvestorReadableList(dashboard && dashboard.risk_alerts, 3);
 
   if (riskAlerts.length > 0) {
     summary.push(`风险提示=${riskAlerts.join("；")}`);
@@ -327,14 +334,14 @@ function buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, news
 function buildFundExecutionContext(dashboard, reportContext) {
   const segments = [];
   const ruleTrace = dashboard && dashboard.rule_trace ? dashboard.rule_trace : {};
-  const blockedActions = summarizeTextList(ruleTrace.blocked_actions, 3);
-  const ruleFlags = summarizeTextList(ruleTrace.rule_flags, 3);
+  const blockedActions = formatActionList(ruleTrace.blocked_actions, "");
+  const ruleFlags = formatRuleFlagList(ruleTrace.rule_flags, "");
   const positionContext = buildPositionContext(reportContext);
 
   if (blockedActions || ruleFlags) {
     segments.push(`规则约束=${joinMetricSegments([
-      blockedActions ? `禁止${blockedActions}` : "",
-      ruleFlags ? `风控标记${ruleFlags}` : ""
+      blockedActions ? `当前不宜做${blockedActions}` : "",
+      ruleFlags ? `需要留意${ruleFlags}` : ""
     ])}`);
   }
   if (positionContext) {

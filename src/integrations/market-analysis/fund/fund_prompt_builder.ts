@@ -2,6 +2,12 @@ import { FundFeatureContext, FundNewsItem, FundRawContext } from "./fund_types";
 import { FundRuleOutput } from "./fund_rule_engine";
 import { buildFundReportContext } from "./fund_report_context";
 import { hasSearchStatus } from "../../search-engine/types";
+import {
+  describeEvidenceStrength,
+  describeRuleTilt,
+  formatActionList,
+  formatRuleFlagList
+} from "../readable_labels";
 
 const PROMPT_VERSION = "fund_dashboard_v4";
 const MAX_NEWS_ITEMS = 8;
@@ -20,6 +26,8 @@ export function buildFundSystemPrompt(): string {
     "分析架构请尽量向“决策仪表盘”靠拢：核心结论、数据透视、舆情情报、作战计划四块必须清晰分工。",
     "虽然输出是 FundDecisionDashboard JSON，但字段语义必须对应这四块：core_conclusion=核心结论，data_perspective=数据透视，risk_alerts=舆情风险看板，action_plan=作战计划。",
     "核心结论、风险提示、执行建议要写成自然中文，不要照抄字段名、枚举值或程序化描述。",
+    "只要输入里给出了可用数值、排名、日期或事件，必须尽量保留到 thesis 或 data_perspective 中，不要只用“表现尚可”“波动可控”之类空话替代整组数据。",
+    "sentiment_score、confidence、rule_adjusted_score、blocked_actions、rule_flags 是内部校准字段：schema 内要填写，但自然语言字段不得直接复述原始分数、英文 code 或枚举值。",
     "不同基金使用对应指标表达：ETF/指数基金优先参考同类百分位、同类排名变化、折溢价；主动基金优先参考收益、回撤、波动、基金经理与申赎事件。",
     "如果数据不足，必须在 insufficient_data 中明确标记，并把建议收敛到保守动作。",
     "若 blocked_actions 非空，decision_type 与 action_plan 不能与其冲突。",
@@ -98,6 +106,7 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
         "给出单行核心结论 one_sentence，直接说明动作。",
         "action_plan 要明确建议动作、仓位变化、执行条件、停止条件。",
         "至少给 2 条 thesis，且每条引用输入里的具体指标或事件。",
+        "data_perspective 中凡是输入已给出的收益、风险、同类对照指标，尽量完整保留，不要只挑部分数字。",
         "risk_alerts 需优先展示高风险约束和新闻中的风险事件。",
         "若 blocked_actions 非空，不得输出被阻断动作。"
       ],
@@ -187,7 +196,7 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
       metricPair("Calmar", input.features.nav.calmar, "plain"),
       metricPair("基金经理任职", input.features.nav.manager_tenure, "plain")
     ])}`,
-    `- 数据质量: 特征覆盖 ${formatCoverageLabel(input.features.coverage)}，模型置信度 ${formatPromptMetricValue(input.features.confidence, 2)}。${formatWarningsLine(input.features.warnings)}`,
+    `- 数据质量: 特征覆盖 ${formatCoverageLabel(input.features.coverage)}，${describeEvidenceStrength(input.features.confidence)}。${formatWarningsLine(input.features.warnings)}`,
     "",
     "### 持仓与策略背景",
     "| 项目 | 数据 |",
@@ -203,10 +212,10 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     `| 十大重仓参考 | ${formatTextList(input.raw.holdings_style.top_holdings, "数据不足")} |`,
     "",
     "## 🧭 规则约束与当前判断",
-    `- 当前规则分数: ${formatPromptMetricValue(input.rules.rule_adjusted_score, 0)} / 100`,
-    `- 被阻断动作: ${formatTextList(input.rules.blocked_actions, "无")}`,
-    `- 风控标记: ${formatTextList(input.rules.rule_flags, "无")}`,
-    `- 强制保守约束: ${input.rules.hard_blocked ? "是" : "否"}`,
+    `- 规则倾向: ${describeRuleTilt(input.rules.rule_adjusted_score, input.rules.hard_blocked)}`,
+    `- 当前不建议动作: ${formatActionList(input.rules.blocked_actions, "无")}`,
+    `- 风控提示: ${formatRuleFlagList(input.rules.rule_flags, "无")}`,
+    `- 强制保守约束: ${input.rules.hard_blocked ? "是，优先观察或持有" : "否"}`,
     "",
     "## 📰 舆情情报",
     `- 新闻检索状态: ${formatNewsSearchStatusLabel(inferNewsSearchStatus(input.raw))}`,
@@ -228,7 +237,9 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     "- `core_conclusion.one_sentence` 要像成熟基金日报里的“一句话核心结论”，简洁、直接、有动作。",
     "- `action_plan.suggestion` 尽量写成“持仓者...；未持仓者...”这种双视角句式，而不是单句口号。",
     "- ETF/指数基金不要套用股票特有口径，优先使用同类百分位、同类排名变化、折溢价等基金指标。",
+    "- `data_perspective` 只要输入里给了数值，就尽量保留，不要用笼统结论替代整组收益/风险/同类数据。",
     "- `risk_alerts` 优先写限制性因素、回撤/波动、申赎限制、基金经理变化和监管风险。",
+    "- `core_conclusion`、`risk_alerts`、`action_plan` 不得直接出现 `61/100`、`0.66`、`buy/add`、`subscription_redemption_restriction` 这类内部口径，要翻译成投资者能理解的中文。",
     "- 如果 `blocked_actions` 非空，最终动作和执行计划不得与之冲突。",
     "- 如果数据不足或事件不清晰，要直接承认不确定性并给保守建议。",
     "",
@@ -291,11 +302,11 @@ function buildFundDashboardSchemaHint(): Record<string, unknown> {
     fund_name: "string",
     as_of_date: "YYYY-MM-DD",
     decision_type: "buy|add|hold|reduce|redeem|watch",
-    sentiment_score: "0-100 integer",
-    confidence: "0.0-1.0",
+    sentiment_score: "0-100 integer（内部校准字段，填写数值；不要在中文结论里直接写分数）",
+    confidence: "0.0-1.0（内部校准字段，填写数值；不要在中文结论里直接写置信度）",
     core_conclusion: {
       one_sentence: "一句话核心结论，<=40字，先给动作，再给原因",
-      thesis: ["数据透视结论1", "数据透视结论2"]
+      thesis: ["数据透视结论1（含具体指标）", "数据透视结论2（含具体指标）"]
     },
     risk_alerts: ["舆情/风险/限制性情报"],
     action_plan: {
@@ -305,15 +316,31 @@ function buildFundDashboardSchemaHint(): Record<string, unknown> {
       stop_conditions: ["失效条件/停止条件"]
     },
     data_perspective: {
-      return_metrics: "收益与净值表现",
-      risk_metrics: "回撤/波动/修复",
-      relative_metrics: "同类百分位/同类排名变化",
+      return_metrics: {
+        ret_1d: "number|string|null（若输入有值应尽量保留）",
+        ret_5d: "number|string|null",
+        ret_20d: "number|string|null",
+        ret_60d: "number|string|null",
+        ret_120d: "number|string|null"
+      },
+      risk_metrics: {
+        max_drawdown: "number|string|null",
+        volatility_annualized: "number|string|null",
+        drawdown_recovery_days: "number|string|null"
+      },
+      relative_metrics: {
+        peer_percentile: "number|string|null",
+        peer_percentile_change_20d: "number|string|null",
+        peer_percentile_change_60d: "number|string|null",
+        peer_rank_position: "number|string|null",
+        peer_rank_total: "number|string|null"
+      },
       feature_coverage: "ok|partial|insufficient"
     },
     rule_trace: {
       rule_flags: ["string"],
       blocked_actions: ["string"],
-      adjusted_score: "0-100 number"
+      adjusted_score: "0-100 number（内部规则校准字段，填写数值；不要在中文结论里直接写）"
     },
     insufficient_data: {
       is_insufficient: "boolean",
@@ -488,7 +515,7 @@ function formatWarningsLine(warnings: string[]): string {
   if (!Array.isArray(warnings) || warnings.length === 0) {
     return "暂无额外警告。";
   }
-  return `需要额外留意：${warnings.slice(0, 6).join("；")}。`;
+  return `需要额外留意：${formatRuleFlagList(warnings, "无")}。`;
 }
 
 function formatRangeText(low: unknown, high: unknown, digits: number): string {

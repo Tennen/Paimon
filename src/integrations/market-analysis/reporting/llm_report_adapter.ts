@@ -9,6 +9,14 @@ import type { RunFundAnalysisOutput } from "../fund/fund_analysis_service";
 import type { FundAnalysisOutput, MarketPhase, MarketPortfolio } from "../fund/fund_types";
 import { isCodexProvider, runCodexMarkdownReport } from "../../codex/markdownReport";
 import { hasSearchStatus, readSearchProviderDescriptor } from "../../search-engine/types";
+import {
+  describeRuleTilt,
+  describeSignalStrength,
+  formatActionLabel,
+  formatActionList,
+  formatInvestorReadableList,
+  formatRuleFlagList
+} from "../readable_labels";
 
 export type MarketReportPayload = {
   phase: MarketPhase;
@@ -65,8 +73,11 @@ export function buildMarketReportSystemPrompt(): string {
     "把输入视为基金持仓日报素材包，分析架构尽量贴近“决策仪表盘”：核心结论、数据视角、情报观察、执行计划。",
     "优先使用二级/三级标题和短 bullet，避免连续大段文字。",
     "持仓逐项建议中，每个标的都按“核心结论 / 数据视角 / 情报观察 / 执行计划”四段展开，再补充结构化表格。",
+    "每个标的的“数据视角”必须尽量保留输入里已有的关键数字，至少覆盖净值快照、收益表现、风险刻画、相对表现；有值就保留，不要为了简短主动省略。",
+    "如果输入已给出多项数据，请优先完整呈现，再下结论；不要只保留 1-2 个指标代替整张数据视角。",
     "必须严格保持输入里的信号方向和决策动作，不得反转或改写原始信号。",
     "对于结构化数据，请在\"持仓逐项建议\"中补充 markdown 表格，列名使用中文，指标名称改成人能读懂的表达；宽表最多 4 列，超过时拆成多段短列表。",
+    "sentiment_score、confidence、rule_adjusted_score、blocked_actions、rule_flags 是内部校准口径，最终面向投资者的文字里不要原样复述数字或英文 code，要改写成“信号偏强”“证据支撑一般”“存在申购赎回限制”等自然表达。",
     "除专有名词（如 ETF、LOF、Search Engine 名称）外，尽量保持中文表达一致，避免中英文混写。",
     "高风险或强约束内容请使用 quote（>）或加粗强调。",
     "关键信号值需转换为人类可读语言：",
@@ -143,7 +154,7 @@ function appendSignalSection(lines: string[], signalResult: FundAnalysisOutput):
 
   for (const item of signals) {
     const signal = asRecord(item);
-    lines.push(`- ${normalizeText(signal.code) || "-"}: ${formatSignalLabel(normalizeText(signal.signal) || "WATCH")}`);
+    lines.push(`- ${normalizeText(signal.code) || "-"}: ${formatActionLabel(normalizeText(signal.signal) || "WATCH")}`);
   }
   lines.push("");
 }
@@ -160,7 +171,7 @@ function appendFundDashboardSection(lines: string[], signalResult: FundAnalysisO
     const dashboard = item;
     const code = normalizeText(dashboard.fund_code) || "-";
     const name = normalizeText(dashboard.fund_name) || "-";
-    const decision = formatDecisionLabel(normalizeText(dashboard.decision_type) || "watch");
+    const decision = formatActionLabel(normalizeText(dashboard.decision_type) || "watch");
     const score = toFiniteNumber(dashboard.sentiment_score);
     const confidence = toFiniteNumber(dashboard.confidence);
     const conclusion = normalizeText(dashboard.core_conclusion?.one_sentence) || "未提供";
@@ -173,7 +184,7 @@ function appendFundDashboardSection(lines: string[], signalResult: FundAnalysisO
     lines.push("#### 核心结论");
     lines.push(`- 当前动作: ${decision}`);
     lines.push(`- 一句话判断: ${conclusion}`);
-    lines.push(`- 信号强弱: ${formatSignalStrength(score, confidence)}`);
+    lines.push(`- 信号概览: ${describeSignalStrength(score, confidence)}`);
 
     const rationale = buildFundRationaleLine(dashboard, reportContext);
     if (rationale) {
@@ -363,7 +374,7 @@ function buildFundDataPerspectiveLines(
   const trading = asRecord(reportContext.feature_context.trading);
   const stability = asRecord(reportContext.feature_context.stability);
   const nav = asRecord(reportContext.feature_context.nav);
-  const warnings = readStringList(reportContext.feature_context.warnings).slice(0, 4);
+  const warnings = formatInvestorReadableList(reportContext.feature_context.warnings, 4);
   const fundSeries = reportContext.fund_series_summary;
   const peerPercentileSeries = reportContext.peer_percentile_summary;
   const lines: string[] = [];
@@ -453,10 +464,7 @@ function buildFundIntelligenceLines(
   const events = reportContext.events;
   const reference = reportContext.reference_context;
   const holdings = reportContext.holdings_style;
-  const riskAlerts = asArray(dashboard.risk_alerts)
-    .map((risk) => normalizeText(risk))
-    .filter((risk): risk is string => Boolean(risk))
-    .slice(0, 4);
+  const riskAlerts = formatInvestorReadableList(dashboard.risk_alerts, 4);
   const positiveSignals = pickPositiveIntel(reportContext).slice(0, 3);
   const newsStatus = describeNewsStatus(reportContext);
   const headline = pickTopNewsHeadline(reportContext);
@@ -611,13 +619,13 @@ function pickPositiveIntel(reportContext: FundReportContext): string[] {
 
 function buildRuleConstraintLine(dashboard: Record<string, unknown>): string {
   const ruleTrace = asRecord(dashboard.rule_trace);
-  const blockedActions = summarizeStringList(ruleTrace.blocked_actions, 4);
-  const ruleFlags = summarizeStringList(ruleTrace.rule_flags, 4);
+  const blockedActions = formatActionList(ruleTrace.blocked_actions, "");
+  const ruleFlags = formatRuleFlagList(ruleTrace.rule_flags, "");
   const adjustedScore = toFiniteNumber(ruleTrace.adjusted_score);
   const content = joinReadableParts([
-    blockedActions ? `禁止动作 ${blockedActions}` : "",
-    ruleFlags ? `风控标记 ${ruleFlags}` : "",
-    adjustedScore === null ? "" : `规则调整分 ${formatMetricValue(adjustedScore, 0, "分", false)}`
+    blockedActions ? `当前不宜做 ${blockedActions}` : "",
+    ruleFlags ? `需要留意 ${ruleFlags}` : "",
+    adjustedScore === null ? "" : `规则倾向 ${describeRuleTilt(adjustedScore)}`
   ]);
   return content ? `规则约束: ${content}` : "";
 }
@@ -790,28 +798,6 @@ function pickTopNewsHeadline(reportContext: FundReportContext): string {
   return source ? `${title} (${source})` : title;
 }
 
-function formatDecisionLabel(raw: string): string {
-  const value = raw.trim().toLowerCase();
-  if (value === "buy") return "买入";
-  if (value === "add") return "加仓";
-  if (value === "hold") return "持有";
-  if (value === "reduce") return "减仓";
-  if (value === "redeem") return "赎回";
-  if (value === "watch") return "观察";
-  return raw || "观察";
-}
-
-function formatSignalLabel(raw: string): string {
-  const value = raw.trim().toLowerCase();
-  if (value === "buy") return "买入";
-  if (value === "add") return "加仓";
-  if (value === "hold") return "持有";
-  if (value === "reduce") return "减仓";
-  if (value === "redeem") return "赎回";
-  if (value === "watch") return "观察";
-  return raw || "观察";
-}
-
 function formatCoverageLabel(raw: string): string {
   const value = raw.trim().toLowerCase();
   if (value === "ok") return "完整";
@@ -849,12 +835,6 @@ function formatPhaseLabel(raw: string): string {
   if (value === "midday") return "盘中";
   if (value === "close") return "收盘";
   return raw || "-";
-}
-
-function formatSignalStrength(score: number | null, confidence: number | null): string {
-  const scoreText = score === null ? "评分未知" : `评分 ${Math.round(score)} 分`;
-  const confidenceText = confidence === null ? "置信度未知" : `置信度 ${confidence.toFixed(2)}`;
-  return `${scoreText}，${confidenceText}`;
 }
 
 function resolveTimeoutOverride(raw: unknown): number | undefined {

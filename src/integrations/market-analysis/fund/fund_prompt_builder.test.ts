@@ -145,6 +145,8 @@ test("fund system prompt should enforce json-only and data constraints", () => {
   assert.ok(prompt.includes("自然中文"));
   assert.ok(prompt.includes("ETF/指数基金"));
   assert.ok(prompt.includes("核心结论、数据透视、舆情情报、作战计划"));
+  assert.ok(prompt.includes("不得直接复述原始分数"));
+  assert.ok(prompt.includes("尽量保留到 thesis 或 data_perspective"));
 });
 
 test("fund user prompt should include natural-language sections and structured snapshot", () => {
@@ -172,6 +174,11 @@ test("fund user prompt should include natural-language sections and structured s
   assert.match(prompt, /### 决策仪表盘四块结构（必须吸收）/);
   assert.match(prompt, /持仓者\.\.\.；未持仓者\.\.\./);
   assert.match(prompt, /近7日未抓到高置信度公开新闻|1\. 沪深300ETF份额增长/);
+  assert.match(prompt, /data_perspective 中凡是输入已给出的收益、风险、同类对照指标/);
+  assert.match(prompt, /证据支撑较充分/);
+  assert.match(prompt, /规则倾向: 偏谨慎/);
+  assert.match(prompt, /当前不建议动作: 买入、加仓/);
+  assert.match(prompt, /风控提示: 数据时效性不足/);
   assert.equal(newsAndEvents.news_search_status, "search_engine_hit");
   assert.equal((marketSnapshot.fund_series_summary as Record<string, unknown>).latest_value, 4.35);
   assert.deepEqual((marketSnapshot.raw_context_summary as Record<string, unknown>).reference_context, {
