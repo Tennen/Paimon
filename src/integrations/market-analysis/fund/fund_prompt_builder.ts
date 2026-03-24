@@ -1,5 +1,6 @@
 import { FundFeatureContext, FundNewsItem, FundRawContext } from "./fund_types";
 import { FundRuleOutput } from "./fund_rule_engine";
+import { buildFundReportContext } from "./fund_report_context";
 
 const PROMPT_VERSION = "fund_dashboard_v4";
 const MAX_NEWS_ITEMS = 8;
@@ -28,11 +29,9 @@ export function buildFundSystemPrompt(): string {
 }
 
 export function buildFundUserPrompt(input: FundPromptInput): string {
-  const fundSeriesSummary = summarizeSeries(input.raw.price_or_nav_series, MAX_SERIES_POINTS);
-  const benchmarkSeriesSummary = summarizeSeries(input.raw.benchmark_series, MAX_SERIES_POINTS);
-  const latestValue = typeof fundSeriesSummary.latest_value === "number"
-    ? fundSeriesSummary.latest_value
-    : undefined;
+  const reportContext = buildFundReportContext(input.raw, input.features);
+  const fundSeriesSummary = reportContext.fund_series_summary;
+  const benchmarkSeriesSummary = reportContext.benchmark_series_summary;
   const payload = prunePromptPayload({
     prompt_meta: {
       version: PROMPT_VERSION,
@@ -63,16 +62,16 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
       fund_series_summary: fundSeriesSummary,
       benchmark_code: input.raw.benchmark_code,
       benchmark_series_summary: benchmarkSeriesSummary,
-      position_snapshot: summarizePosition(input.raw.account_context, latestValue),
+      position_snapshot: reportContext.position_snapshot,
       raw_context_summary: {
-        holdings_style: input.raw.holdings_style,
-        account_context: input.raw.account_context
+        holdings_style: reportContext.holdings_style,
+        account_context: reportContext.account_context
       },
       data_quality: {
-        feature_coverage: input.features.coverage,
-        feature_confidence: input.features.confidence,
-        source_chain: input.raw.source_chain,
-        ingestion_errors: input.raw.errors.slice(0, 12)
+        feature_coverage: reportContext.feature_context.coverage,
+        feature_confidence: reportContext.feature_context.confidence,
+        source_chain: reportContext.source_chain,
+        ingestion_errors: reportContext.errors.slice(0, 12)
       },
       series_points: input.raw.price_or_nav_series.slice(-MAX_SERIES_POINTS),
       benchmark_points: input.raw.benchmark_series.slice(-MAX_SERIES_POINTS)
@@ -120,7 +119,7 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     output_schema: buildFundDashboardSchemaHint()
   });
 
-  const positionSummary = summarizePosition(input.raw.account_context, latestValue);
+  const positionSummary = reportContext.position_snapshot;
   const lines: string[] = [
     "# 基金决策仪表盘分析请求",
     "",
@@ -239,63 +238,6 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
   ];
 
   return lines.join("\n");
-}
-
-function summarizeSeries(
-  points: FundRawContext["price_or_nav_series"],
-  limit: number
-): Record<string, unknown> {
-  const valid = Array.isArray(points)
-    ? points
-      .filter((item) => item && Number.isFinite(Number(item.value)) && Number(item.value) > 0)
-      .slice(-Math.max(10, limit))
-    : [];
-
-  const values = valid.map((item) => Number(item.value));
-  const last = valid.length > 0 ? valid[valid.length - 1] : null;
-  const high60d = values.length > 0 ? Math.max(...values.slice(-60)) : undefined;
-  const low60d = values.length > 0 ? Math.min(...values.slice(-60)) : undefined;
-
-  return {
-    point_count: valid.length,
-    latest_date: last ? String(last.date || "") : undefined,
-    latest_value: last ? roundNumber(Number(last.value), 6) : undefined,
-    ret_1d: calculateWindowReturn(values, 1),
-    ret_5d: calculateWindowReturn(values, 5),
-    ret_20d: calculateWindowReturn(values, 20),
-    ret_60d: calculateWindowReturn(values, 60),
-    nav_slope_20d: values.length >= 21
-      ? roundNumber((values[values.length - 1] - values[values.length - 21]) / 20, 6)
-      : "not_supported",
-    high_60d: Number.isFinite(high60d) ? roundNumber(high60d as number, 6) : "not_supported",
-    low_60d: Number.isFinite(low60d) ? roundNumber(low60d as number, 6) : "not_supported"
-  };
-}
-
-function summarizePosition(
-  account: FundRawContext["account_context"],
-  latestValue?: number
-): Record<string, unknown> {
-  const quantity = Number(account.current_position);
-  const avgCost = Number(account.avg_cost);
-  const hasValidAvgCost = Number.isFinite(avgCost) && avgCost > 0;
-  const hasLatest = Number.isFinite(latestValue) && (latestValue as number) > 0;
-  const pnlPct = hasValidAvgCost && hasLatest
-    ? roundNumber((((latestValue as number) - avgCost) / avgCost) * 100, 4)
-    : "not_supported";
-  const marketValue = Number.isFinite(quantity) && quantity > 0 && hasLatest
-    ? roundNumber(quantity * (latestValue as number), 4)
-    : "not_supported";
-
-  return {
-    current_position: account.current_position,
-    avg_cost: account.avg_cost,
-    budget: account.budget,
-    risk_preference: account.risk_preference,
-    holding_horizon: account.holding_horizon,
-    estimated_market_value: marketValue,
-    estimated_position_pnl_pct: pnlPct
-  };
 }
 
 function summarizeNews(items: FundNewsItem[], maxItems: number): Array<Record<string, unknown>> {
@@ -581,18 +523,6 @@ function formatTextList(values: string[], fallback: string): string {
     return fallback;
   }
   return values.join("；");
-}
-
-function calculateWindowReturn(values: number[], window: number): number | "not_supported" {
-  if (values.length <= window) {
-    return "not_supported";
-  }
-  const start = values[values.length - window - 1];
-  const end = values[values.length - 1];
-  if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0) {
-    return "not_supported";
-  }
-  return roundNumber(((end - start) / start) * 100, 4);
 }
 
 function compactSnippet(input: unknown, maxLength: number): string | undefined {

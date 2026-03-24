@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildFundSystemPrompt, buildFundUserPrompt } from "./fund_prompt_builder";
+import { buildFundReportContext } from "./fund_report_context";
 import { FundFeatureContext, FundRawContext } from "./fund_types";
 
 function buildRawContext(partial?: Partial<FundRawContext>): FundRawContext {
@@ -159,4 +160,15 @@ test("fund user prompt should include natural-language sections and structured s
   assert.equal(newsAndEvents.news_search_status, "serpapi_hit");
   assert.equal((marketSnapshot.fund_series_summary as Record<string, unknown>).latest_value, 4.35);
   assert.equal(Array.isArray((payload.task_and_constraints as Record<string, unknown>).must_answer), true);
+});
+
+test("fund report context should expose prompt-aligned latest values and position snapshot", () => {
+  const context = buildFundReportContext(buildRawContext(), buildFeatureContext());
+
+  assert.equal(context.fund_series_summary.latest_value, 4.35);
+  assert.equal(context.fund_series_summary.latest_date, "2026-03-16");
+  assert.equal(context.benchmark_series_summary.latest_value, 3835);
+  assert.equal(context.position_snapshot.estimated_market_value, 435);
+  assert.equal(context.position_snapshot.estimated_position_pnl_pct, 6.0976);
+  assert.equal(context.feature_context.returns.ret_1d, 1.2);
 });

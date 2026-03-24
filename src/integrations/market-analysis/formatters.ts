@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { buildFundReportContext, createEmptyFundReportContext } from "./fund/fund_report_context";
 import {
   MARKET_CONFIG_STORE,
   MARKET_PORTFOLIO_STORE,
@@ -120,19 +121,24 @@ export function buildRunResponseText(result) {
       const positionChange = dashboard.action_plan && dashboard.action_plan.position_change
         ? String(dashboard.action_plan.position_change).trim()
         : "";
-      const metricSummary = buildFundMetricSummary(dashboard);
       const record = fundRecordMap.get(code);
-      const newsStatus = describeNewsStatus(record && record.raw_context);
-      const newsHeadline = pickTopNewsHeadline(record && record.raw_context);
+      const reportContext = record && record.raw_context && record.feature_context
+        ? buildFundReportContext(record.raw_context, record.feature_context)
+        : createEmptyFundReportContext();
+      const metricSummary = buildFundMetricSummary(dashboard, reportContext);
+      const newsStatus = describeNewsStatus(reportContext);
+      const newsHeadline = pickTopNewsHeadline(reportContext);
       const risks = Array.isArray(dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
-      const checklist = buildFundChecklistText(dashboard, record && record.raw_context);
+      const intelligenceSummary = buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, newsHeadline);
+      const executionContext = buildFundExecutionContext(dashboard, reportContext);
+      const checklist = buildFundChecklistText(dashboard, reportContext);
 
       lines.push(`- ${label}`);
       lines.push(`  核心结论: ${decision}。${conclusion}`);
       lines.push(`  数据视角: ${metricSummary.length > 0 ? metricSummary.join("；") : "关键指标暂不充分"}；信号强弱=${score}/100，置信度=${confidence}`);
-      lines.push(`  情报观察: ${risks.length > 0 ? risks.join("；") : "暂无新增重点风险"}${newsStatus ? `；${newsStatus}` : ""}${newsHeadline ? `；样本=${newsHeadline}` : ""}`);
-      if (actionSuggestion || positionChange) {
-        lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}`);
+      lines.push(`  情报观察: ${intelligenceSummary.length > 0 ? intelligenceSummary.join("；") : (risks.length > 0 ? risks.join("；") : "暂无新增重点风险")}`);
+      if (actionSuggestion || positionChange || executionContext) {
+        lines.push(`  执行计划: ${actionSuggestion || "未提供"}${positionChange ? `；仓位处理=${positionChange}` : ""}${executionContext ? `；${executionContext}` : ""}`);
       }
       if (checklist.length > 0) {
         lines.push(`  检查清单: ${checklist.join("；")}`);
@@ -172,7 +178,7 @@ export function buildHelpText() {
   ].join("\n");
 }
 
-function buildFundMetricSummary(dashboard) {
+function buildFundMetricSummary(dashboard, reportContext) {
   const metrics = [];
   const returns = dashboard && dashboard.data_perspective && dashboard.data_perspective.return_metrics
     ? dashboard.data_perspective.return_metrics
@@ -183,48 +189,161 @@ function buildFundMetricSummary(dashboard) {
   const relative = dashboard && dashboard.data_perspective && dashboard.data_perspective.relative_metrics
     ? dashboard.data_perspective.relative_metrics
     : {};
+  const featureContext = reportContext && reportContext.feature_context ? reportContext.feature_context : {};
+  const featureReturns = featureContext && featureContext.returns ? featureContext.returns : {};
+  const featureRisks = featureContext && featureContext.risk ? featureContext.risk : {};
+  const featureRelative = featureContext && featureContext.relative ? featureContext.relative : {};
+  const trading = featureContext && featureContext.trading ? featureContext.trading : {};
+  const stability = featureContext && featureContext.stability ? featureContext.stability : {};
+  const nav = featureContext && featureContext.nav ? featureContext.nav : {};
   const coverage = dashboard && dashboard.data_perspective
     ? String(dashboard.data_perspective.feature_coverage || "").trim()
     : "";
+  const mergedReturns = mergeMetricMaps(returns, featureReturns);
+  const mergedRisks = mergeMetricMaps(risks, featureRisks);
+  const mergedRelative = mergeMetricMaps(relative, featureRelative);
 
   if (coverage) {
     metrics.push(`数据完整性=${formatCoverageLabel(coverage)}`);
   }
 
-  const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
-  if (ret20d) {
-    metrics.push(`近20日回报=${ret20d}`);
-  }
-  const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
-  if (ret60d) {
-    metrics.push(`近60日回报=${ret60d}`);
-  }
-  const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
-  if (drawdown) {
-    metrics.push(`最大回撤=${drawdown}`);
-  }
-  const volatility = formatMetricValue(risks.volatility_annualized, 2, "%", false);
-  if (volatility) {
-    metrics.push(`年化波动=${volatility}`);
-  }
-  const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
-  if (excess20d) {
-    metrics.push(`近20日超额=${excess20d}`);
+  const latestLine = joinMetricSegments([
+    compactMetric("基金 ", reportContext && reportContext.fund_series_summary ? reportContext.fund_series_summary.latest_value : null, 6, "", false),
+    compactMetric("基准 ", reportContext && reportContext.benchmark_series_summary ? reportContext.benchmark_series_summary.latest_value : null, 6, "", false)
+  ]);
+  if (latestLine) {
+    metrics.push(`最新值=${latestLine}`);
   }
 
-  return metrics.slice(0, 5);
+  const shortTerm = joinMetricSegments([
+    compactMetric("1日", mergedReturns.ret_1d, 2, "%", true),
+    compactMetric("5日", mergedReturns.ret_5d, 2, "%", true)
+  ]);
+  if (shortTerm) {
+    metrics.push(`短线回报=${shortTerm}`);
+  }
+
+  const midTerm = joinMetricSegments([
+    compactMetric("20日", mergedReturns.ret_20d, 2, "%", true),
+    compactMetric("60日", mergedReturns.ret_60d, 2, "%", true),
+    compactMetric("120日", mergedReturns.ret_120d, 2, "%", true)
+  ]);
+  if (midTerm) {
+    metrics.push(`中期回报=${midTerm}`);
+  }
+
+  const riskLine = joinMetricSegments([
+    compactMetric("回撤", mergedRisks.max_drawdown, 2, "%", true),
+    compactMetric("波动", mergedRisks.volatility_annualized, 2, "%", false),
+    compactMetric("修复", mergedRisks.drawdown_recovery_days, 0, "天", false)
+  ]);
+  if (riskLine) {
+    metrics.push(`风险=${riskLine}`);
+  }
+
+  const relativeLine = joinMetricSegments([
+    compactMetric("20日超额", mergedRelative.benchmark_excess_20d, 2, "%", true),
+    compactMetric("60日超额", mergedRelative.benchmark_excess_60d, 2, "%", true),
+    compactMetric("跟踪偏离", mergedRelative.tracking_deviation, 2, "%", false),
+    compactMetric("同类分位", mergedRelative.peer_percentile, 2, "", false)
+  ]);
+  if (relativeLine) {
+    metrics.push(`相对表现=${relativeLine}`);
+  }
+
+  const tradingLine = joinMetricSegments([
+    compactMetric("MA5 ", trading.ma5, 4, "", false),
+    compactMetric("MA10 ", trading.ma10, 4, "", false),
+    compactMetric("MA20 ", trading.ma20, 4, "", false),
+    compactMetric("量能", trading.volume_change_rate, 2, "%", true),
+    compactMetric("折溢价", trading.premium_discount, 2, "%", true)
+  ]);
+  if (tradingLine) {
+    metrics.push(`交易结构=${tradingLine}`);
+  }
+
+  const stabilityLine = joinMetricSegments([
+    compactMetric("超额稳定度", stability.excess_return_consistency, 2, "", false),
+    compactMetric("Sharpe ", nav.sharpe, 2, "", false),
+    compactMetric("Sortino ", nav.sortino, 2, "", false),
+    compactMetric("Calmar ", nav.calmar, 2, "", false),
+    compactMetric("20日斜率", nav.nav_slope_20d, 4, "", false)
+  ]);
+  if (stabilityLine) {
+    metrics.push(`稳定性=${stabilityLine}`);
+  }
+
+  return metrics.slice(0, 6);
 }
 
-function buildFundChecklistText(dashboard, rawContext) {
+function buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, newsHeadline) {
+  const summary = [];
+  const events = reportContext && reportContext.events ? reportContext.events : {};
+  const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
+
+  if (riskAlerts.length > 0) {
+    summary.push(`风险提示=${riskAlerts.join("；")}`);
+  }
+
+  const notices = summarizeTextList(events.notices, 2);
+  if (notices) {
+    summary.push(`公告/提示=${notices}`);
+  }
+  const managerChanges = summarizeTextList(events.manager_changes, 2);
+  if (managerChanges) {
+    summary.push(`基金经理变化=${managerChanges}`);
+  }
+  const subscriptionRedemption = summarizeTextList(events.subscription_redemption, 2);
+  if (subscriptionRedemption) {
+    summary.push(`申赎约束=${subscriptionRedemption}`);
+  }
+  const regulatoryRisks = summarizeTextList(events.regulatory_risks, 2);
+  if (regulatoryRisks) {
+    summary.push(`监管/异常=${regulatoryRisks}`);
+  }
+  if (newsStatus) {
+    summary.push(newsStatus);
+  }
+  if (newsHeadline) {
+    summary.push(`样本=${newsHeadline}`);
+  }
+
+  return summary.slice(0, 6);
+}
+
+function buildFundExecutionContext(dashboard, reportContext) {
+  const segments = [];
+  const ruleTrace = dashboard && dashboard.rule_trace ? dashboard.rule_trace : {};
+  const blockedActions = summarizeTextList(ruleTrace.blocked_actions, 3);
+  const ruleFlags = summarizeTextList(ruleTrace.rule_flags, 3);
+  const positionContext = buildPositionContext(reportContext);
+
+  if (blockedActions || ruleFlags) {
+    segments.push(`规则约束=${joinMetricSegments([
+      blockedActions ? `禁止${blockedActions}` : "",
+      ruleFlags ? `风控标记${ruleFlags}` : ""
+    ])}`);
+  }
+  if (positionContext) {
+    segments.push(`持仓背景=${positionContext}`);
+  }
+
+  return segments.join("；");
+}
+
+function buildFundChecklistText(dashboard, reportContext) {
   const checklist = [];
   const perspective = dashboard && dashboard.data_perspective ? dashboard.data_perspective : {};
   const relative = perspective.relative_metrics || {};
   const risks = perspective.risk_metrics || {};
+  const events = reportContext && reportContext.events ? reportContext.events : {};
   const coverage = String(perspective.feature_coverage || "").trim();
   const excess20d = Number(relative.benchmark_excess_20d);
   const maxDrawdown = Number(risks.max_drawdown);
   const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts : [];
-  const newsStatus = describeNewsStatus(rawContext);
+  const newsStatus = describeNewsStatus(reportContext);
+  const featureContext = reportContext && reportContext.feature_context ? reportContext.feature_context : {};
+  const warnings = Array.isArray(featureContext && featureContext.warnings) ? featureContext.warnings : [];
 
   checklist.push(
     coverage === "ok"
@@ -239,10 +358,79 @@ function buildFundChecklistText(dashboard, rawContext) {
   if (Number.isFinite(maxDrawdown)) {
     checklist.push(maxDrawdown >= -5 ? "✅ 回撤可控" : "⚠️ 回撤偏大");
   }
-  checklist.push(riskAlerts.length > 0 ? "⚠️ 风险事件待跟踪" : "✅ 暂无新增风险");
+  if (Array.isArray(events.subscription_redemption) && events.subscription_redemption.length > 0) {
+    checklist.push("⚠️ 存在申赎约束");
+  } else if (Array.isArray(events.manager_changes) && events.manager_changes.length > 0) {
+    checklist.push("⚠️ 存在基金经理变动");
+  } else if (Array.isArray(events.regulatory_risks) && events.regulatory_risks.length > 0) {
+    checklist.push("⚠️ 存在监管或异常风险");
+  } else {
+    checklist.push(riskAlerts.length > 0 ? "⚠️ 风险事件待跟踪" : "✅ 暂无新增风险");
+  }
+  if (warnings.length > 0) {
+    checklist.push("⚠️ 特征侧有额外提示");
+  }
   checklist.push(newsStatus ? "✅ 已有公开信息样本" : "⚠️ 公开信息有限");
 
   return checklist.slice(0, 5);
+}
+
+function buildPositionContext(reportContext) {
+  const account = reportContext && reportContext.account_context ? reportContext.account_context : {};
+  const position = reportContext && reportContext.position_snapshot ? reportContext.position_snapshot : {};
+
+  return joinMetricSegments([
+    position.current_position !== undefined ? `当前持仓${formatNumber(position.current_position)}` : "",
+    position.avg_cost !== undefined ? `成本${formatNumber(position.avg_cost)}` : "",
+    position.estimated_market_value !== "not_supported" ? `估算市值${formatNumber(position.estimated_market_value)}` : "",
+    position.estimated_position_pnl_pct !== "not_supported" ? `估算盈亏${formatMetricValue(position.estimated_position_pnl_pct, 2, "%", true)}` : "",
+    Number.isFinite(Number(position.budget)) ? `预算${formatNumber(position.budget)}` : "",
+    account.risk_preference ? `风险偏好${formatRiskPreferenceLabel(account.risk_preference)}` : "",
+    account.holding_horizon ? `周期${formatHoldingHorizonLabel(account.holding_horizon)}` : ""
+  ]);
+}
+
+function mergeMetricMaps(primary, fallback) {
+  return {
+    ...(fallback && typeof fallback === "object" ? fallback : {}),
+    ...(primary && typeof primary === "object" ? primary : {})
+  };
+}
+
+function compactMetric(label, value, digits, suffix, signed) {
+  const rendered = formatMetricValue(value, digits, suffix, signed);
+  return rendered ? `${label}${rendered}` : "";
+}
+
+function joinMetricSegments(items) {
+  return items.filter(Boolean).join("/");
+}
+
+function summarizeTextList(values, limit) {
+  if (!Array.isArray(values) || values.length === 0) {
+    return "";
+  }
+  return values
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .join("；");
+}
+
+function formatRiskPreferenceLabel(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "conservative") return "稳健";
+  if (value === "balanced") return "均衡";
+  if (value === "aggressive") return "进取";
+  return String(raw || "").trim() || "-";
+}
+
+function formatHoldingHorizonLabel(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "short_term") return "短期";
+  if (value === "medium_term") return "中期";
+  if (value === "long_term") return "长期";
+  return String(raw || "").trim() || "-";
 }
 
 function formatMetricValue(value, digits, suffix, signed) {

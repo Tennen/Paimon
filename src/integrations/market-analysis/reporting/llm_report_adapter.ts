@@ -1,12 +1,20 @@
 import { resolveDataPath } from "../../../storage/persistence";
+import {
+  buildFundReportContext,
+  createEmptyFundReportContext,
+  type FundReportContext,
+  type FundSeriesSummary
+} from "../fund/fund_report_context";
+import type { RunFundAnalysisOutput } from "../fund/fund_analysis_service";
+import type { FundAnalysisOutput, MarketPhase, MarketPortfolio } from "../fund/fund_types";
 import { isCodexProvider, runCodexMarkdownReport } from "../../codex/markdownReport";
 
 export type MarketReportPayload = {
-  phase: string;
-  portfolio: unknown;
-  marketData: unknown;
-  signalResult: unknown;
-  optionalNewsContext: unknown;
+  phase: MarketPhase;
+  portfolio: MarketPortfolio;
+  marketData: RunFundAnalysisOutput["marketData"];
+  signalResult: FundAnalysisOutput;
+  optionalNewsContext: RunFundAnalysisOutput["optionalNewsContext"];
   analysisEngine: string;
 };
 
@@ -18,6 +26,10 @@ export type MarketLlmReport = {
   generatedAt: string;
   inputPath: string;
   outputPath: string;
+};
+
+type FundRecordContext = {
+  reportContext: FundReportContext;
 };
 
 const REPORT_DIR = resolveDataPath("market-analysis", "llm-reports");
@@ -71,10 +83,10 @@ export function buildMarketReportSystemPrompt(): string {
 }
 
 export function buildMarketReportSourceMarkdown(input: MarketReportPayload): string {
-  const signalResult = asRecord(input.signalResult);
-  const portfolio = asRecord(input.portfolio);
-  const marketData = asRecord(input.marketData);
-  const optionalNews = asRecord(input.optionalNewsContext);
+  const signalResult = input.signalResult;
+  const portfolio = input.portfolio;
+  const marketData = input.marketData;
+  const optionalNews = input.optionalNewsContext;
 
   const lines: string[] = [
     "# 市场分析上下文",
@@ -95,12 +107,12 @@ export function buildMarketReportSourceMarkdown(input: MarketReportPayload): str
   return lines.join("\n").trim();
 }
 
-function appendPortfolioSection(lines: string[], portfolio: Record<string, unknown>): void {
+function appendPortfolioSection(lines: string[], portfolio: MarketPortfolio): void {
   lines.push("## 账户持仓");
   const cash = toFiniteNumber(portfolio.cash);
   lines.push(`- 可用现金: ${cash === null ? "-" : String(cash)}`);
 
-  const funds = asArray(portfolio.funds);
+  const funds = portfolio.funds;
   if (funds.length === 0) {
     lines.push("- 持仓: (空)");
     lines.push("");
@@ -108,11 +120,10 @@ function appendPortfolioSection(lines: string[], portfolio: Record<string, unkno
   }
 
   for (const item of funds) {
-    const holding = asRecord(item);
-    const code = normalizeText(holding.code) || "-";
-    const name = normalizeText(holding.name);
-    const quantity = toFiniteNumber(holding.quantity);
-    const avgCost = toFiniteNumber(holding.avgCost);
+    const code = normalizeText(item.code) || "-";
+    const name = normalizeText(item.name);
+    const quantity = toFiniteNumber(item.quantity);
+    const avgCost = toFiniteNumber(item.avgCost);
     lines.push(
       `- ${name ? `${name}(${code})` : code} | 持仓数量: ${quantity === null ? "-" : quantity} | 持仓成本: ${avgCost === null ? "-" : avgCost}`
     );
@@ -120,9 +131,9 @@ function appendPortfolioSection(lines: string[], portfolio: Record<string, unkno
   lines.push("");
 }
 
-function appendSignalSection(lines: string[], signalResult: Record<string, unknown>): void {
+function appendSignalSection(lines: string[], signalResult: FundAnalysisOutput): void {
   lines.push("## 系统初步判断");
-  const signals = asArray(signalResult.assetSignals);
+  const signals = Array.isArray(signalResult.assetSignals) ? signalResult.assetSignals : [];
   if (signals.length === 0) {
     lines.push("- 无信号");
     lines.push("");
@@ -136,12 +147,8 @@ function appendSignalSection(lines: string[], signalResult: Record<string, unkno
   lines.push("");
 }
 
-function appendFundDashboardSection(
-  lines: string[],
-  signalResult: Record<string, unknown>,
-  marketData: Record<string, unknown>
-): void {
-  const dashboards = asArray(signalResult.fund_dashboards);
+function appendFundDashboardSection(lines: string[], signalResult: FundAnalysisOutput, marketData: RunFundAnalysisOutput["marketData"]): void {
+  const dashboards = Array.isArray(signalResult.fund_dashboards) ? signalResult.fund_dashboards : [];
   if (dashboards.length === 0) {
     return;
   }
@@ -149,17 +156,17 @@ function appendFundDashboardSection(
 
   lines.push("## 持仓逐项建议");
   for (const item of dashboards) {
-    const dashboard = asRecord(item);
+    const dashboard = item;
     const code = normalizeText(dashboard.fund_code) || "-";
     const name = normalizeText(dashboard.fund_name) || "-";
     const decision = formatDecisionLabel(normalizeText(dashboard.decision_type) || "watch");
     const score = toFiniteNumber(dashboard.sentiment_score);
     const confidence = toFiniteNumber(dashboard.confidence);
-    const conclusion = normalizeText(asRecord(dashboard.core_conclusion).one_sentence) || "未提供";
+    const conclusion = normalizeText(dashboard.core_conclusion?.one_sentence) || "未提供";
     const label = name ? `${name}(${code})` : code;
 
     const record = fundRecordMap.get(code);
-    const rawContext = record ? asRecord(record.raw_context) : {};
+    const reportContext = record?.reportContext ?? createEmptyFundReportContext();
 
     lines.push(`### ${label}`);
     lines.push("#### 核心结论");
@@ -167,32 +174,31 @@ function appendFundDashboardSection(
     lines.push(`- 一句话判断: ${conclusion}`);
     lines.push(`- 信号强弱: ${formatSignalStrength(score, confidence)}`);
 
-    const rationale = buildFundRationaleLine(dashboard);
+    const rationale = buildFundRationaleLine(dashboard, reportContext);
     if (rationale) {
       lines.push(`- 结论依据: ${rationale}`);
     }
 
     lines.push("#### 数据视角");
-    for (const dataLine of buildFundDataPerspectiveLines(dashboard)) {
+    for (const dataLine of buildFundDataPerspectiveLines(dashboard, reportContext)) {
       lines.push(`- ${dataLine}`);
     }
 
     lines.push("#### 情报观察");
-    for (const intelLine of buildFundIntelligenceLines(dashboard, rawContext)) {
+    for (const intelLine of buildFundIntelligenceLines(dashboard, reportContext)) {
       lines.push(`- ${intelLine}`);
     }
 
     lines.push("#### 执行计划");
-    for (const planLine of buildFundExecutionLines(dashboard, rawContext)) {
+    for (const planLine of buildFundExecutionLines(dashboard, reportContext)) {
       lines.push(`- ${planLine}`);
     }
 
     lines.push("");
   }
 
-  const portfolioReport = asRecord(signalResult.portfolio_report);
-  const brief = normalizeText(portfolioReport.brief);
-  const full = normalizeText(portfolioReport.full);
+  const brief = normalizeText(signalResult.portfolio_report?.brief);
+  const full = normalizeText(signalResult.portfolio_report?.full);
   if (brief || full) {
     lines.push("### 组合层判断");
     if (brief) {
@@ -203,8 +209,7 @@ function appendFundDashboardSection(
     }
   }
 
-  const audit = asRecord(signalResult.audit);
-  const auditErrors = asArray(audit.errors)
+  const auditErrors = asArray(signalResult.audit?.errors)
     .map((item) => normalizeText(item))
     .filter((item): item is string => Boolean(item));
   if (auditErrors.length > 0) {
@@ -216,7 +221,7 @@ function appendFundDashboardSection(
   lines.push("");
 }
 
-function appendMarketErrorsSection(lines: string[], marketData: Record<string, unknown>): void {
+function appendMarketErrorsSection(lines: string[], marketData: RunFundAnalysisOutput["marketData"]): void {
   const errors = asArray(marketData.errors)
     .map((item) => normalizeText(item))
     .filter((item): item is string => Boolean(item));
@@ -231,21 +236,18 @@ function appendMarketErrorsSection(lines: string[], marketData: Record<string, u
   lines.push("");
 }
 
-function appendNewsSection(lines: string[], optionalNewsContext: Record<string, unknown>): void {
-  if (Object.keys(optionalNewsContext).length === 0) {
+function appendNewsSection(lines: string[], optionalNewsContext: RunFundAnalysisOutput["optionalNewsContext"]): void {
+  if (!optionalNewsContext || !Array.isArray(optionalNewsContext.funds) || optionalNewsContext.funds.length === 0) {
     return;
   }
 
   lines.push("## 近期公开信息摘录");
 
-  const funds = asArray(optionalNewsContext.funds);
-  for (const item of funds.slice(0, 16)) {
-    const fund = asRecord(item);
+  for (const fund of optionalNewsContext.funds.slice(0, 16)) {
     const code = normalizeText(fund.fund_code) || "-";
     const name = normalizeText(fund.fund_name) || "-";
     lines.push(`- ${name}(${code})`);
-    const marketNews = asArray(fund.market_news);
-    for (const news of marketNews.slice(0, 4)) {
+    for (const news of fund.market_news.slice(0, 4)) {
       const row = asRecord(news);
       const title = normalizeText(row.title);
       const source = normalizeText(row.source);
@@ -260,63 +262,90 @@ function appendNewsSection(lines: string[], optionalNewsContext: Record<string, 
   lines.push("");
 }
 
-function buildFundRecordMap(marketData: Record<string, unknown>): Map<string, Record<string, unknown>> {
-  const map = new Map<string, Record<string, unknown>>();
-  const fundRecords = asArray(marketData.funds);
-  for (const item of fundRecords) {
-    const record = asRecord(item);
-    const identity = asRecord(record.identity);
-    const code = normalizeText(identity.fund_code);
+function buildFundRecordMap(marketData: RunFundAnalysisOutput["marketData"]): Map<string, FundRecordContext> {
+  const map = new Map<string, FundRecordContext>();
+  for (const record of marketData.funds) {
+    const code = normalizeText(record.identity?.fund_code);
     if (!code) {
       continue;
     }
-    map.set(code, record);
+    map.set(code, {
+      reportContext: buildFundReportContext(record.raw_context, record.feature_context)
+    });
   }
   return map;
 }
 
-function buildFundMetricSummary(dashboard: Record<string, unknown>): string[] {
+function buildFundMetricSummary(
+  dashboard: Record<string, unknown>,
+  reportContext: FundReportContext
+): string[] {
   const metrics: string[] = [];
   const dataPerspective = asRecord(dashboard.data_perspective);
-  const returns = asRecord(dataPerspective.return_metrics);
-  const risks = asRecord(dataPerspective.risk_metrics);
-  const relative = asRecord(dataPerspective.relative_metrics);
+  const returns = mergeMetricRecords(asRecord(dataPerspective.return_metrics), asRecord(reportContext.feature_context.returns));
+  const risks = mergeMetricRecords(asRecord(dataPerspective.risk_metrics), asRecord(reportContext.feature_context.risk));
+  const relative = mergeMetricRecords(asRecord(dataPerspective.relative_metrics), asRecord(reportContext.feature_context.relative));
   const coverage = formatCoverageLabel(normalizeText(dataPerspective.feature_coverage));
   if (coverage) {
     metrics.push(`数据完整性: ${coverage}`);
   }
 
-  const ret20d = formatMetricValue(returns.ret_20d, 2, "%", true);
-  if (ret20d) {
-    metrics.push(`近20个交易日回报: ${ret20d}`);
-  }
-  const ret60d = formatMetricValue(returns.ret_60d, 2, "%", true);
-  if (ret60d) {
-    metrics.push(`近60个交易日回报: ${ret60d}`);
-  }
-  const drawdown = formatMetricValue(risks.max_drawdown, 2, "%", true);
-  if (drawdown) {
-    metrics.push(`最大回撤: ${drawdown}`);
-  }
-  const volatility = formatMetricValue(risks.volatility_annualized, 2, "%", false);
-  if (volatility) {
-    metrics.push(`年化波动: ${volatility}`);
-  }
-  const excess20d = formatMetricValue(relative.benchmark_excess_20d, 2, "%", true);
-  if (excess20d) {
-    metrics.push(`近20个交易日相对基准超额: ${excess20d}`);
+  const latestLine = joinSlashParts([
+    compactMetricEntry("基金 ", reportContext.fund_series_summary.latest_value, 6, "", false),
+    compactMetricEntry("基准 ", reportContext.benchmark_series_summary.latest_value, 6, "", false)
+  ]);
+  if (latestLine) {
+    metrics.push(`最新值: ${latestLine}`);
   }
 
-  return metrics.slice(0, 6);
+  const shortTerm = joinSlashParts([
+    compactMetricEntry("1日", returns.ret_1d, 2, "%", true),
+    compactMetricEntry("5日", returns.ret_5d, 2, "%", true)
+  ]);
+  if (shortTerm) {
+    metrics.push(`短线回报: ${shortTerm}`);
+  }
+
+  const midTerm = joinSlashParts([
+    compactMetricEntry("20日", returns.ret_20d, 2, "%", true),
+    compactMetricEntry("60日", returns.ret_60d, 2, "%", true),
+    compactMetricEntry("120日", returns.ret_120d, 2, "%", true)
+  ]);
+  if (midTerm) {
+    metrics.push(`中期回报: ${midTerm}`);
+  }
+
+  const riskLine = joinSlashParts([
+    compactMetricEntry("回撤", risks.max_drawdown, 2, "%", true),
+    compactMetricEntry("波动", risks.volatility_annualized, 2, "%", false),
+    compactMetricEntry("修复", risks.drawdown_recovery_days, 0, "天", false)
+  ]);
+  if (riskLine) {
+    metrics.push(`风险刻画: ${riskLine}`);
+  }
+
+  const relativeLine = joinSlashParts([
+    compactMetricEntry("20日超额", relative.benchmark_excess_20d, 2, "%", true),
+    compactMetricEntry("60日超额", relative.benchmark_excess_60d, 2, "%", true),
+    compactMetricEntry("跟踪偏离", relative.tracking_deviation, 2, "%", false)
+  ]);
+  if (relativeLine) {
+    metrics.push(`相对表现: ${relativeLine}`);
+  }
+
+  return metrics.slice(0, 5);
 }
 
-function buildFundRationaleLine(dashboard: Record<string, unknown>): string {
+function buildFundRationaleLine(
+  dashboard: Record<string, unknown>,
+  reportContext: FundReportContext
+): string {
   const conclusion = asRecord(dashboard.core_conclusion);
   const thesis = asArray(conclusion.thesis)
     .map((item) => normalizeText(item))
     .filter((item): item is string => Boolean(item))
     .slice(0, 2);
-  const metrics = buildFundMetricSummary(dashboard).slice(0, 4);
+  const metrics = buildFundMetricSummary(dashboard, reportContext).slice(0, 4);
   const parts = [...thesis];
   if (metrics.length > 0) {
     parts.push(`可直接核对的数据包括 ${metrics.join("、")}`);
@@ -324,16 +353,37 @@ function buildFundRationaleLine(dashboard: Record<string, unknown>): string {
   return parts.join("；");
 }
 
-function buildFundDataPerspectiveLines(dashboard: Record<string, unknown>): string[] {
+function buildFundDataPerspectiveLines(
+  dashboard: Record<string, unknown>,
+  reportContext: FundReportContext
+): string[] {
   const dataPerspective = asRecord(dashboard.data_perspective);
-  const returns = asRecord(dataPerspective.return_metrics);
-  const risks = asRecord(dataPerspective.risk_metrics);
-  const relative = asRecord(dataPerspective.relative_metrics);
+  const returns = mergeMetricRecords(asRecord(dataPerspective.return_metrics), asRecord(reportContext.feature_context.returns));
+  const risks = mergeMetricRecords(asRecord(dataPerspective.risk_metrics), asRecord(reportContext.feature_context.risk));
+  const relative = mergeMetricRecords(asRecord(dataPerspective.relative_metrics), asRecord(reportContext.feature_context.relative));
+  const trading = asRecord(reportContext.feature_context.trading);
+  const stability = asRecord(reportContext.feature_context.stability);
+  const nav = asRecord(reportContext.feature_context.nav);
+  const warnings = readStringList(reportContext.feature_context.warnings).slice(0, 4);
+  const fundSeries = reportContext.fund_series_summary;
+  const benchmarkSeries = reportContext.benchmark_series_summary;
   const lines: string[] = [];
 
+  const snapshotLine = joinReadableParts([
+    formatSeriesLatest("基金最新值", fundSeries),
+    formatSeriesLatest("基准最新值", benchmarkSeries),
+    formatRangeStatement("基金近60日区间", fundSeries)
+  ]);
+  if (snapshotLine) {
+    lines.push(`净值快照: ${snapshotLine}`);
+  }
+
   const returnLine = joinReadableParts([
-    metricStatement("近20个交易日回报", returns.ret_20d, 2, "%", true),
-    metricStatement("近60个交易日回报", returns.ret_60d, 2, "%", true)
+    metricStatement("近1日回报", returns.ret_1d, 2, "%", true),
+    metricStatement("近5日回报", returns.ret_5d, 2, "%", true),
+    metricStatement("近20日回报", returns.ret_20d, 2, "%", true),
+    metricStatement("近60日回报", returns.ret_60d, 2, "%", true),
+    metricStatement("近120日回报", returns.ret_120d, 2, "%", true)
   ]);
   if (returnLine) {
     lines.push(`收益表现: ${returnLine}`);
@@ -341,24 +391,54 @@ function buildFundDataPerspectiveLines(dashboard: Record<string, unknown>): stri
 
   const riskLine = joinReadableParts([
     metricStatement("最大回撤", risks.max_drawdown, 2, "%", true),
-    metricStatement("年化波动", risks.volatility_annualized, 2, "%", false)
+    metricStatement("年化波动", risks.volatility_annualized, 2, "%", false),
+    metricStatement("回撤修复", risks.drawdown_recovery_days, 0, "天", false)
   ]);
   if (riskLine) {
     lines.push(`风险刻画: ${riskLine}`);
   }
 
   const relativeLine = joinReadableParts([
-    metricStatement("近20个交易日相对基准超额", relative.benchmark_excess_20d, 2, "%", true),
-    metricStatement("近60个交易日相对基准超额", relative.benchmark_excess_60d, 2, "%", true),
-    metricStatement("跟踪偏离", relative.tracking_deviation, 2, "%", false)
+    metricStatement("近20日相对基准超额", relative.benchmark_excess_20d, 2, "%", true),
+    metricStatement("近60日相对基准超额", relative.benchmark_excess_60d, 2, "%", true),
+    metricStatement("跟踪偏离", relative.tracking_deviation, 2, "%", false),
+    metricStatement("同类分位", relative.peer_percentile, 2, "", false)
   ]);
   if (relativeLine) {
     lines.push(`相对表现: ${relativeLine}`);
   }
 
+  const tradingLine = joinReadableParts([
+    metricStatement("MA5 ", trading.ma5, 4, "", false),
+    metricStatement("MA10 ", trading.ma10, 4, "", false),
+    metricStatement("MA20 ", trading.ma20, 4, "", false),
+    metricStatement("10日均成交量 ", trading.liquidity_avg_volume_10d, 2, "", false),
+    metricStatement("量能变化", trading.volume_change_rate, 2, "%", true),
+    metricStatement("折溢价", trading.premium_discount, 2, "%", true)
+  ]);
+  if (tradingLine) {
+    lines.push(`交易结构: ${tradingLine}`);
+  }
+
+  const qualityLine = joinReadableParts([
+    metricStatement("超额收益稳定度", stability.excess_return_consistency, 2, "", false),
+    metricStatement("风格漂移", stability.style_drift, 2, "", false),
+    metricStatement("净值平滑异常", stability.nav_smoothing_anomaly, 2, "", false),
+    metricStatement("20日净值斜率", nav.nav_slope_20d, 4, "", false),
+    metricStatement("Sharpe ", nav.sharpe, 2, "", false),
+    metricStatement("Sortino ", nav.sortino, 2, "", false),
+    metricStatement("Calmar ", nav.calmar, 2, "", false),
+    metricStatement("基金经理任职 ", nav.manager_tenure, 2, "", false)
+  ]);
+  if (qualityLine) {
+    lines.push(`稳定性与质量: ${qualityLine}`);
+  }
+
   const coverage = formatCoverageLabel(normalizeText(dataPerspective.feature_coverage));
   if (coverage) {
-    lines.push(`数据完整性: ${coverage}`);
+    lines.push(`数据质量: 数据完整性 ${coverage}${warnings.length > 0 ? `；额外提示 ${warnings.join("；")}` : ""}`);
+  } else if (warnings.length > 0) {
+    lines.push(`数据质量: 额外提示 ${warnings.join("；")}`);
   }
 
   if (lines.length === 0) {
@@ -370,20 +450,37 @@ function buildFundDataPerspectiveLines(dashboard: Record<string, unknown>): stri
 
 function buildFundIntelligenceLines(
   dashboard: Record<string, unknown>,
-  rawContext: Record<string, unknown>
+  reportContext: FundReportContext
 ): string[] {
   const lines: string[] = [];
+  const events = reportContext.events;
   const riskAlerts = asArray(dashboard.risk_alerts)
     .map((risk) => normalizeText(risk))
     .filter((risk): risk is string => Boolean(risk))
     .slice(0, 4);
-  const positiveSignals = pickPositiveIntel(rawContext).slice(0, 3);
-  const newsStatus = describeNewsStatus(rawContext);
-  const headline = pickTopNewsHeadline(rawContext);
+  const positiveSignals = pickPositiveIntel(reportContext).slice(0, 3);
+  const newsStatus = describeNewsStatus(reportContext);
+  const headline = pickTopNewsHeadline(reportContext);
 
   lines.push(`风险情报: ${riskAlerts.length > 0 ? riskAlerts.join("；") : "暂无新增重点风险。"}`);
   if (positiveSignals.length > 0) {
     lines.push(`积极线索: ${positiveSignals.join("；")}`);
+  }
+  const notices = summarizeStringList(events.notices, 3);
+  if (notices) {
+    lines.push(`公告/提示: ${notices}`);
+  }
+  const managerChanges = summarizeStringList(events.manager_changes, 3);
+  if (managerChanges) {
+    lines.push(`基金经理变化: ${managerChanges}`);
+  }
+  const subscriptionRedemption = summarizeStringList(events.subscription_redemption, 3);
+  if (subscriptionRedemption) {
+    lines.push(`申购赎回约束: ${subscriptionRedemption}`);
+  }
+  const regulatoryRisks = summarizeStringList(events.regulatory_risks, 3);
+  if (regulatoryRisks) {
+    lines.push(`监管/异常风险: ${regulatoryRisks}`);
   }
   if (newsStatus) {
     lines.push(`新闻检索: ${newsStatus}`);
@@ -397,7 +494,7 @@ function buildFundIntelligenceLines(
 
 function buildFundExecutionLines(
   dashboard: Record<string, unknown>,
-  rawContext: Record<string, unknown>
+  reportContext: FundReportContext
 ): string[] {
   const lines: string[] = [];
   const action = asRecord(dashboard.action_plan);
@@ -411,7 +508,9 @@ function buildFundExecutionLines(
     .map((item) => normalizeText(item))
     .filter((item): item is string => Boolean(item))
     .slice(0, 4);
-  const checklist = buildFundChecklist(dashboard, rawContext);
+  const checklist = buildFundChecklist(dashboard, reportContext);
+  const ruleConstraint = buildRuleConstraintLine(dashboard);
+  const positionContext = buildPositionContext(reportContext);
 
   lines.push(`操作建议: ${suggestion || "未提供"}`);
   if (positionChange) {
@@ -423,6 +522,12 @@ function buildFundExecutionLines(
   if (stopConditions.length > 0) {
     lines.push(`停止条件: ${stopConditions.join("；")}`);
   }
+  if (ruleConstraint) {
+    lines.push(ruleConstraint);
+  }
+  if (positionContext) {
+    lines.push(`持仓背景: ${positionContext}`);
+  }
   if (checklist.length > 0) {
     lines.push(`检查清单: ${checklist.join("；")}`);
   }
@@ -432,17 +537,19 @@ function buildFundExecutionLines(
 
 function buildFundChecklist(
   dashboard: Record<string, unknown>,
-  rawContext: Record<string, unknown>
+  reportContext: FundReportContext
 ): string[] {
   const items: string[] = [];
   const dataPerspective = asRecord(dashboard.data_perspective);
-  const relative = asRecord(dataPerspective.relative_metrics);
-  const risks = asRecord(dataPerspective.risk_metrics);
+  const relative = mergeMetricRecords(asRecord(dataPerspective.relative_metrics), asRecord(reportContext.feature_context.relative));
+  const risks = mergeMetricRecords(asRecord(dataPerspective.risk_metrics), asRecord(reportContext.feature_context.risk));
+  const events = reportContext.events;
   const coverage = normalizeText(dataPerspective.feature_coverage);
   const excess20d = toFiniteNumber(relative.benchmark_excess_20d);
   const maxDrawdown = toFiniteNumber(risks.max_drawdown);
   const riskAlerts = asArray(dashboard.risk_alerts);
-  const hasNews = Boolean(describeNewsStatus(rawContext));
+  const hasNews = Boolean(describeNewsStatus(reportContext));
+  const warnings = readStringList(reportContext.feature_context.warnings);
 
   items.push(
     coverage === "ok"
@@ -457,15 +564,25 @@ function buildFundChecklist(
   if (maxDrawdown !== null) {
     items.push(maxDrawdown >= -5 ? "✅ 回撤仍在可控区间" : "⚠️ 回撤压力偏大");
   }
-  items.push(riskAlerts.length > 0 ? "⚠️ 需要持续跟踪风险事件" : "✅ 暂无新增公开风险");
+  if (asArray(events.subscription_redemption).length > 0) {
+    items.push("⚠️ 存在申购赎回约束");
+  } else if (asArray(events.manager_changes).length > 0) {
+    items.push("⚠️ 存在基金经理变化");
+  } else if (asArray(events.regulatory_risks).length > 0) {
+    items.push("⚠️ 存在监管或异常风险");
+  } else {
+    items.push(riskAlerts.length > 0 ? "⚠️ 需要持续跟踪风险事件" : "✅ 暂无新增公开风险");
+  }
+  if (warnings.length > 0) {
+    items.push("⚠️ 特征侧提示需复核");
+  }
   items.push(hasNews ? "✅ 已有公开信息样本可跟踪" : "⚠️ 公开信息样本有限");
 
-  return items.slice(0, 5);
+  return items.slice(0, 6);
 }
 
-function pickPositiveIntel(rawContext: Record<string, unknown>): string[] {
-  const events = asRecord(rawContext.events);
-  const newsItems = asArray(events.market_news);
+function pickPositiveIntel(reportContext: FundReportContext): string[] {
+  const newsItems = reportContext.events.market_news;
   const positives: string[] = [];
 
   for (const item of newsItems) {
@@ -479,6 +596,83 @@ function pickPositiveIntel(rawContext: Record<string, unknown>): string[] {
   }
 
   return positives.filter(Boolean);
+}
+
+function buildRuleConstraintLine(dashboard: Record<string, unknown>): string {
+  const ruleTrace = asRecord(dashboard.rule_trace);
+  const blockedActions = summarizeStringList(ruleTrace.blocked_actions, 4);
+  const ruleFlags = summarizeStringList(ruleTrace.rule_flags, 4);
+  const adjustedScore = toFiniteNumber(ruleTrace.adjusted_score);
+  const content = joinReadableParts([
+    blockedActions ? `禁止动作 ${blockedActions}` : "",
+    ruleFlags ? `风控标记 ${ruleFlags}` : "",
+    adjustedScore === null ? "" : `规则调整分 ${formatMetricValue(adjustedScore, 0, "分", false)}`
+  ]);
+  return content ? `规则约束: ${content}` : "";
+}
+
+function buildPositionContext(reportContext: FundReportContext): string {
+  const account = reportContext.account_context;
+  const position = reportContext.position_snapshot;
+
+  return joinReadableParts([
+    position.current_position === undefined ? "" : `当前持仓 ${formatMetricValue(position.current_position, 4, "", false)}`,
+    position.avg_cost === undefined ? "" : `持仓成本 ${formatMetricValue(position.avg_cost, 4, "", false)}`,
+    position.estimated_market_value === "not_supported" ? "" : `估算市值 ${formatMetricValue(position.estimated_market_value, 2, "", false)}`,
+    position.estimated_position_pnl_pct === "not_supported" ? "" : `浮动盈亏 ${formatMetricValue(position.estimated_position_pnl_pct, 2, "%", true)}`,
+    `可用预算 ${formatMetricValue(position.budget, 2, "", false)}`,
+    normalizeText(account.risk_preference) ? `风险偏好 ${formatRiskPreferenceLabel(normalizeText(account.risk_preference))}` : "",
+    normalizeText(account.holding_horizon) ? `持有周期 ${formatHoldingHorizonLabel(normalizeText(account.holding_horizon))}` : ""
+  ]);
+}
+
+function mergeMetricRecords(
+  primary: Record<string, unknown>,
+  fallback: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...fallback,
+    ...primary
+  };
+}
+
+function compactMetricEntry(
+  label: string,
+  value: unknown,
+  digits: number,
+  suffix: string,
+  signed: boolean
+): string {
+  const rendered = formatMetricValue(value, digits, suffix, signed);
+  return rendered ? `${label}${rendered}` : "";
+}
+
+function joinSlashParts(items: string[]): string {
+  return items.filter(Boolean).join("/");
+}
+
+function readStringList(input: unknown): string[] {
+  return asArray(input)
+    .map((item) => normalizeText(item))
+    .filter((item): item is string => Boolean(item));
+}
+
+function summarizeStringList(input: unknown, limit: number): string {
+  return readStringList(input).slice(0, limit).join("；");
+}
+
+function formatSeriesLatest(label: string, summary: FundSeriesSummary): string {
+  if (typeof summary.latest_value !== "number") {
+    return "";
+  }
+  return `${label} ${formatMetricValue(summary.latest_value, 6, "", false)}${summary.latest_date ? ` (${summary.latest_date})` : ""}`;
+}
+
+function formatRangeStatement(label: string, summary: FundSeriesSummary): string {
+  if (summary.low_60d === "not_supported" || summary.high_60d === "not_supported") {
+    return "";
+  }
+  return `${label} ${formatMetricValue(summary.low_60d, 6, "", false)} - ${formatMetricValue(summary.high_60d, 6, "", false)}`;
 }
 
 function metricStatement(
@@ -509,10 +703,10 @@ function formatMetricValue(value: unknown, digits: number, suffix: string, signe
   return `${prefix}${normalized}${suffix || ""}`;
 }
 
-function describeNewsStatus(rawContext: Record<string, unknown>): string {
-  const sourceChain = asArray(rawContext.source_chain).map((item) => normalizeText(item)).filter((item): item is string => Boolean(item));
-  const errors = asArray(rawContext.errors).map((item) => normalizeText(item)).filter((item): item is string => Boolean(item));
-  const events = asRecord(rawContext.events);
+function describeNewsStatus(reportContext: FundReportContext): string {
+  const sourceChain = asArray(reportContext.source_chain).map((item) => normalizeText(item)).filter((item): item is string => Boolean(item));
+  const errors = asArray(reportContext.errors).map((item) => normalizeText(item)).filter((item): item is string => Boolean(item));
+  const events = asRecord(reportContext.events);
   const newsItems = asArray(events.market_news);
   const newsCount = newsItems.length;
 
@@ -554,8 +748,8 @@ function describeNewsStatus(rawContext: Record<string, unknown>): string {
   return `新闻命中 ${newsCount} 条`;
 }
 
-function pickTopNewsHeadline(rawContext: Record<string, unknown>): string {
-  const events = asRecord(rawContext.events);
+function pickTopNewsHeadline(reportContext: FundReportContext): string {
+  const events = asRecord(reportContext.events);
   const newsItems = asArray(events.market_news);
   if (newsItems.length === 0) {
     return "";
@@ -597,6 +791,22 @@ function formatCoverageLabel(raw: string): string {
   if (value === "partial") return "部分可用";
   if (value === "insufficient") return "不足";
   return raw || "";
+}
+
+function formatRiskPreferenceLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "conservative") return "稳健";
+  if (value === "balanced") return "均衡";
+  if (value === "aggressive") return "进取";
+  return raw || "-";
+}
+
+function formatHoldingHorizonLabel(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === "short_term") return "短期";
+  if (value === "medium_term") return "中期";
+  if (value === "long_term") return "长期";
+  return raw || "-";
 }
 
 function formatMarketStateLabel(raw: string): string {
