@@ -66,7 +66,7 @@ export function formatStatus(state) {
     `最近运行: ${latest.createdAt || "-"}`,
     `阶段: ${phaseLabel(latest.phase)}`,
     `市场状态: ${latest.marketState || "-"}`,
-    `基准指数: ${latest.benchmark || "-"}`,
+    `相对参照: ${latest.comparisonReference || "-"}`,
     `资产信号数: ${latest.assetSignalCount || 0}`
   ];
 
@@ -82,7 +82,7 @@ export function buildRunResponseText(result) {
   const lines = [
     `Market Analysis ${phaseLabel(signalResult.phase)} 完成`,
     "分析对象: 基金组合",
-    `市场状态: ${signalResult.marketState}${signalResult.benchmark ? ` (${signalResult.benchmark})` : ""}`
+    `市场状态: ${signalResult.marketState}${signalResult.comparisonReference ? ` (${signalResult.comparisonReference})` : ""}`
   ];
 
   const fundRecords = Array.isArray(result.marketData && result.marketData.funds)
@@ -207,12 +207,15 @@ function buildFundMetricSummary(dashboard, reportContext) {
     metrics.push(`数据完整性=${formatCoverageLabel(coverage)}`);
   }
 
-  const latestLine = joinMetricSegments([
-    compactMetric("基金 ", reportContext && reportContext.fund_series_summary ? reportContext.fund_series_summary.latest_value : null, 6, "", false),
-    compactMetric("基准 ", reportContext && reportContext.benchmark_series_summary ? reportContext.benchmark_series_summary.latest_value : null, 6, "", false)
-  ]);
-  if (latestLine) {
-    metrics.push(`最新值=${latestLine}`);
+  const latestValue = compactMetric(
+    "基金 ",
+    reportContext && reportContext.fund_series_summary ? reportContext.fund_series_summary.latest_value : null,
+    6,
+    "",
+    false
+  );
+  if (latestValue) {
+    metrics.push(`最新值=${latestValue}`);
   }
 
   const shortTerm = joinMetricSegments([
@@ -242,10 +245,10 @@ function buildFundMetricSummary(dashboard, reportContext) {
   }
 
   const relativeLine = joinMetricSegments([
-    compactMetric("20日超额", mergedRelative.benchmark_excess_20d, 2, "%", true),
-    compactMetric("60日超额", mergedRelative.benchmark_excess_60d, 2, "%", true),
-    compactMetric("跟踪偏离", mergedRelative.tracking_deviation, 2, "%", false),
-    compactMetric("同类分位", mergedRelative.peer_percentile, 2, "", false)
+    compactMetric("同类分位", mergedRelative.peer_percentile, 2, "", false),
+    compactMetric("20日分位变化", mergedRelative.peer_percentile_change_20d, 2, "", true),
+    compactMetric("60日分位变化", mergedRelative.peer_percentile_change_60d, 2, "", true),
+    compactRankMetric("同类排名", mergedRelative.peer_rank_position, mergedRelative.peer_rank_total)
   ]);
   if (relativeLine) {
     metrics.push(`相对表现=${relativeLine}`);
@@ -255,7 +258,6 @@ function buildFundMetricSummary(dashboard, reportContext) {
     compactMetric("MA5 ", trading.ma5, 4, "", false),
     compactMetric("MA10 ", trading.ma10, 4, "", false),
     compactMetric("MA20 ", trading.ma20, 4, "", false),
-    compactMetric("量能", trading.volume_change_rate, 2, "%", true),
     compactMetric("折溢价", trading.premium_discount, 2, "%", true)
   ]);
   if (tradingLine) {
@@ -263,7 +265,7 @@ function buildFundMetricSummary(dashboard, reportContext) {
   }
 
   const stabilityLine = joinMetricSegments([
-    compactMetric("超额稳定度", stability.excess_return_consistency, 2, "", false),
+    compactMetric("同类趋势", stability.excess_return_consistency, 2, "", false),
     compactMetric("Sharpe ", nav.sharpe, 2, "", false),
     compactMetric("Sortino ", nav.sortino, 2, "", false),
     compactMetric("Calmar ", nav.calmar, 2, "", false),
@@ -279,6 +281,8 @@ function buildFundMetricSummary(dashboard, reportContext) {
 function buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, newsHeadline) {
   const summary = [];
   const events = reportContext && reportContext.events ? reportContext.events : {};
+  const reference = reportContext && reportContext.reference_context ? reportContext.reference_context : {};
+  const holdings = reportContext && reportContext.holdings_style ? reportContext.holdings_style : {};
   const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts.slice(0, 3) : [];
 
   if (riskAlerts.length > 0) {
@@ -292,6 +296,14 @@ function buildFundIntelligenceSummary(dashboard, reportContext, newsStatus, news
   const managerChanges = summarizeTextList(events.manager_changes, 2);
   if (managerChanges) {
     summary.push(`基金经理变化=${managerChanges}`);
+  }
+  const currentManagers = summarizeTextList(reference.current_managers, 2);
+  if (currentManagers) {
+    summary.push(`现任基金经理=${currentManagers}`);
+  }
+  const topHoldings = summarizeTextList(holdings.top_holdings, 3);
+  if (topHoldings) {
+    summary.push(`重仓参考=${topHoldings}`);
   }
   const subscriptionRedemption = summarizeTextList(events.subscription_redemption, 2);
   if (subscriptionRedemption) {
@@ -338,7 +350,8 @@ function buildFundChecklistText(dashboard, reportContext) {
   const risks = perspective.risk_metrics || {};
   const events = reportContext && reportContext.events ? reportContext.events : {};
   const coverage = String(perspective.feature_coverage || "").trim();
-  const excess20d = Number(relative.benchmark_excess_20d);
+  const percentile = Number(relative.peer_percentile);
+  const percentileChange20d = Number(relative.peer_percentile_change_20d);
   const maxDrawdown = Number(risks.max_drawdown);
   const riskAlerts = Array.isArray(dashboard && dashboard.risk_alerts) ? dashboard.risk_alerts : [];
   const newsStatus = describeNewsStatus(reportContext);
@@ -352,8 +365,11 @@ function buildFundChecklistText(dashboard, reportContext) {
         ? "⚠️ 数据部分可用"
         : "❌ 数据不足"
   );
-  if (Number.isFinite(excess20d)) {
-    checklist.push(excess20d >= 0 ? "✅ 相对基准未转弱" : "⚠️ 相对基准偏弱");
+  if (Number.isFinite(percentile)) {
+    checklist.push(percentile >= 50 ? "✅ 当前同类位置仍在中上区间" : "⚠️ 当前同类位置偏弱");
+  }
+  if (Number.isFinite(percentileChange20d)) {
+    checklist.push(percentileChange20d >= 0 ? "✅ 近20日同类位置未走弱" : "⚠️ 近20日同类位置回落");
   }
   if (Number.isFinite(maxDrawdown)) {
     checklist.push(maxDrawdown >= -5 ? "✅ 回撤可控" : "⚠️ 回撤偏大");
@@ -400,6 +416,15 @@ function mergeMetricMaps(primary, fallback) {
 function compactMetric(label, value, digits, suffix, signed) {
   const rendered = formatMetricValue(value, digits, suffix, signed);
   return rendered ? `${label}${rendered}` : "";
+}
+
+function compactRankMetric(label, position, total) {
+  const pos = formatMetricValue(position, 0, "", false);
+  const count = formatMetricValue(total, 0, "", false);
+  if (!pos || !count) {
+    return "";
+  }
+  return `${label}${pos}/${count}`;
 }
 
 function joinMetricSegments(items) {

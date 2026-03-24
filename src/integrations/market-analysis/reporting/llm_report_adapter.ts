@@ -94,7 +94,7 @@ export function buildMarketReportSourceMarkdown(input: MarketReportPayload): str
     `- 运行阶段: ${formatPhaseLabel(normalizeText(input.phase))}`,
     "- 资产类型: 基金",
     `- 市场状态: ${formatMarketStateLabel(normalizeText(signalResult.marketState))}`,
-    `- 基准: ${normalizeText(signalResult.benchmark) || "-"}`,
+    `- 相对参照: ${normalizeText(signalResult.comparisonReference) || "-"}`,
     `- 生成时间: ${normalizeText(signalResult.generatedAt) || new Date().toISOString()}`,
     ""
   ];
@@ -290,12 +290,9 @@ function buildFundMetricSummary(
     metrics.push(`数据完整性: ${coverage}`);
   }
 
-  const latestLine = joinSlashParts([
-    compactMetricEntry("基金 ", reportContext.fund_series_summary.latest_value, 6, "", false),
-    compactMetricEntry("基准 ", reportContext.benchmark_series_summary.latest_value, 6, "", false)
-  ]);
-  if (latestLine) {
-    metrics.push(`最新值: ${latestLine}`);
+  const latestValue = compactMetricEntry("基金 ", reportContext.fund_series_summary.latest_value, 6, "", false);
+  if (latestValue) {
+    metrics.push(`最新值: ${latestValue}`);
   }
 
   const shortTerm = joinSlashParts([
@@ -325,9 +322,10 @@ function buildFundMetricSummary(
   }
 
   const relativeLine = joinSlashParts([
-    compactMetricEntry("20日超额", relative.benchmark_excess_20d, 2, "%", true),
-    compactMetricEntry("60日超额", relative.benchmark_excess_60d, 2, "%", true),
-    compactMetricEntry("跟踪偏离", relative.tracking_deviation, 2, "%", false)
+    compactMetricEntry("同类分位", relative.peer_percentile, 2, "", false),
+    compactMetricEntry("20日分位变化", relative.peer_percentile_change_20d, 2, "", true),
+    compactMetricEntry("60日分位变化", relative.peer_percentile_change_60d, 2, "", true),
+    compactRankEntry("同类排名", relative.peer_rank_position, relative.peer_rank_total)
   ]);
   if (relativeLine) {
     metrics.push(`相对表现: ${relativeLine}`);
@@ -366,12 +364,12 @@ function buildFundDataPerspectiveLines(
   const nav = asRecord(reportContext.feature_context.nav);
   const warnings = readStringList(reportContext.feature_context.warnings).slice(0, 4);
   const fundSeries = reportContext.fund_series_summary;
-  const benchmarkSeries = reportContext.benchmark_series_summary;
+  const peerPercentileSeries = reportContext.peer_percentile_summary;
   const lines: string[] = [];
 
   const snapshotLine = joinReadableParts([
     formatSeriesLatest("基金最新值", fundSeries),
-    formatSeriesLatest("基准最新值", benchmarkSeries),
+    formatSeriesLatest("同类百分位", peerPercentileSeries),
     formatRangeStatement("基金近60日区间", fundSeries)
   ]);
   if (snapshotLine) {
@@ -399,10 +397,10 @@ function buildFundDataPerspectiveLines(
   }
 
   const relativeLine = joinReadableParts([
-    metricStatement("近20日相对基准超额", relative.benchmark_excess_20d, 2, "%", true),
-    metricStatement("近60日相对基准超额", relative.benchmark_excess_60d, 2, "%", true),
-    metricStatement("跟踪偏离", relative.tracking_deviation, 2, "%", false),
-    metricStatement("同类分位", relative.peer_percentile, 2, "", false)
+    metricStatement("同类分位", relative.peer_percentile, 2, "", false),
+    metricStatement("20日分位变化", relative.peer_percentile_change_20d, 2, "", true),
+    metricStatement("60日分位变化", relative.peer_percentile_change_60d, 2, "", true),
+    rankStatement("同类排名", relative.peer_rank_position, relative.peer_rank_total)
   ]);
   if (relativeLine) {
     lines.push(`相对表现: ${relativeLine}`);
@@ -412,8 +410,6 @@ function buildFundDataPerspectiveLines(
     metricStatement("MA5 ", trading.ma5, 4, "", false),
     metricStatement("MA10 ", trading.ma10, 4, "", false),
     metricStatement("MA20 ", trading.ma20, 4, "", false),
-    metricStatement("10日均成交量 ", trading.liquidity_avg_volume_10d, 2, "", false),
-    metricStatement("量能变化", trading.volume_change_rate, 2, "%", true),
     metricStatement("折溢价", trading.premium_discount, 2, "%", true)
   ]);
   if (tradingLine) {
@@ -421,7 +417,7 @@ function buildFundDataPerspectiveLines(
   }
 
   const qualityLine = joinReadableParts([
-    metricStatement("超额收益稳定度", stability.excess_return_consistency, 2, "", false),
+    metricStatement("同类排名趋势", stability.excess_return_consistency, 2, "", false),
     metricStatement("风格漂移", stability.style_drift, 2, "", false),
     metricStatement("净值平滑异常", stability.nav_smoothing_anomaly, 2, "", false),
     metricStatement("20日净值斜率", nav.nav_slope_20d, 4, "", false),
@@ -454,6 +450,8 @@ function buildFundIntelligenceLines(
 ): string[] {
   const lines: string[] = [];
   const events = reportContext.events;
+  const reference = reportContext.reference_context;
+  const holdings = reportContext.holdings_style;
   const riskAlerts = asArray(dashboard.risk_alerts)
     .map((risk) => normalizeText(risk))
     .filter((risk): risk is string => Boolean(risk))
@@ -473,6 +471,14 @@ function buildFundIntelligenceLines(
   const managerChanges = summarizeStringList(events.manager_changes, 3);
   if (managerChanges) {
     lines.push(`基金经理变化: ${managerChanges}`);
+  }
+  const currentManagers = summarizeStringList(reference.current_managers, 3);
+  if (currentManagers) {
+    lines.push(`现任基金经理: ${currentManagers}`);
+  }
+  const topHoldings = summarizeStringList(holdings.top_holdings, 5);
+  if (topHoldings) {
+    lines.push(`十大重仓参考: ${topHoldings}`);
   }
   const subscriptionRedemption = summarizeStringList(events.subscription_redemption, 3);
   if (subscriptionRedemption) {
@@ -545,7 +551,8 @@ function buildFundChecklist(
   const risks = mergeMetricRecords(asRecord(dataPerspective.risk_metrics), asRecord(reportContext.feature_context.risk));
   const events = reportContext.events;
   const coverage = normalizeText(dataPerspective.feature_coverage);
-  const excess20d = toFiniteNumber(relative.benchmark_excess_20d);
+  const peerPercentile = toFiniteNumber(relative.peer_percentile);
+  const peerPercentileChange20d = toFiniteNumber(relative.peer_percentile_change_20d);
   const maxDrawdown = toFiniteNumber(risks.max_drawdown);
   const riskAlerts = asArray(dashboard.risk_alerts);
   const hasNews = Boolean(describeNewsStatus(reportContext));
@@ -558,8 +565,11 @@ function buildFundChecklist(
         ? "⚠️ 数据仅部分可用"
         : "❌ 数据完整度不足"
   );
-  if (excess20d !== null) {
-    items.push(excess20d >= 0 ? "✅ 近20日相对基准未转弱" : "⚠️ 近20日相对基准偏弱");
+  if (peerPercentile !== null) {
+    items.push(peerPercentile >= 50 ? "✅ 当前同类位置仍在中上区间" : "⚠️ 当前同类位置偏弱");
+  }
+  if (peerPercentileChange20d !== null) {
+    items.push(peerPercentileChange20d >= 0 ? "✅ 近20日同类位置未走弱" : "⚠️ 近20日同类位置回落");
   }
   if (maxDrawdown !== null) {
     items.push(maxDrawdown >= -5 ? "✅ 回撤仍在可控区间" : "⚠️ 回撤压力偏大");
@@ -647,6 +657,12 @@ function compactMetricEntry(
   return rendered ? `${label}${rendered}` : "";
 }
 
+function compactRankEntry(label: string, position: unknown, total: unknown): string {
+  const pos = formatMetricValue(position, 0, "", false);
+  const count = formatMetricValue(total, 0, "", false);
+  return pos && count ? `${label}${pos}/${count}` : "";
+}
+
 function joinSlashParts(items: string[]): string {
   return items.filter(Boolean).join("/");
 }
@@ -684,6 +700,12 @@ function metricStatement(
 ): string {
   const rendered = formatMetricValue(value, digits, suffix, signed);
   return rendered ? `${label}${rendered}` : "";
+}
+
+function rankStatement(label: string, position: unknown, total: unknown): string {
+  const pos = formatMetricValue(position, 0, "", false);
+  const count = formatMetricValue(total, 0, "", false);
+  return pos && count ? `${label}${pos}/${count}` : "";
 }
 
 function joinReadableParts(items: string[]): string {

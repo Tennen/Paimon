@@ -14,13 +14,30 @@ test("buildRunResponseText should format fund output as dashboard-style sections
               { date: "2026-03-14", value: 4.12 },
               { date: "2026-03-17", value: 4.28 }
             ],
-            benchmark_series: [
-              { date: "2026-03-13", value: 3988 },
-              { date: "2026-03-14", value: 4002 },
-              { date: "2026-03-17", value: 4015 }
-            ],
             source_chain: ["serpapi:google_news"],
             errors: [],
+            reference_context: {
+              comparison_reference: "同类基金百分位",
+              estimated_nav: 4.3,
+              estimated_nav_date: "2026-03-17",
+              estimated_nav_time: "14:35:00",
+              estimated_change_pct: 0.47,
+              peer_percentile: 88.2,
+              peer_rank_position: 18,
+              peer_rank_total: 240,
+              peer_percentile_series: [
+                { date: "2026-03-13", value: 84.5 },
+                { date: "2026-03-14", value: 86.1 },
+                { date: "2026-03-17", value: 88.2 }
+              ],
+              current_managers: ["张三", "李四"]
+            },
+            holdings_style: {
+              top_holdings: ["贵州茅台(9.80%)", "宁德时代(8.12%)"],
+              sector_exposure: {},
+              style_factor_exposure: {},
+              duration_credit_profile: {}
+            },
             account_context: {
               current_position: 100,
               avg_cost: 4.2,
@@ -50,15 +67,17 @@ test("buildRunResponseText should format fund output as dashboard-style sections
               drawdown_recovery_days: 8
             },
             relative: {
-              benchmark_excess_20d: 0.8,
-              benchmark_excess_60d: 1.1,
-              tracking_deviation: 0.9
+              peer_percentile: 88.2,
+              peer_percentile_change_20d: 6.4,
+              peer_percentile_change_60d: 10.8,
+              peer_rank_position: 18,
+              peer_rank_total: 240
             },
             trading: {
               ma5: 4.18,
               ma10: 4.12,
               ma20: 4.05,
-              volume_change_rate: 5.4
+              premium_discount: "not_supported"
             },
             stability: {
               excess_return_consistency: 1.2
@@ -77,7 +96,7 @@ test("buildRunResponseText should format fund output as dashboard-style sections
     signalResult: {
       phase: "close",
       marketState: "MARKET_NEUTRAL",
-      benchmark: "000300",
+      comparisonReference: "同类基金百分位",
       assetType: "fund",
       fund_dashboards: [
         {
@@ -92,7 +111,13 @@ test("buildRunResponseText should format fund output as dashboard-style sections
           data_perspective: {
             return_metrics: { ret_20d: 1.23, ret_60d: 3.45 },
             risk_metrics: { max_drawdown: -2.8, volatility_annualized: 11.2 },
-            relative_metrics: { benchmark_excess_20d: 0.8 },
+            relative_metrics: {
+              peer_percentile: 88.2,
+              peer_percentile_change_20d: 6.4,
+              peer_percentile_change_60d: 10.8,
+              peer_rank_position: 18,
+              peer_rank_total: 240
+            },
             feature_coverage: "ok"
           },
           rule_trace: {
@@ -109,8 +134,8 @@ test("buildRunResponseText should format fund output as dashboard-style sections
   });
 
   assert.match(text, /核心结论: hold。保持仓位，等待趋势确认。/);
-  assert.match(text, /数据视角: 数据完整性=完整；最新值=基金 4\.28\/基准 4015；短线回报=1日\+0\.45%\/5日\+1\.56%；中期回报=20日\+1\.23%\/60日\+3\.45%\/120日\+6\.78%/);
-  assert.match(text, /情报观察: 风险提示=波动率抬升；公告\/提示=披露季度报告；基金经理变化=基金经理分工调整；申赎约束=暂停大额申购；SerpAPI\(google_news\) 命中 1 条；样本=基金公告更新 \(中证网\)/);
+  assert.match(text, /数据视角: 数据完整性=完整；最新值=基金 4\.28；短线回报=1日\+0\.45%\/5日\+1\.56%；中期回报=20日\+1\.23%\/60日\+3\.45%\/120日\+6\.78%；风险=回撤-2\.8%\/波动11\.2%\/修复8天；相对表现=同类分位88\.2\/20日分位变化\+6\.4\/60日分位变化\+10\.8\/同类排名18\/240/);
+  assert.match(text, /情报观察: 风险提示=波动率抬升；公告\/提示=披露季度报告；基金经理变化=基金经理分工调整；现任基金经理=张三；李四；重仓参考=贵州茅台\(9\.80%\)；宁德时代\(8\.12%\)/);
   assert.match(text, /执行计划: 持仓者继续持有；未持仓者暂不追高；仓位处理=维持仓位；规则约束=禁止buy\/风控标记subscription_redemption_restriction；持仓背景=当前持仓100\/成本4\.2\/估算市值428\/估算盈亏\+1\.9%\/预算1000\/风险偏好均衡\/周期中期/);
   assert.match(text, /检查清单: /);
 });

@@ -2,9 +2,16 @@ import { FundFeatureContext, FundRawContext } from "./fund_types";
 
 export function buildFundFeatureContext(raw: FundRawContext): FundFeatureContext {
   const series = raw.price_or_nav_series;
-  const benchmark = raw.benchmark_series;
   const values = series.map((item) => item.value).filter((value) => Number.isFinite(value) && value > 0);
-  const benchmarkValues = benchmark.map((item) => item.value).filter((value) => Number.isFinite(value) && value > 0);
+  const peerPercentileSeries = Array.isArray(raw.reference_context.peer_percentile_series)
+    ? raw.reference_context.peer_percentile_series
+    : [];
+  const peerPercentileValues = peerPercentileSeries
+    .map((item) => Number(item.value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const peerPercentile = Number(raw.reference_context.peer_percentile);
+  const peerRankPosition = Number(raw.reference_context.peer_rank_position);
+  const peerRankTotal = Number(raw.reference_context.peer_rank_total);
 
   const ret1d = calculateWindowReturn(values, 1);
   const ret5d = calculateWindowReturn(values, 5);
@@ -26,36 +33,12 @@ export function buildFundFeatureContext(raw: FundRawContext): FundFeatureContext
     ? calculateRecoveryDays(values)
     : "not_supported";
 
-  const benchmarkRet20d = calculateWindowReturn(benchmarkValues, 20);
-  const benchmarkRet60d = calculateWindowReturn(benchmarkValues, 60);
-
-  const relativeRet20d = typeof ret20d === "number" && typeof benchmarkRet20d === "number"
-    ? round(ret20d - benchmarkRet20d, 4)
-    : "not_supported";
-
-  const relativeRet60d = typeof ret60d === "number" && typeof benchmarkRet60d === "number"
-    ? round(ret60d - benchmarkRet60d, 4)
-    : "not_supported";
-
-  const trackingDeviation =
-    dailyReturns.length >= 20 && benchmarkValues.length >= 21
-      ? calculateTrackingDeviation(values, benchmarkValues)
-      : "not_supported";
+  const peerPercentileChange20d = calculateWindowDelta(peerPercentileValues, 20);
+  const peerPercentileChange60d = calculateWindowDelta(peerPercentileValues, 60);
 
   const ma5 = movingAverage(values, 5);
   const ma10 = movingAverage(values, 10);
   const ma20 = movingAverage(values, 20);
-
-  const latestVolume = series.length > 0 ? Number(series[series.length - 1].volume ?? NaN) : NaN;
-  const avgVolume = average(
-    series
-      .slice(-10)
-      .map((item) => Number(item.volume ?? NaN))
-      .filter((item) => Number.isFinite(item) && item >= 0)
-  );
-  const volumeChangeRate = Number.isFinite(latestVolume) && Number.isFinite(avgVolume) && avgVolume > 0
-    ? round(((latestVolume - avgVolume) / avgVolume) * 100, 4)
-    : "not_supported";
 
   const navSlope20d = values.length >= 21
     ? round((values[values.length - 1] - values[values.length - 21]) / 20, 6)
@@ -93,13 +76,14 @@ export function buildFundFeatureContext(raw: FundRawContext): FundFeatureContext
     volatility,
     maxDrawdown,
     drawdownRecoveryDays,
-    relativeRet20d,
-    relativeRet60d,
-    trackingDeviation,
+    Number.isFinite(peerPercentile) ? peerPercentile : "not_supported",
+    peerPercentileChange20d,
+    peerPercentileChange60d,
+    Number.isFinite(peerRankPosition) ? peerRankPosition : "not_supported",
+    Number.isFinite(peerRankTotal) ? peerRankTotal : "not_supported",
     ma5,
     ma10,
     ma20,
-    volumeChangeRate,
     navSlope20d,
     sharpe,
     sortino,
@@ -131,24 +115,23 @@ export function buildFundFeatureContext(raw: FundRawContext): FundFeatureContext
       drawdown_recovery_days: drawdownRecoveryDays
     },
     stability: {
-      excess_return_consistency: typeof relativeRet20d === "number" && typeof relativeRet60d === "number"
-        ? round((relativeRet20d + relativeRet60d) / 2, 4)
+      excess_return_consistency: typeof peerPercentileChange20d === "number" && typeof peerPercentileChange60d === "number"
+        ? round((peerPercentileChange20d + peerPercentileChange60d) / 2, 4)
         : "not_supported",
       style_drift: "not_supported",
       nav_smoothing_anomaly: "not_supported"
     },
     relative: {
-      benchmark_excess_20d: relativeRet20d,
-      benchmark_excess_60d: relativeRet60d,
-      peer_percentile: "not_supported",
-      tracking_deviation: trackingDeviation
+      peer_percentile: Number.isFinite(peerPercentile) ? round(peerPercentile, 4) : "not_supported",
+      peer_percentile_change_20d: peerPercentileChange20d,
+      peer_percentile_change_60d: peerPercentileChange60d,
+      peer_rank_position: Number.isFinite(peerRankPosition) ? round(peerRankPosition, 0) : "not_supported",
+      peer_rank_total: Number.isFinite(peerRankTotal) ? round(peerRankTotal, 0) : "not_supported"
     },
     trading: {
       ma5,
       ma10,
       ma20,
-      liquidity_avg_volume_10d: Number.isFinite(avgVolume) ? round(avgVolume, 4) : "not_supported",
-      volume_change_rate: volumeChangeRate,
       premium_discount: "not_supported"
     },
     nav: {
@@ -175,6 +158,18 @@ function calculateWindowReturn(values: number[], window: number): number | "not_
     return "not_supported";
   }
   return round(((end - start) / start) * 100, 4);
+}
+
+function calculateWindowDelta(values: number[], window: number): number | "not_supported" {
+  if (values.length <= window) {
+    return "not_supported";
+  }
+  const start = values[values.length - 1 - window];
+  const end = values[values.length - 1];
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return "not_supported";
+  }
+  return round(end - start, 4);
 }
 
 function calculateMaxDrawdown(values: number[]): number {
@@ -244,38 +239,6 @@ function findMaxDrawdownBottom(values: number[]): number {
   }
 
   return bottomIdx;
-}
-
-function calculateTrackingDeviation(values: number[], benchmarkValues: number[]): number | "not_supported" {
-  const length = Math.min(values.length, benchmarkValues.length);
-  if (length < 21) {
-    return "not_supported";
-  }
-
-  const alignedValues = values.slice(-length);
-  const alignedBenchmark = benchmarkValues.slice(-length);
-
-  const excessDaily: number[] = [];
-  for (let idx = 1; idx < length; idx += 1) {
-    const prev = alignedValues[idx - 1];
-    const curr = alignedValues[idx];
-    const prevBenchmark = alignedBenchmark[idx - 1];
-    const currBenchmark = alignedBenchmark[idx];
-
-    if (prev <= 0 || prevBenchmark <= 0) {
-      continue;
-    }
-
-    const ret = (curr - prev) / prev;
-    const benchmarkRet = (currBenchmark - prevBenchmark) / prevBenchmark;
-    excessDaily.push(ret - benchmarkRet);
-  }
-
-  if (excessDaily.length < 20) {
-    return "not_supported";
-  }
-
-  return round(sampleStdDev(excessDaily) * Math.sqrt(252) * 100, 4);
 }
 
 function calculateSortino(dailyReturns: number[]): number | "not_supported" {

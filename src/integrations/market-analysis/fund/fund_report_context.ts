@@ -27,10 +27,11 @@ export type FundPositionSnapshot = {
 
 export type FundReportContext = {
   fund_series_summary: FundSeriesSummary;
-  benchmark_series_summary: FundSeriesSummary;
+  peer_percentile_summary: FundSeriesSummary;
   position_snapshot: FundPositionSnapshot;
   feature_context: FundFeatureContext;
   holdings_style: FundRawContext["holdings_style"];
+  reference_context: FundRawContext["reference_context"];
   account_context: FundRawContext["account_context"];
   events: FundRawContext["events"];
   source_chain: string[];
@@ -101,17 +102,18 @@ export function buildFundReportContext(
   featureContext: FundFeatureContext
 ): FundReportContext {
   const fundSeriesSummary = summarizeFundSeries(rawContext.price_or_nav_series);
-  const benchmarkSeriesSummary = summarizeFundSeries(rawContext.benchmark_series);
+  const peerPercentileSummary = summarizeFundSeries(rawContext.reference_context.peer_percentile_series);
   const latestValue = typeof fundSeriesSummary.latest_value === "number"
     ? fundSeriesSummary.latest_value
     : undefined;
 
   return {
     fund_series_summary: fundSeriesSummary,
-    benchmark_series_summary: benchmarkSeriesSummary,
+    peer_percentile_summary: peerPercentileSummary,
     position_snapshot: summarizeFundPosition(rawContext.account_context, latestValue),
     feature_context: featureContext,
     holdings_style: rawContext.holdings_style,
+    reference_context: rawContext.reference_context,
     account_context: rawContext.account_context,
     events: rawContext.events,
     source_chain: rawContext.source_chain,
@@ -140,7 +142,7 @@ export function createEmptyFundReportContext(): FundReportContext {
 
   return {
     fund_series_summary: summarizeFundSeries([]),
-    benchmark_series_summary: summarizeFundSeries([]),
+    peer_percentile_summary: summarizeFundSeries([]),
     position_snapshot: summarizeFundPosition(accountContext),
     feature_context: emptyFeatureContext,
     holdings_style: {
@@ -148,6 +150,10 @@ export function createEmptyFundReportContext(): FundReportContext {
       sector_exposure: {},
       style_factor_exposure: {},
       duration_credit_profile: {}
+    },
+    reference_context: {
+      peer_percentile_series: [],
+      current_managers: []
     },
     account_context: accountContext,
     events: {

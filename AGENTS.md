@@ -106,6 +106,7 @@ This file defines hard constraints for coding agents working in this repository.
 ## API And Contract Rules
 
 - Keep request/response schemas backward compatible unless the change explicitly includes migration.
+- For user-directed logic iterations or refactors, default to replacing old logic and related storage/display contracts in the same change; do not add backward-compatibility shims unless the user explicitly asks for compatibility or migration.
 - If admin API schema changes, update `admin-web/src/types/admin.ts` and affected UI components in the same change.
 - New env vars must be documented in `.env.example`; remove dead env vars when no longer used.
 - LLM provider selection contract must stay centralized in `src/engines/llm/engine_factory.ts`.

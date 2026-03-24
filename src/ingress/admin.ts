@@ -119,7 +119,7 @@ type MarketRunSummary = {
   createdAt: string;
   phase: MarketPhase;
   marketState: string;
-  benchmark?: string;
+  comparisonReference?: string;
   assetSignalCount: number;
   signals: Array<{ code: string; signal: string }>;
   explanationSummary?: string;
@@ -2459,7 +2459,7 @@ function normalizeMarketRunSummaryFromRecord(
     createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
     phase,
     marketState: typeof signalResult.marketState === "string" ? signalResult.marketState : "",
-    benchmark: typeof signalResult.benchmark === "string" ? signalResult.benchmark : "",
+    comparisonReference: typeof signalResult.comparisonReference === "string" ? signalResult.comparisonReference : "",
     assetSignalCount: compactSignals.length,
     signals: compactSignals.slice(0, 8),
     explanationSummary: typeof explanation.summary === "string" ? explanation.summary : ""
@@ -2561,7 +2561,7 @@ function normalizeMarketRunSummary(input: unknown): MarketRunSummary | null {
     createdAt: typeof source.createdAt === "string" ? source.createdAt : "",
     phase,
     marketState: typeof source.marketState === "string" ? source.marketState : "",
-    benchmark: typeof source.benchmark === "string" ? source.benchmark : "",
+    comparisonReference: typeof source.comparisonReference === "string" ? source.comparisonReference : "",
     assetSignalCount: Number.isFinite(Number(source.assetSignalCount))
       ? Math.max(0, Math.floor(Number(source.assetSignalCount)))
       : signals.length,

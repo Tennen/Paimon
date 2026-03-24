@@ -619,7 +619,7 @@ export function MarketSection(props: MarketSectionProps) {
                   <TableCell>{run.phase === "close" ? "收盘" : "盘中"}</TableCell>
                   <TableCell>
                     <div>{run.marketState || "-"}</div>
-                    <div className="mono text-xs text-muted-foreground">{run.benchmark || "-"}</div>
+                    <div className="mono text-xs text-muted-foreground">{run.comparisonReference || "-"}</div>
                   </TableCell>
                   <TableCell className="text-xs">
                     {run.signals.length > 0

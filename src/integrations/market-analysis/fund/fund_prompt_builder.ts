@@ -19,7 +19,7 @@ export function buildFundSystemPrompt(): string {
     "分析架构请尽量向“决策仪表盘”靠拢：核心结论、数据透视、舆情情报、作战计划四块必须清晰分工。",
     "虽然输出是 FundDecisionDashboard JSON，但字段语义必须对应这四块：core_conclusion=核心结论，data_perspective=数据透视，risk_alerts=舆情风险看板，action_plan=作战计划。",
     "核心结论、风险提示、执行建议要写成自然中文，不要照抄字段名、枚举值或程序化描述。",
-    "不同基金使用对应指标表达：ETF/指数基金优先参考相对基准、跟踪偏离、折溢价、流动性；主动基金优先参考收益、回撤、波动、基金经理与申赎事件。",
+    "不同基金使用对应指标表达：ETF/指数基金优先参考同类百分位、同类排名变化、折溢价；主动基金优先参考收益、回撤、波动、基金经理与申赎事件。",
     "如果数据不足，必须在 insufficient_data 中明确标记，并把建议收敛到保守动作。",
     "若 blocked_actions 非空，decision_type 与 action_plan 不能与其冲突。",
     "结论要先给动作，再给理由，再给执行条件和停止条件。",
@@ -31,7 +31,7 @@ export function buildFundSystemPrompt(): string {
 export function buildFundUserPrompt(input: FundPromptInput): string {
   const reportContext = buildFundReportContext(input.raw, input.features);
   const fundSeriesSummary = reportContext.fund_series_summary;
-  const benchmarkSeriesSummary = reportContext.benchmark_series_summary;
+  const peerPercentileSummary = reportContext.peer_percentile_summary;
   const payload = prunePromptPayload({
     prompt_meta: {
       version: PROMPT_VERSION,
@@ -60,11 +60,12 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     },
     market_snapshot: {
       fund_series_summary: fundSeriesSummary,
-      benchmark_code: input.raw.benchmark_code,
-      benchmark_series_summary: benchmarkSeriesSummary,
+      comparison_reference: input.raw.reference_context.comparison_reference,
+      peer_percentile_summary: peerPercentileSummary,
       position_snapshot: reportContext.position_snapshot,
       raw_context_summary: {
         holdings_style: reportContext.holdings_style,
+        reference_context: reportContext.reference_context,
         account_context: reportContext.account_context
       },
       data_quality: {
@@ -74,7 +75,7 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
         ingestion_errors: reportContext.errors.slice(0, 12)
       },
       series_points: input.raw.price_or_nav_series.slice(-MAX_SERIES_POINTS),
-      benchmark_points: input.raw.benchmark_series.slice(-MAX_SERIES_POINTS)
+      peer_percentile_points: input.raw.reference_context.peer_percentile_series.slice(-MAX_SERIES_POINTS)
     },
     feature_context: input.features,
     rule_result: {
@@ -132,22 +133,26 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     `| 策略属性 | ${formatStrategyTypeLabel(input.raw.identity.strategy_type)} |`,
     `| 交易方式 | ${formatTradableLabel(input.raw.identity.tradable)} |`,
     `| 市场/币种 | ${formatMarketLabel(input.raw.identity.market)} / ${input.raw.identity.currency || "CNY"} |`,
-    `| 参考基准 | ${input.raw.benchmark_code || "未提供"} |`,
+    `| 相对参照 | ${input.raw.reference_context.comparison_reference || "未提供"} |`,
     "",
     "## 📈 数据透视",
-    "### 净值与阶段表现",
-    "| 指标 | 基金 | 基准 |",
-    "| --- | --- | --- |",
-    `| 最新净值/价格 | ${formatPromptMetricValue(fundSeriesSummary.latest_value, 6)} | ${formatPromptMetricValue(benchmarkSeriesSummary.latest_value, 6)} |`,
-    `| 最新日期 | ${formatPromptText(fundSeriesSummary.latest_date)} | ${formatPromptText(benchmarkSeriesSummary.latest_date)} |`,
-    `| 近1日收益 | ${formatPromptPercent(fundSeriesSummary.ret_1d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_1d)} |`,
-    `| 近5日收益 | ${formatPromptPercent(fundSeriesSummary.ret_5d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_5d)} |`,
-    `| 近20日收益 | ${formatPromptPercent(fundSeriesSummary.ret_20d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_20d)} |`,
-    `| 近60日收益 | ${formatPromptPercent(fundSeriesSummary.ret_60d)} | ${formatPromptPercent(benchmarkSeriesSummary.ret_60d)} |`,
-    `| 20日净值斜率 | ${formatPromptMetricValue(fundSeriesSummary.nav_slope_20d, 6)} | 数据不足 |`,
-    `| 近60日区间 | ${formatRangeText(fundSeriesSummary.low_60d, fundSeriesSummary.high_60d, 6)} | ${formatRangeText(benchmarkSeriesSummary.low_60d, benchmarkSeriesSummary.high_60d, 6)} |`,
+    "### 净值与同类位置",
+    "| 项目 | 数据 |",
+    "| --- | --- |",
+    `| 最新净值/价格 | ${formatPromptMetricValue(fundSeriesSummary.latest_value, 6)} |`,
+    `| 最新日期 | ${formatPromptText(fundSeriesSummary.latest_date)} |`,
+    `| 近1日收益 | ${formatPromptPercent(fundSeriesSummary.ret_1d)} |`,
+    `| 近5日收益 | ${formatPromptPercent(fundSeriesSummary.ret_5d)} |`,
+    `| 近20日收益 | ${formatPromptPercent(fundSeriesSummary.ret_20d)} |`,
+    `| 近60日收益 | ${formatPromptPercent(fundSeriesSummary.ret_60d)} |`,
+    `| 20日净值斜率 | ${formatPromptMetricValue(fundSeriesSummary.nav_slope_20d, 6)} |`,
+    `| 近60日区间 | ${formatRangeText(fundSeriesSummary.low_60d, fundSeriesSummary.high_60d, 6)} |`,
+    `| 当前同类百分位 | ${formatPromptMetricValue(input.features.relative.peer_percentile, 2)} |`,
+    `| 20日百分位变化 | ${formatPromptMetricValue(input.features.relative.peer_percentile_change_20d, 2)} |`,
+    `| 60日百分位变化 | ${formatPromptMetricValue(input.features.relative.peer_percentile_change_60d, 2)} |`,
+    `| 同类排名 | ${formatPeerRankText(input.features.relative.peer_rank_position, input.features.relative.peer_rank_total)} |`,
     "",
-    "### 风险收益与相对基准",
+    "### 风险收益与同类对照",
     `- 收益表现: ${buildFeatureLine([
       metricPair("近1日", input.features.returns.ret_1d, "percent"),
       metricPair("近5日", input.features.returns.ret_5d, "percent"),
@@ -161,21 +166,19 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
       metricPair("回撤修复天数", input.features.risk.drawdown_recovery_days, "plain")
     ])}`,
     `- 相对表现: ${buildFeatureLine([
-      metricPair("近20日超额", input.features.relative.benchmark_excess_20d, "percent"),
-      metricPair("近60日超额", input.features.relative.benchmark_excess_60d, "percent"),
       metricPair("同类分位", input.features.relative.peer_percentile, "plain"),
-      metricPair("跟踪偏离", input.features.relative.tracking_deviation, "percent")
+      metricPair("20日分位变化", input.features.relative.peer_percentile_change_20d, "plain"),
+      metricPair("60日分位变化", input.features.relative.peer_percentile_change_60d, "plain"),
+      metricPair("同类排名", formatPeerRankText(input.features.relative.peer_rank_position, input.features.relative.peer_rank_total), "text")
     ])}`,
-    `- 交易与流动性: ${buildFeatureLine([
+    `- 交易参考: ${buildFeatureLine([
       metricPair("MA5", input.features.trading.ma5, "plain"),
       metricPair("MA10", input.features.trading.ma10, "plain"),
       metricPair("MA20", input.features.trading.ma20, "plain"),
-      metricPair("10日均成交量", input.features.trading.liquidity_avg_volume_10d, "plain"),
-      metricPair("量能变化", input.features.trading.volume_change_rate, "percent"),
       metricPair("折溢价", input.features.trading.premium_discount, "percent")
     ])}`,
     `- 稳定性与质量: ${buildFeatureLine([
-      metricPair("超额收益稳定度", input.features.stability.excess_return_consistency, "plain"),
+      metricPair("同类排名趋势", input.features.stability.excess_return_consistency, "plain"),
       metricPair("风格漂移", input.features.stability.style_drift, "plain"),
       metricPair("净值平滑异常", input.features.stability.nav_smoothing_anomaly, "plain"),
       metricPair("Sharpe", input.features.nav.sharpe, "plain"),
@@ -195,6 +198,8 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     `| 可用预算 | ${formatPromptMetricValue(positionSummary.budget, 2)} |`,
     `| 风险偏好 | ${formatRiskPreferenceLabel(positionSummary.risk_preference)} |`,
     `| 持有周期 | ${formatHoldingHorizonLabel(positionSummary.holding_horizon)} |`,
+    `| 现任基金经理 | ${formatTextList(input.raw.reference_context.current_managers, "数据不足")} |`,
+    `| 十大重仓参考 | ${formatTextList(input.raw.holdings_style.top_holdings, "数据不足")} |`,
     "",
     "## 🧭 规则约束与当前判断",
     `- 当前规则分数: ${formatPromptMetricValue(input.rules.rule_adjusted_score, 0)} / 100`,
@@ -214,14 +219,14 @@ export function buildFundUserPrompt(input: FundPromptInput): string {
     "请基于以上信息输出一个完整的 FundDecisionDashboard JSON，并遵守以下要求：",
     "### 决策仪表盘四块结构（必须吸收）",
     "1. 核心结论：`core_conclusion.one_sentence` 先给动作，再给一句原因；不要写成程序字段解释。",
-    "2. 数据透视：`core_conclusion.thesis` 至少给 2 条，分别覆盖收益/回撤/相对基准/流动性中的关键事实。",
+    "2. 数据透视：`core_conclusion.thesis` 至少给 2 条，分别覆盖收益/回撤/同类对照中的关键事实。",
     "3. 舆情情报：`risk_alerts` 不只是罗列风险词，要像情报板一样指出当前最值得盯的新闻、公告或限制。",
     "4. 作战计划：`action_plan` 要像作战计划，优先同时说明持仓者怎么做、未持仓者能不能追，以及什么条件下执行、什么条件下停止。",
     "",
     "### 重点要求",
-    "- `core_conclusion.one_sentence` 要像 Python 股票分析里的“一句话核心结论”，简洁、直接、有动作。",
+    "- `core_conclusion.one_sentence` 要像成熟基金日报里的“一句话核心结论”，简洁、直接、有动作。",
     "- `action_plan.suggestion` 尽量写成“持仓者...；未持仓者...”这种双视角句式，而不是单句口号。",
-    "- ETF/指数基金不要套用股票特有口径，优先使用相对基准、跟踪偏离、流动性、折溢价等基金指标。",
+    "- ETF/指数基金不要套用股票特有口径，优先使用同类百分位、同类排名变化、折溢价等基金指标。",
     "- `risk_alerts` 优先写限制性因素、回撤/波动、申赎限制、基金经理变化和监管风险。",
     "- 如果 `blocked_actions` 非空，最终动作和执行计划不得与之冲突。",
     "- 如果数据不足或事件不清晰，要直接承认不确定性并给保守建议。",
@@ -295,7 +300,7 @@ function buildFundDashboardSchemaHint(): Record<string, unknown> {
     data_perspective: {
       return_metrics: "收益与净值表现",
       risk_metrics: "回撤/波动/修复",
-      relative_metrics: "相对基准/同类/跟踪",
+      relative_metrics: "同类百分位/同类排名变化",
       feature_coverage: "ok|partial|insufficient"
     },
     rule_trace: {
@@ -337,12 +342,23 @@ function buildFeatureLine(items: Array<{ label: string; value: string } | null>)
 function metricPair(
   label: string,
   value: unknown,
-  mode: "plain" | "percent"
+  mode: "plain" | "percent" | "text"
 ): { label: string; value: string } | null {
   const text = mode === "percent"
     ? formatPromptPercent(value)
-    : formatPromptMetricValue(value, 4);
+    : mode === "text"
+      ? formatPromptText(value)
+      : formatPromptMetricValue(value, 4);
   return text === "数据不足" ? null : { label: `${label} `, value: text };
+}
+
+function formatPeerRankText(position: unknown, total: unknown): string {
+  const pos = formatPromptMetricValue(position, 0);
+  const count = formatPromptMetricValue(total, 0);
+  if (pos === "数据不足" || count === "数据不足") {
+    return "数据不足";
+  }
+  return `${pos}/${count}`;
 }
 
 function formatInstrumentLabel(name: string, code: string): string {

@@ -71,7 +71,7 @@ export function summarizeRun(run) {
     createdAt: run.createdAt,
     phase: run.phase,
     marketState: run.signalResult ? run.signalResult.marketState : "",
-    benchmark: run.signalResult ? run.signalResult.benchmark : "",
+    comparisonReference: run.signalResult ? run.signalResult.comparisonReference : "",
     assetSignalCount: signals.length,
     signals: signals.slice(0, 8).map((item) => ({
       code: item.code,

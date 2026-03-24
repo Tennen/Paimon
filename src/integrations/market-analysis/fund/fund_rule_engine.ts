@@ -40,16 +40,6 @@ export function evaluateFundRules(input: FundRuleInput): FundRuleOutput {
     score -= 8;
   }
 
-  if (raw.identity.tradable === "intraday") {
-    const liquidity = features.trading.liquidity_avg_volume_10d;
-    if (typeof liquidity === "number" && liquidity < 500000) {
-      ruleFlags.push("low_liquidity");
-      blockedActions.add("buy");
-      blockedActions.add("add");
-      score -= 12;
-    }
-  }
-
   const subscriptionRestriction = raw.events.subscription_redemption.some((item) => /暂停|限制|限购|限赎/.test(item));
   if (subscriptionRestriction) {
     ruleFlags.push("subscription_redemption_restriction");
@@ -112,9 +102,14 @@ function baseScoreFromFeatures(features: FundFeatureContext): number {
     score += ret60d >= 10 ? 10 : ret60d >= 0 ? 4 : -10;
   }
 
-  const relative20d = features.relative.benchmark_excess_20d;
-  if (typeof relative20d === "number") {
-    score += relative20d > 0 ? 6 : -6;
+  const peerPercentile = features.relative.peer_percentile;
+  if (typeof peerPercentile === "number") {
+    score += peerPercentile >= 75 ? 8 : peerPercentile >= 50 ? 4 : peerPercentile <= 25 ? -8 : -2;
+  }
+
+  const peerPercentileChange20d = features.relative.peer_percentile_change_20d;
+  if (typeof peerPercentileChange20d === "number") {
+    score += peerPercentileChange20d >= 5 ? 4 : peerPercentileChange20d >= 0 ? 1 : -4;
   }
 
   const volatility = features.risk.volatility_annualized;

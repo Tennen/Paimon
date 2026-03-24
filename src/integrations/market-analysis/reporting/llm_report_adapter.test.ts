@@ -61,16 +61,17 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
               drawdown_recovery_days: 8
             },
             relative: {
-              benchmark_excess_20d: 0.8,
-              benchmark_excess_60d: 1.1,
-              tracking_deviation: 0.9
+              peer_percentile: 88.2,
+              peer_percentile_change_20d: 6.4,
+              peer_percentile_change_60d: 10.8,
+              peer_rank_position: 18,
+              peer_rank_total: 240
             },
             trading: {
               ma5: 4.18,
               ma10: 4.12,
               ma20: 4.05,
-              liquidity_avg_volume_10d: 120000,
-              volume_change_rate: 5.4
+              premium_discount: "not_supported"
             },
             stability: {
               excess_return_consistency: 1.2
@@ -116,17 +117,27 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
               { date: "2026-03-14", value: 4.12 },
               { date: "2026-03-17", value: 4.28 }
             ],
-            benchmark_series: [
-              { date: "2026-03-13", value: 3988 },
-              { date: "2026-03-14", value: 4002 },
-              { date: "2026-03-17", value: 4015 }
-            ],
-            benchmark_code: "000300",
             holdings_style: {
-              top_holdings: [],
+              top_holdings: ["贵州茅台(9.80%)", "宁德时代(8.12%)"],
               sector_exposure: {},
               style_factor_exposure: {},
               duration_credit_profile: {}
+            },
+            reference_context: {
+              comparison_reference: "同类基金百分位",
+              estimated_nav: 4.3,
+              estimated_nav_date: "2026-03-17",
+              estimated_nav_time: "14:35:00",
+              estimated_change_pct: 0.47,
+              peer_percentile: 88.2,
+              peer_rank_position: 18,
+              peer_rank_total: 240,
+              peer_percentile_series: [
+                { date: "2026-03-13", value: 84.5 },
+                { date: "2026-03-14", value: 86.1 },
+                { date: "2026-03-17", value: 88.2 }
+              ],
+              current_managers: ["张三", "李四"]
             },
             source_chain: ["serpapi:google_news"],
             errors: [],
@@ -151,7 +162,7 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
     signalResult: {
       phase: "close",
       marketState: "MARKET_NEUTRAL",
-      benchmark: "000300",
+      comparisonReference: "同类基金百分位",
       generatedAt: "2026-03-17T00:00:00.000Z",
       assetSignals: [{ code: "510300", signal: "HOLD" }],
       assetType: "fund",
@@ -177,7 +188,13 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
           data_perspective: {
             return_metrics: { ret_20d: 1.23, ret_60d: 3.45 },
             risk_metrics: { max_drawdown: -2.8, volatility_annualized: 11.2 },
-            relative_metrics: { benchmark_excess_20d: 0.8 },
+            relative_metrics: {
+              peer_percentile: 88.2,
+              peer_percentile_change_20d: 6.4,
+              peer_percentile_change_60d: 10.8,
+              peer_rank_position: 18,
+              peer_rank_total: 240
+            },
             feature_coverage: "ok"
           },
           rule_trace: {
@@ -219,13 +236,16 @@ test("buildMarketReportSourceMarkdown should include fund dashboard context", ()
   assert.match(sourceMarkdown, /当前动作: 持有/);
   assert.match(sourceMarkdown, /一句话判断: 保持仓位，等待趋势确认。/);
   assert.match(sourceMarkdown, /#### 数据视角/);
-  assert.match(sourceMarkdown, /净值快照: 基金最新值 4\.28 \(2026-03-17\)；基准最新值 4015 \(2026-03-17\)；基金近60日区间 4\.05 - 4\.28/);
+  assert.match(sourceMarkdown, /净值快照: 基金最新值 4\.28 \(2026-03-17\)；同类百分位 88\.2 \(2026-03-17\)；基金近60日区间 4\.05 - 4\.28/);
   assert.match(sourceMarkdown, /收益表现: 近1日回报\+0\.45%；近5日回报\+1\.56%；近20日回报\+1\.23%；近60日回报\+3\.45%；近120日回报\+6\.78%/);
   assert.match(sourceMarkdown, /风险刻画: 最大回撤-2\.8%；年化波动11\.2%；回撤修复8天/);
-  assert.match(sourceMarkdown, /交易结构: MA5 4\.18；MA10 4\.12；MA20 4\.05；10日均成交量 120000；量能变化\+5\.4%/);
+  assert.match(sourceMarkdown, /相对表现: 同类分位88\.2；20日分位变化\+6\.4；60日分位变化\+10\.8；同类排名18\/240/);
+  assert.match(sourceMarkdown, /交易结构: MA5 4\.18；MA10 4\.12；MA20 4\.05/);
   assert.match(sourceMarkdown, /#### 情报观察/);
   assert.match(sourceMarkdown, /公告\/提示: 披露季度报告/);
   assert.match(sourceMarkdown, /基金经理变化: 基金经理分工调整/);
+  assert.match(sourceMarkdown, /现任基金经理: 张三；李四/);
+  assert.match(sourceMarkdown, /十大重仓参考: 贵州茅台\(9\.80%\)；宁德时代\(8\.12%\)/);
   assert.match(sourceMarkdown, /申购赎回约束: 暂停大额申购/);
   assert.match(sourceMarkdown, /新闻检索: SerpAPI\(google_news\) 命中 1 条/);
   assert.match(sourceMarkdown, /#### 执行计划/);

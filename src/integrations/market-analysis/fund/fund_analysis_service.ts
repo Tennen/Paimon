@@ -26,8 +26,7 @@ import {
 } from "./fund_types";
 
 const DEFAULT_TIMEOUT_MS = 12000;
-const SH_INDEX_CODES = new Set(["000001", "000016", "000300", "000688", "000905", "000852"]);
-const SZ_INDEX_CODES = new Set(["399001", "399005", "399006", "399102", "399303"]);
+const DEFAULT_COMPARISON_REFERENCE = "同类基金百分位";
 
 export type RunFundAnalysisInput = {
   phase: MarketPhase;
@@ -211,12 +210,14 @@ export async function runFundAnalysis(input: RunFundAnalysisInput): Promise<RunF
   }
 
   const generatedAt = new Date().toISOString();
-  const benchmark = records.find((item) => item.raw.benchmark_code)?.raw.benchmark_code || "";
+  const comparisonReference = records.find((item) => item.raw.reference_context.comparison_reference)
+    ?.raw.reference_context.comparison_reference
+    || DEFAULT_COMPARISON_REFERENCE;
 
   const signalResult: FundAnalysisOutput = {
     phase: input.phase,
     marketState: inferMarketState(records),
-    benchmark,
+    comparisonReference,
     generatedAt,
     assetSignals: records.map((item) => ({
       code: item.identity.fund_code,
@@ -310,17 +311,15 @@ async function collectRawContext(
   const sourceChain: string[] = [];
   const errors: string[] = [];
 
-  const seriesResult = identity.tradable === "intraday"
-    ? await fetchExchangeFundSeries(identity.fund_code, options.lookbackDays, options.timeoutMs)
-    : await fetchOtcFundSeries(identity.fund_code, options.lookbackDays, options.timeoutMs);
+  const baseData = await fetchFundBaseData(identity.fund_code, options.lookbackDays, options.timeoutMs);
 
-  sourceChain.push(...seriesResult.source_chain);
-  errors.push(...seriesResult.errors);
+  sourceChain.push(...baseData.source_chain);
+  errors.push(...baseData.errors);
 
-  if (seriesResult.series.length === 0) {
+  if (baseData.series.length === 0) {
     logFundBaseDataFailure(identity, {
-      sourceChain: seriesResult.source_chain,
-      errors: seriesResult.errors
+      sourceChain: baseData.source_chain,
+      errors: baseData.errors
     });
     const raw = buildBaseDataFailureRawContext(identity, options.accountCash, {
       sourceChain,
@@ -337,11 +336,6 @@ async function collectRawContext(
     };
   }
 
-  const benchmarkCode = chooseBenchmarkCode(identity.strategy_type);
-  const benchmarkSeries = await fetchBenchmarkSeries(benchmarkCode, options.lookbackDays, options.timeoutMs);
-  sourceChain.push(...benchmarkSeries.source_chain);
-  errors.push(...benchmarkSeries.errors);
-
   const news = await fetchFundNews({
     fundCode: identity.fund_code,
     fundName: identity.fund_name,
@@ -355,26 +349,23 @@ async function collectRawContext(
   sourceChain.push(...news.source_chain);
   errors.push(...news.errors);
 
-  const events = classifyEventsFromNews(news.items);
-  const asOfDate = inferAsOfDate(seriesResult.series);
+  const newsEvents = classifyEventsFromNews(news.items);
+  const asOfDate = inferAsOfDate(baseData.series);
 
   const raw: FundRawContext = {
     identity,
     as_of_date: asOfDate,
-    price_or_nav_series: seriesResult.series,
-    benchmark_series: benchmarkSeries.series,
-    benchmark_code: benchmarkCode,
-    holdings_style: {
-      top_holdings: [],
-      sector_exposure: {},
-      style_factor_exposure: {},
-      duration_credit_profile: {}
-    },
+    price_or_nav_series: baseData.series,
+    holdings_style: baseData.holdings_style,
+    reference_context: baseData.reference_context,
     events: {
-      notices: events.notices,
-      manager_changes: events.manager_changes,
-      subscription_redemption: events.subscription_redemption,
-      regulatory_risks: events.regulatory_risks,
+      notices: dedupStrings([...baseData.events.notices, ...newsEvents.notices]),
+      manager_changes: dedupStrings([...baseData.events.manager_changes, ...newsEvents.manager_changes]),
+      subscription_redemption: dedupStrings([
+        ...baseData.events.subscription_redemption,
+        ...newsEvents.subscription_redemption
+      ]),
+      regulatory_risks: dedupStrings([...baseData.events.regulatory_risks, ...newsEvents.regulatory_risks]),
       market_news: news.items
     },
     account_context: {
@@ -719,19 +710,19 @@ function inferMarketState(records: Array<{ feature: FundFeatureContext }>): stri
   }
 
   const values = records
-    .map((item) => item.feature.relative.benchmark_excess_20d)
+    .map((item) => item.feature.relative.peer_percentile)
     .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
 
   if (values.length === 0) {
     return "MARKET_NEUTRAL";
   }
 
-  const avgExcess = values.reduce((acc, item) => acc + item, 0) / values.length;
+  const avgPercentile = values.reduce((acc, item) => acc + item, 0) / values.length;
 
-  if (avgExcess >= 1.5) {
+  if (avgPercentile >= 65) {
     return "MARKET_STRONG";
   }
-  if (avgExcess <= -1.5) {
+  if (avgPercentile <= 35) {
     return "MARKET_WEAK";
   }
   return "MARKET_NEUTRAL";
@@ -742,9 +733,6 @@ function inferMissingFields(raw: FundRawContext, feature: FundFeatureContext): s
 
   if (raw.price_or_nav_series.length === 0) {
     missing.push("price_or_nav_series");
-  }
-  if (raw.benchmark_series.length === 0) {
-    missing.push("benchmark_series");
   }
   if (!raw.as_of_date) {
     missing.push("as_of_date");
@@ -780,17 +768,16 @@ function buildSkippedFundFeatureContext(): FundFeatureContext {
       nav_smoothing_anomaly: "not_supported"
     },
     relative: {
-      benchmark_excess_20d: "not_supported",
-      benchmark_excess_60d: "not_supported",
       peer_percentile: "not_supported",
-      tracking_deviation: "not_supported"
+      peer_percentile_change_20d: "not_supported",
+      peer_percentile_change_60d: "not_supported",
+      peer_rank_position: "not_supported",
+      peer_rank_total: "not_supported"
     },
     trading: {
       ma5: "not_supported",
       ma10: "not_supported",
       ma20: "not_supported",
-      liquidity_avg_volume_10d: "not_supported",
-      volume_change_rate: "not_supported",
       premium_discount: "not_supported"
     },
     nav: {
@@ -864,6 +851,23 @@ function buildSkippedFundDashboard(input: {
   };
 }
 
+function buildEmptyHoldingsStyle(): FundRawContext["holdings_style"] {
+  return {
+    top_holdings: [],
+    sector_exposure: {},
+    style_factor_exposure: {},
+    duration_credit_profile: {}
+  };
+}
+
+function buildEmptyReferenceContext(): FundRawContext["reference_context"] {
+  return {
+    comparison_reference: DEFAULT_COMPARISON_REFERENCE,
+    peer_percentile_series: [],
+    current_managers: []
+  };
+}
+
 function buildBaseDataFailureRawContext(
   identity: FundIdentity,
   accountCash: number,
@@ -876,14 +880,8 @@ function buildBaseDataFailureRawContext(
     identity,
     as_of_date: todayDate(),
     price_or_nav_series: [],
-    benchmark_series: [],
-    benchmark_code: chooseBenchmarkCode(identity.strategy_type),
-    holdings_style: {
-      top_holdings: [],
-      sector_exposure: {},
-      style_factor_exposure: {},
-      duration_credit_profile: {}
-    },
+    holdings_style: buildEmptyHoldingsStyle(),
+    reference_context: buildEmptyReferenceContext(),
     events: {
       notices: [],
       manager_changes: [],
@@ -923,16 +921,6 @@ function logFundBaseDataFailure(
   );
 }
 
-function chooseBenchmarkCode(strategy: StrategyType): string {
-  if (strategy === "bond") {
-    return "000012";
-  }
-  if (strategy === "money_market") {
-    return "000001";
-  }
-  return "000300";
-}
-
 function classifyEventsFromNews(items: FundRawContext["events"]["market_news"]): {
   notices: string[];
   manager_changes: string[];
@@ -969,141 +957,147 @@ function classifyEventsFromNews(items: FundRawContext["events"]["market_news"]):
   };
 }
 
-async function fetchBenchmarkSeries(code: string, lookbackDays: number, timeoutMs: number): Promise<{
-  series: FundRawContext["benchmark_series"];
-  source_chain: string[];
-  errors: string[];
-}> {
-  const secid = toSecId(code, "index");
-  if (!secid) {
-    return {
-      series: [],
-      source_chain: ["benchmark:secid_missing"],
-      errors: ["benchmark secid missing"]
-    };
-  }
-
-  try {
-    const history = await fetchHistoryKline(secid, lookbackDays, timeoutMs);
-    return {
-      series: history.points,
-      source_chain: ["eastmoney:index_history"],
-      errors: []
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(
-      `[MarketAnalysis][fund][benchmark] fallback code=${code || "-"} secid=${secid || "-"} lookbackDays=${lookbackDays} error=${message}`
-    );
-    return {
-      series: [],
-      source_chain: ["eastmoney:index_history"],
-      errors: [message]
-    };
-  }
-}
-
-async function fetchExchangeFundSeries(code: string, lookbackDays: number, timeoutMs: number): Promise<{
+type FundBaseDataResult = {
   series: FundRawContext["price_or_nav_series"];
+  holdings_style: FundRawContext["holdings_style"];
+  reference_context: FundRawContext["reference_context"];
+  events: Pick<FundRawContext["events"], "notices" | "manager_changes" | "subscription_redemption" | "regulatory_risks">;
   source_chain: string[];
   errors: string[];
-}> {
-  const secid = toSecId(code, "fund");
-  if (!secid) {
-    return {
-      series: [],
-      source_chain: ["exchange_fund:secid_missing"],
-      errors: ["fund secid missing"]
-    };
-  }
+};
 
-  try {
-    const [quoteResult, historyResult] = await Promise.allSettled([
-      fetchQuote(secid, timeoutMs),
-      fetchHistoryKline(secid, lookbackDays, timeoutMs)
-    ]);
-
-    if (historyResult.status !== "fulfilled") {
-      const historyError = historyResult.reason instanceof Error
-        ? historyResult.reason.message
-        : String(historyResult.reason);
-      const quoteError = quoteResult.status === "rejected"
-        ? (quoteResult.reason instanceof Error ? quoteResult.reason.message : String(quoteResult.reason))
-        : "";
-      return {
-        series: [],
-        source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
-        errors: dedupStrings([historyError, quoteError])
-      };
-    }
-
-    const points = historyResult.value.points.slice();
-    if (points.length === 0) {
-      const quoteError = quoteResult.status === "rejected"
-        ? (quoteResult.reason instanceof Error ? quoteResult.reason.message : String(quoteResult.reason))
-        : "";
-      return {
-        series: [],
-        source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
-        errors: dedupStrings(["fund history series empty", quoteError])
-      };
-    }
-
-    if (quoteResult.status === "fulfilled" && Number.isFinite(quoteResult.value.price) && quoteResult.value.price > 0) {
-      const lastDate = points.length > 0 ? points[points.length - 1].date : todayDate();
-      const existsSame = points.length > 0 && Math.abs(points[points.length - 1].value - quoteResult.value.price) < 0.0001;
-      if (!existsSame) {
-        points.push({
-          date: lastDate,
-          value: quoteResult.value.price,
-          ...(Number.isFinite(quoteResult.value.volume) ? { volume: quoteResult.value.volume } : {})
-        });
-      }
-    }
-
-    return {
-      series: points,
-      source_chain: dedupStrings(["eastmoney:fund_quote", "eastmoney:fund_history"]),
-      errors: []
-    };
-  } catch (error) {
-    return {
-      series: [],
-      source_chain: ["eastmoney:fund_quote", "eastmoney:fund_history"],
-      errors: [error instanceof Error ? error.message : String(error)]
-    };
-  }
-}
-
-async function fetchOtcFundSeries(code: string, lookbackDays: number, timeoutMs: number): Promise<{
-  series: FundRawContext["price_or_nav_series"];
+type FundEstimateResponse = {
+  point?: FundRawContext["price_or_nav_series"][number];
+  reference_context: Partial<FundRawContext["reference_context"]>;
   source_chain: string[];
   errors: string[];
-}> {
-  const url = `https://fund.eastmoney.com/pingzhongdata/${encodeURIComponent(code)}.js?v=${Date.now()}`;
+};
 
-  try {
-    const script = await fetchTextWithTimeout(url, timeoutMs);
-    const points = parseOtcSeriesFromScript(script).slice(-lookbackDays);
-    if (points.length === 0) {
-      return {
-        series: [],
+type FundHistoryRow = {
+  date: string;
+  unit_nav?: number;
+  cumulative_nav?: number;
+  daily_growth?: number;
+  purchase_status: string;
+  redemption_status: string;
+  dividend: string;
+};
+
+type FundHistoryResponse = {
+  rows: FundHistoryRow[];
+  points: FundRawContext["price_or_nav_series"];
+  source_chain: string[];
+  errors: string[];
+};
+
+type FundHistoryPageResponse = {
+  rows: FundHistoryRow[];
+  pages: number;
+};
+
+type FundHoldingsResponse = {
+  holdings_style: FundRawContext["holdings_style"];
+  source_chain: string[];
+  errors: string[];
+};
+
+type FundPingzhongdataResponse = {
+  points: FundRawContext["price_or_nav_series"];
+  reference_context: Partial<FundRawContext["reference_context"]>;
+  source_chain: string[];
+  errors: string[];
+};
+
+async function fetchFundBaseData(code: string, lookbackDays: number, timeoutMs: number): Promise<FundBaseDataResult> {
+  const [estimateResult, historyResult, holdingsResult, pingzhongdataResult] = await Promise.allSettled([
+    fetchFundEstimate(code, timeoutMs),
+    fetchFundHistory(code, lookbackDays, timeoutMs),
+    fetchFundHoldings(code, timeoutMs),
+    fetchFundPingzhongdata(code, timeoutMs)
+  ]);
+
+  const estimate = estimateResult.status === "fulfilled"
+    ? estimateResult.value
+    : {
+        reference_context: {},
+        source_chain: ["eastmoney:fundgz"],
+        errors: [estimateResult.reason instanceof Error ? estimateResult.reason.message : String(estimateResult.reason)]
+      } satisfies FundEstimateResponse;
+
+  const history = historyResult.status === "fulfilled"
+    ? historyResult.value
+    : {
+        rows: [],
+        points: [],
+        source_chain: ["eastmoney:fund_lsjz"],
+        errors: [historyResult.reason instanceof Error ? historyResult.reason.message : String(historyResult.reason)]
+      } satisfies FundHistoryResponse;
+
+  const holdings = holdingsResult.status === "fulfilled"
+    ? holdingsResult.value
+    : {
+        holdings_style: buildEmptyHoldingsStyle(),
+        source_chain: ["eastmoney:fund_jjcc"],
+        errors: [holdingsResult.reason instanceof Error ? holdingsResult.reason.message : String(holdingsResult.reason)]
+      } satisfies FundHoldingsResponse;
+
+  const pingzhongdata = pingzhongdataResult.status === "fulfilled"
+    ? pingzhongdataResult.value
+    : {
+        points: [],
+        reference_context: {},
         source_chain: ["eastmoney:fund_pingzhongdata"],
-        errors: ["otc fund series empty"]
-      };
-    }
-    return {
-      series: points,
-      source_chain: ["eastmoney:fund_pingzhongdata"],
-      errors: []
-    };
-  } catch (error) {
-    return {
-      series: [],
-      source_chain: ["eastmoney:fund_pingzhongdata"],
-      errors: [error instanceof Error ? error.message : String(error)]
-    };
-  }
+        errors: [pingzhongdataResult.reason instanceof Error ? pingzhongdataResult.reason.message : String(pingzhongdataResult.reason)]
+      } satisfies FundPingzhongdataResponse;
+
+  const targetLength = Math.max(30, lookbackDays + 10);
+  const mergedHistory = mergeFundSeriesPoints([
+    pingzhongdata.points,
+    history.points
+  ], targetLength);
+  const series = mergedHistory.length > 0
+    ? appendEstimatedPoint(mergedHistory, estimate.point).slice(-targetLength)
+    : [];
+  const historyEvents = buildHistoryDerivedEvents(history.rows);
+
+  return {
+    series,
+    holdings_style: holdings.holdings_style,
+    reference_context: {
+      ...buildEmptyReferenceContext(),
+      ...pingzhongdata.reference_context,
+      ...estimate.reference_context,
+      comparison_reference: pingzhongdata.reference_context.comparison_reference || DEFAULT_COMPARISON_REFERENCE,
+      current_managers: dedupStrings([
+        ...buildEmptyReferenceContext().current_managers,
+        ...toStringArray(pingzhongdata.reference_context.current_managers)
+      ]),
+      peer_percentile_series: mergeFundSeriesPoints([
+        buildEmptyReferenceContext().peer_percentile_series,
+        Array.isArray(pingzhongdata.reference_context.peer_percentile_series)
+          ? pingzhongdata.reference_context.peer_percentile_series
+          : []
+      ], targetLength)
+    },
+    events: {
+      notices: historyEvents.notices,
+      manager_changes: [],
+      subscription_redemption: historyEvents.subscription_redemption,
+      regulatory_risks: []
+    },
+    source_chain: dedupStrings([
+      ...estimate.source_chain,
+      ...history.source_chain,
+      ...holdings.source_chain,
+      ...pingzhongdata.source_chain
+    ]),
+    errors: dedupStrings([
+      ...history.errors,
+      ...pingzhongdata.errors,
+      ...(series.length === 0 ? estimate.errors : []),
+      ...(holdings.holdings_style.top_holdings.length === 0 && series.length === 0 ? holdings.errors : [])
+    ])
+  };
 }
 
 function parseOtcSeriesFromScript(script: string): FundRawContext["price_or_nav_series"] {
@@ -1174,77 +1168,191 @@ function parseScriptVariable(script: string, variableName: string): unknown {
   return parseJsonLoose(raw);
 }
 
-async function fetchQuote(secid: string, timeoutMs: number): Promise<{ price: number; volume: number }> {
-  const url = new URL("https://push2.eastmoney.com/api/qt/stock/get");
-  url.searchParams.set("secid", secid);
-  url.searchParams.set("fields", "f43,f47");
+async function fetchFundEstimate(code: string, timeoutMs: number): Promise<FundEstimateResponse> {
+  const url = `https://fundgz.1234567.com.cn/js/${encodeURIComponent(code)}.js?rt=${Date.now()}`;
 
-  const payload = await fetchJsonWithTimeout(url.toString(), timeoutMs);
-  const source = payload && typeof payload === "object"
-    ? (payload as Record<string, unknown>)
-    : {};
-  const data = source.data && typeof source.data === "object"
-    ? (source.data as Record<string, unknown>)
-    : {};
+  try {
+    const script = await fetchTextWithTimeout(url, timeoutMs);
+    const payload = parseFundEstimateScript(script);
+    const estimateValue = normalizePositiveNumber(payload.gsz);
+    const estimatedSource = typeof payload.gztime === "string"
+      ? payload.gztime
+      : typeof payload.jzrq === "string"
+        ? payload.jzrq
+        : "";
+    const estimatedAt = normalizeDateTimeString(estimatedSource);
+    const estimatedDate = normalizeDateString(estimatedAt || estimatedSource);
+    const estimatedTime = extractTimeString(estimatedAt);
+
+    return {
+      ...(Number.isFinite(estimateValue) && estimateValue > 0
+        ? {
+            point: {
+              date: estimatedDate,
+              value: round(estimateValue, 6)
+            }
+          }
+        : {}),
+      reference_context: {
+        ...(Number.isFinite(estimateValue) && estimateValue > 0 ? { estimated_nav: round(estimateValue, 6) } : {}),
+        ...(estimatedDate ? { estimated_nav_date: estimatedDate } : {}),
+        ...(estimatedTime ? { estimated_nav_time: estimatedTime } : {}),
+        ...(Number.isFinite(normalizeSignedNumber(payload.gszzl))
+          ? { estimated_change_pct: round(normalizeSignedNumber(payload.gszzl), 4) }
+          : {})
+      },
+      source_chain: ["eastmoney:fundgz"],
+      errors: []
+    };
+  } catch (error) {
+    return {
+      reference_context: {},
+      source_chain: ["eastmoney:fundgz"],
+      errors: [error instanceof Error ? error.message : String(error)]
+    };
+  }
+}
+
+async function fetchFundHistory(code: string, lookbackDays: number, timeoutMs: number): Promise<FundHistoryResponse> {
+  const per = 49;
+  const targetRows = Math.max(30, lookbackDays + 10);
+
+  try {
+    const firstPage = await fetchFundHistoryPage(code, 1, per, timeoutMs);
+    const pageCount = Math.min(
+      Math.max(1, firstPage.pages),
+      Math.max(1, Math.ceil(targetRows / per))
+    );
+
+    const remainingPages = pageCount > 1
+      ? await Promise.allSettled(
+        Array.from({ length: pageCount - 1 }, (_, index) => fetchFundHistoryPage(code, index + 2, per, timeoutMs))
+      )
+      : [];
+
+    const rows = firstPage.rows.slice();
+    const errors: string[] = [];
+
+    for (const page of remainingPages) {
+      if (page.status === "fulfilled") {
+        rows.push(...page.value.rows);
+      } else {
+        errors.push(page.reason instanceof Error ? page.reason.message : String(page.reason));
+      }
+    }
+
+    const points = rows
+      .map((row) => {
+        const unitNav = normalizePositiveNumber(row.unit_nav);
+        if (!Number.isFinite(unitNav) || unitNav <= 0) {
+          return null;
+        }
+        return {
+          date: row.date,
+          value: round(unitNav, 6)
+        };
+      })
+      .filter((item): item is { date: string; value: number } => Boolean(item));
+
+    return {
+      rows: dedupFundHistoryRows(rows).slice(-targetRows),
+      points: mergeFundSeriesPoints([points], targetRows),
+      source_chain: ["eastmoney:fund_lsjz"],
+      errors: dedupStrings(errors)
+    };
+  } catch (error) {
+    return {
+      rows: [],
+      points: [],
+      source_chain: ["eastmoney:fund_lsjz"],
+      errors: [error instanceof Error ? error.message : String(error)]
+    };
+  }
+}
+
+async function fetchFundHistoryPage(
+  code: string,
+  page: number,
+  per: number,
+  timeoutMs: number
+): Promise<FundHistoryPageResponse> {
+  const url = new URL("https://fundf10.eastmoney.com/F10DataApi.aspx");
+  url.searchParams.set("type", "lsjz");
+  url.searchParams.set("code", code);
+  url.searchParams.set("page", String(Math.max(1, page)));
+  url.searchParams.set("per", String(Math.max(1, per)));
+  url.searchParams.set("sdate", "");
+  url.searchParams.set("edate", "");
+
+  const payload = await fetchTextWithTimeout(url.toString(), timeoutMs);
+  const content = extractApidataContent(payload);
+  const rows = parseFundHistoryRows(content);
+  const pages = extractApidataNumberField(payload, "pages");
 
   return {
-    price: normalizePrice(data.f43),
-    volume: normalizeVolume(data.f47)
+    rows,
+    pages: Number.isFinite(pages) && pages > 0 ? Math.floor(pages) : 1
   };
 }
 
-async function fetchHistoryKline(secid: string, lookbackDays: number, timeoutMs: number): Promise<{
-  points: FundRawContext["price_or_nav_series"];
-}> {
-  const url = new URL("https://push2his.eastmoney.com/api/qt/stock/kline/get");
-  url.searchParams.set("secid", secid);
-  url.searchParams.set("klt", "101");
-  url.searchParams.set("fqt", "1");
-  url.searchParams.set("lmt", String(Math.max(30, lookbackDays + 30)));
-  url.searchParams.set("end", "20500101");
-  url.searchParams.set("fields1", "f1,f2,f3,f4,f5,f6");
-  url.searchParams.set("fields2", "f51,f52,f53,f54,f55,f56,f57,f58");
+async function fetchFundHoldings(code: string, timeoutMs: number): Promise<FundHoldingsResponse> {
+  const url = new URL("https://fundf10.eastmoney.com/FundArchivesDatas.aspx");
+  url.searchParams.set("type", "jjcc");
+  url.searchParams.set("code", code);
+  url.searchParams.set("topline", "10");
+  url.searchParams.set("year", "");
+  url.searchParams.set("month", "");
+  url.searchParams.set("_", String(Date.now()));
 
-  const payload = await fetchJsonWithTimeout(url.toString(), timeoutMs);
-  const source = payload && typeof payload === "object"
-    ? (payload as Record<string, unknown>)
-    : {};
-  const data = source.data && typeof source.data === "object"
-    ? (source.data as Record<string, unknown>)
-    : {};
-  const klines = Array.isArray(data.klines)
-    ? data.klines
-    : [];
+  try {
+    const payload = await fetchTextWithTimeout(url.toString(), timeoutMs);
+    const content = extractApidataContent(payload);
+    return {
+      holdings_style: {
+        ...buildEmptyHoldingsStyle(),
+        top_holdings: parseFundHoldings(content)
+      },
+      source_chain: ["eastmoney:fund_jjcc"],
+      errors: []
+    };
+  } catch (error) {
+    return {
+      holdings_style: buildEmptyHoldingsStyle(),
+      source_chain: ["eastmoney:fund_jjcc"],
+      errors: [error instanceof Error ? error.message : String(error)]
+    };
+  }
+}
 
-  const points = klines
-    .map((item) => {
-      if (typeof item !== "string") {
-        return null;
-      }
+async function fetchFundPingzhongdata(code: string, timeoutMs: number): Promise<FundPingzhongdataResponse> {
+  const url = `https://fund.eastmoney.com/pingzhongdata/${encodeURIComponent(code)}.js?v=${Date.now()}`;
 
-      const parts = item.split(",");
-      if (parts.length < 6) {
-        return null;
-      }
-
-      const close = Number(parts[2]);
-      const volume = Number(parts[5]);
-      if (!Number.isFinite(close) || close <= 0) {
-        return null;
-      }
-
-      const date = normalizeDateString(parts[0]);
-      return {
-        date,
-        value: round(close, 4),
-        ...(Number.isFinite(volume) ? { volume: round(volume, 4) } : {})
-      };
-    })
-    .filter((item): item is { date: string; value: number; volume?: number } => Boolean(item));
-
-  return {
-    points
-  };
+  try {
+    const script = await fetchTextWithTimeout(url, timeoutMs);
+    const peerPercentile = parseFundPeerPercentile(script);
+    const peerPercentileSeries = parseFundPeerPercentileSeries(script);
+    const peerRankSnapshot = parseFundPeerRankSnapshot(script);
+    return {
+      points: parseOtcSeriesFromScript(script),
+      reference_context: {
+        comparison_reference: DEFAULT_COMPARISON_REFERENCE,
+        ...(Number.isFinite(peerPercentile) ? { peer_percentile: round(peerPercentile, 4) } : {}),
+        ...(Number.isFinite(peerRankSnapshot.position) ? { peer_rank_position: round(peerRankSnapshot.position, 0) } : {}),
+        ...(Number.isFinite(peerRankSnapshot.total) ? { peer_rank_total: round(peerRankSnapshot.total, 0) } : {}),
+        peer_percentile_series: peerPercentileSeries,
+        current_managers: parseCurrentFundManagers(script)
+      },
+      source_chain: ["eastmoney:fund_pingzhongdata"],
+      errors: []
+    };
+  } catch (error) {
+    return {
+      points: [],
+      reference_context: {},
+      source_chain: ["eastmoney:fund_pingzhongdata"],
+      errors: [error instanceof Error ? error.message : String(error)]
+    };
+  }
 }
 
 function normalizeFundLlmProvider(engine: string): {
@@ -1351,27 +1459,6 @@ function inferAsOfDate(series: FundRawContext["price_or_nav_series"]): string {
   return normalizeDateString(series[series.length - 1].date);
 }
 
-function toSecId(code: string, kind: "fund" | "index"): string {
-  const normalized = normalizeCode(code);
-  if (!normalized) {
-    return "";
-  }
-
-  if (kind === "index") {
-    if (SH_INDEX_CODES.has(normalized)) {
-      return `1.${normalized}`;
-    }
-    if (SZ_INDEX_CODES.has(normalized)) {
-      return `0.${normalized}`;
-    }
-  }
-
-  if (normalized.startsWith("6") || normalized.startsWith("5") || normalized.startsWith("9")) {
-    return `1.${normalized}`;
-  }
-  return `0.${normalized}`;
-}
-
 function normalizeCode(raw: string): string {
   const digits = String(raw || "").replace(/\D/g, "");
   if (!digits) {
@@ -1402,6 +1489,42 @@ function normalizeDateString(raw: string): string {
   return timestampToDate(timestamp);
 }
 
+function normalizeDateTimeString(raw: string): string {
+  const source = String(raw || "").trim();
+  if (!source) {
+    return "";
+  }
+  const normalized = source
+    .replace(/\//g, "-")
+    .replace(/\./g, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+  const exactMatch = normalized.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?))?$/);
+  if (exactMatch) {
+    return exactMatch[2]
+      ? `${exactMatch[1]} ${exactMatch[2].length === 5 ? `${exactMatch[2]}:00` : exactMatch[2]}`
+      : exactMatch[1];
+  }
+  const timestamp = Date.parse(normalized);
+  if (!Number.isFinite(timestamp)) {
+    return normalized;
+  }
+  const date = new Date(timestamp);
+  return [
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+    `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}:${String(date.getSeconds()).padStart(2, "0")}`
+  ].join(" ");
+}
+
+function extractTimeString(raw: string): string {
+  const source = String(raw || "").trim();
+  if (!source) {
+    return "";
+  }
+  const matched = source.match(/\b(\d{2}:\d{2}(?::\d{2})?)\b/);
+  return matched?.[1] || "";
+}
+
 function timestampToDate(timestamp: number): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
@@ -1412,6 +1535,325 @@ function timestampToDate(timestamp: number): string {
 
 function todayDate(): string {
   return timestampToDate(Date.now());
+}
+
+function parseFundEstimateScript(script: string): Record<string, unknown> {
+  const matched = script.match(/jsonpgz\s*\(\s*(\{[\s\S]*\})\s*\)\s*;?/);
+  if (!matched?.[1]) {
+    return {};
+  }
+  const parsed = parseJsonLoose(matched[1]);
+  return parsed && typeof parsed === "object"
+    ? (parsed as Record<string, unknown>)
+    : {};
+}
+
+function extractApidataContent(payload: string): string {
+  const matched = payload.match(/content\s*:\s*"([\s\S]*?)"\s*,\s*(?:records|arryear|curyear)\s*:/);
+  if (!matched?.[1]) {
+    return "";
+  }
+  return matched[1]
+    .replace(/\\"/g, "\"")
+    .replace(/\\'/g, "'")
+    .replace(/\\\//g, "/")
+    .replace(/\\r\\n|\\n|\\r/g, "");
+}
+
+function extractApidataNumberField(payload: string, field: string): number {
+  const pattern = new RegExp(`${escapeRegExp(field)}\\s*:\\s*(\\d+)`);
+  const matched = payload.match(pattern);
+  return matched?.[1] ? Number(matched[1]) : NaN;
+}
+
+function parseFundHistoryRows(content: string): FundHistoryRow[] {
+  const rows = extractHtmlTableRows(content);
+  return rows
+    .map((row): FundHistoryRow | null => {
+      const cells = extractTableCellTexts(row);
+      if (cells.length < 3) {
+        return null;
+      }
+      const date = normalizeDateString(cells[0]);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return null;
+      }
+      return {
+        date,
+        unit_nav: normalizePositiveNumber(cells[1]),
+        cumulative_nav: normalizePositiveNumber(cells[2]),
+        daily_growth: normalizeSignedNumber(cells[3]),
+        purchase_status: normalizeOptionalText(cells[4]),
+        redemption_status: normalizeOptionalText(cells[5]),
+        dividend: normalizeOptionalText(cells[6])
+      };
+    })
+    .filter((item): item is FundHistoryRow => Boolean(item));
+}
+
+function parseFundHoldings(content: string): string[] {
+  const table = content.match(/<table[\s\S]*?<\/table>/i)?.[0] || "";
+  if (!table) {
+    return [];
+  }
+
+  const rows = extractHtmlTableRows(table);
+  const holdings: string[] = [];
+
+  for (const row of rows) {
+    const cells = extractTableCellTexts(row);
+    if (cells.length < 2) {
+      continue;
+    }
+    const weight = cells.find((item) => /\d+(?:\.\d+)?%/.test(item)) || "";
+    const name = cells.find((item) => isFundHoldingName(item)) || "";
+    if (!name) {
+      continue;
+    }
+    holdings.push(weight ? `${name}(${weight})` : name);
+  }
+
+  return dedupStrings(holdings).slice(0, 10);
+}
+
+function buildHistoryDerivedEvents(rows: FundHistoryRow[]): {
+  notices: string[];
+  subscription_redemption: string[];
+} {
+  const sorted = dedupFundHistoryRows(rows)
+    .slice()
+    .sort((left, right) => Date.parse(right.date) - Date.parse(left.date))
+    .slice(0, 12);
+
+  const notices = sorted
+    .filter((row) => Boolean(row.dividend) && !isHistoryEmptyField(row.dividend))
+    .map((row) => `${row.date} ${row.dividend}`);
+
+  const subscriptionRedemption = sorted.flatMap((row) => {
+    const items: string[] = [];
+    if (isRestrictionStatus(row.purchase_status)) {
+      items.push(`${row.date} 申购状态: ${row.purchase_status}`);
+    }
+    if (isRestrictionStatus(row.redemption_status)) {
+      items.push(`${row.date} 赎回状态: ${row.redemption_status}`);
+    }
+    return items;
+  });
+
+  return {
+    notices: dedupStrings(notices),
+    subscription_redemption: dedupStrings(subscriptionRedemption)
+  };
+}
+
+function dedupFundHistoryRows(rows: FundHistoryRow[]): FundHistoryRow[] {
+  const map = new Map<string, FundHistoryRow>();
+  for (const row of rows) {
+    if (!row.date) {
+      continue;
+    }
+    map.set(row.date, row);
+  }
+  return Array.from(map.values())
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+}
+
+function mergeFundSeriesPoints(
+  groups: Array<FundRawContext["price_or_nav_series"]>,
+  limit: number
+): FundRawContext["price_or_nav_series"] {
+  const merged = new Map<string, FundRawContext["price_or_nav_series"][number]>();
+  for (const group of groups) {
+    for (const point of group) {
+      const value = normalizePositiveNumber(point?.value);
+      if (!point?.date || !Number.isFinite(value) || value <= 0) {
+        continue;
+      }
+      merged.set(normalizeDateString(point.date), {
+        date: normalizeDateString(point.date),
+        value: round(value, 6)
+      });
+    }
+  }
+  return Array.from(merged.values())
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date))
+    .slice(-Math.max(1, limit));
+}
+
+function appendEstimatedPoint(
+  points: FundRawContext["price_or_nav_series"],
+  estimate?: FundRawContext["price_or_nav_series"][number]
+): FundRawContext["price_or_nav_series"] {
+  if (!estimate?.date) {
+    return points.slice();
+  }
+  const estimateValue = normalizePositiveNumber(estimate.value);
+  if (!Number.isFinite(estimateValue) || estimateValue <= 0) {
+    return points.slice();
+  }
+
+  const normalizedDate = normalizeDateString(estimate.date);
+  const existsSameDate = points.some((item) => normalizeDateString(item.date) === normalizedDate);
+  if (existsSameDate) {
+    return points.slice();
+  }
+
+  return [...points, { date: normalizedDate, value: round(estimateValue, 6) }]
+    .sort((left, right) => Date.parse(left.date) - Date.parse(right.date));
+}
+
+function parseFundPeerPercentile(script: string): number {
+  const source = parseScriptVariable(script, "Data_rateInSimilarPersent");
+  if (!Array.isArray(source) || source.length === 0) {
+    return NaN;
+  }
+
+  const last = source[source.length - 1];
+  if (Array.isArray(last)) {
+    return normalizeSignedNumber(last[1]);
+  }
+  if (last && typeof last === "object") {
+    const row = last as Record<string, unknown>;
+    return normalizeSignedNumber(row.y ?? row.value);
+  }
+  return NaN;
+}
+
+function parseFundPeerPercentileSeries(script: string): FundRawContext["price_or_nav_series"] {
+  const source = parseScriptVariable(script, "Data_rateInSimilarPersent");
+  if (!Array.isArray(source)) {
+    return [];
+  }
+
+  return source
+    .map((item) => {
+      if (Array.isArray(item) && item.length >= 2) {
+        const timestamp = Number(item[0]);
+        const percentile = normalizePositiveNumber(item[1]);
+        if (!Number.isFinite(timestamp) || !Number.isFinite(percentile)) {
+          return null;
+        }
+        return {
+          date: timestampToDate(timestamp),
+          value: round(percentile, 4)
+        };
+      }
+
+      if (item && typeof item === "object") {
+        const row = item as Record<string, unknown>;
+        const timestamp = Number(row.x ?? row.date);
+        const percentile = normalizePositiveNumber(row.y ?? row.value);
+        if (!Number.isFinite(timestamp) || !Number.isFinite(percentile)) {
+          return null;
+        }
+        return {
+          date: timestampToDate(timestamp),
+          value: round(percentile, 4)
+        };
+      }
+
+      return null;
+    })
+    .filter((item): item is { date: string; value: number } => Boolean(item));
+}
+
+function parseFundPeerRankSnapshot(script: string): { position: number; total: number } {
+  const source = parseScriptVariable(script, "Data_rateInSimilarType");
+  if (!Array.isArray(source) || source.length === 0) {
+    return { position: NaN, total: NaN };
+  }
+
+  const last = source[source.length - 1];
+  if (!last || typeof last !== "object" || Array.isArray(last)) {
+    return { position: NaN, total: NaN };
+  }
+
+  const row = last as Record<string, unknown>;
+  return {
+    position: normalizePositiveNumber(row.y),
+    total: normalizePositiveNumber(row.sc)
+  };
+}
+
+function parseCurrentFundManagers(script: string): string[] {
+  const source = parseScriptVariable(script, "Data_currentFundManager");
+  if (!Array.isArray(source)) {
+    return [];
+  }
+  return dedupStrings(
+    source
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return "";
+        }
+        const row = item as Record<string, unknown>;
+        return typeof row.name === "string" ? row.name.trim() : "";
+      })
+      .filter(Boolean)
+  );
+}
+
+function extractHtmlTableRows(content: string): string[] {
+  const matched = content.match(/<tr[\s\S]*?<\/tr>/gi);
+  return Array.isArray(matched) ? matched : [];
+}
+
+function extractTableCellTexts(rowHtml: string): string[] {
+  const matched = rowHtml.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi);
+  if (!Array.isArray(matched)) {
+    return [];
+  }
+  return matched
+    .map((item) => normalizeOptionalText(stripHtmlTags(item)))
+    .filter(Boolean);
+}
+
+function stripHtmlTags(input: string): string {
+  return decodeHtmlEntities(String(input || ""))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function decodeHtmlEntities(input: string): string {
+  return input
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'");
+}
+
+function isFundHoldingName(value: string): boolean {
+  const text = normalizeOptionalText(value);
+  if (!text) {
+    return false;
+  }
+  if (/^\d+$/.test(text) || /^\d+(?:\.\d+)?%$/.test(text)) {
+    return false;
+  }
+  if (/^(序号|股票代码|债券代码|股票名称|债券名称|占净值|持仓市值|相关资讯)$/i.test(text)) {
+    return false;
+  }
+  return /[\u4e00-\u9fa5a-z]/i.test(text);
+}
+
+function isRestrictionStatus(value: string): boolean {
+  const text = normalizeOptionalText(value);
+  if (!text) {
+    return false;
+  }
+  return /暂停|限制|限购|限赎|封闭|closed|停售/i.test(text);
+}
+
+function isHistoryEmptyField(value: string): boolean {
+  const text = normalizeOptionalText(value);
+  return !text || /^(--|---|暂无数据|不分红|开放申购|开放赎回)$/i.test(text);
+}
+
+function normalizeOptionalText(value: unknown): string {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function parseJsonLoose(input: string): unknown {
@@ -1460,29 +1902,28 @@ function truncateText(input: string, maxLength: number): string {
   return `${source.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
-function normalizePrice(value: unknown): number {
+function normalizePositiveNumber(value: unknown): number {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return NaN;
+  }
+  return numeric;
+}
+
+function normalizeSignedNumber(value: unknown): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return NaN;
   }
-
-  if (Math.abs(numeric) >= 1000000) {
-    return round(numeric / 10000, 4);
-  }
-
-  if (Math.abs(numeric) >= 1000) {
-    return round(numeric / 100, 4);
-  }
-
-  return round(numeric, 4);
+  return numeric;
 }
 
-function normalizeVolume(value: unknown): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    return 0;
-  }
-  return round(Math.max(0, numeric), 4);
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+      .map((item) => String(item || "").trim())
+      .filter(Boolean)
+    : [];
 }
 
 function normalizeNumber(value: unknown, fallback: number): number {

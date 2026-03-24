@@ -69,7 +69,6 @@ export type FundIdentity = {
 export type FundSeriesPoint = {
   date: string;
   value: number;
-  volume?: number;
 };
 
 export type FundNewsItem = {
@@ -84,13 +83,23 @@ export type FundRawContext = {
   identity: FundIdentity;
   as_of_date: string;
   price_or_nav_series: FundSeriesPoint[];
-  benchmark_series: FundSeriesPoint[];
-  benchmark_code: string;
   holdings_style: {
     top_holdings: string[];
     sector_exposure: Record<string, number | string>;
     style_factor_exposure: Record<string, number | string>;
     duration_credit_profile: Record<string, number | string>;
+  };
+  reference_context: {
+    comparison_reference?: string;
+    estimated_nav?: number;
+    estimated_nav_date?: string;
+    estimated_nav_time?: string;
+    estimated_change_pct?: number;
+    peer_percentile?: number;
+    peer_rank_position?: number;
+    peer_rank_total?: number;
+    peer_percentile_series: FundSeriesPoint[];
+    current_managers: string[];
   };
   events: {
     notices: string[];
@@ -139,7 +148,7 @@ export type FundAuditStep = {
 export type FundAnalysisOutput = {
   phase: MarketPhase;
   marketState: string;
-  benchmark: string;
+  comparisonReference: string;
   generatedAt: string;
   assetSignals: Array<{ code: string; signal: string }>;
   assetType: "fund";

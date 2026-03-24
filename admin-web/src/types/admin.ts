@@ -385,7 +385,7 @@ export type MarketRunSummary = {
   createdAt: string;
   phase: MarketPhase;
   marketState: string;
-  benchmark?: string;
+  comparisonReference?: string;
   assetSignalCount: number;
   signals: Array<{ code: string; signal: string }>;
   explanationSummary?: string;
