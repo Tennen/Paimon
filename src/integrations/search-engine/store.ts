@@ -46,11 +46,11 @@ export function ensureSearchEngineStore(): void {
 export function readSearchEngineStore(): SearchEngineStore {
   ensureSearchEngineStore();
   const raw = getStore<unknown>(SEARCH_ENGINE_STORE);
-  return normalizeSearchEngineStore(raw);
+  return normalizeSearchEngineStorePayload(raw);
 }
 
 export function writeSearchEngineStore(input: unknown): SearchEngineStore {
-  const normalized = normalizeSearchEngineStore(input);
+  const normalized = normalizeSearchEngineStorePayload(input);
   ensureSearchEngineStore();
   setStore(SEARCH_ENGINE_STORE, normalized);
   return normalized;
@@ -137,7 +137,10 @@ export function setDefaultSearchEngine(engineId: string): SearchEngineStore {
 }
 
 export function resolveSearchEngineSelector(raw: unknown): string {
-  const store = readSearchEngineStore();
+  return resolveSearchEngineSelectorFromStore(raw, readSearchEngineStore());
+}
+
+export function resolveSearchEngineSelectorFromStore(raw: unknown, store: SearchEngineStore): string {
   const normalized = normalizeSearchEngineSelector(raw);
 
   if (normalized === "default") {
@@ -146,16 +149,14 @@ export function resolveSearchEngineSelector(raw: unknown): string {
 
   if (normalized === "serpapi") {
     const serpApiEngine = store.engines.find((item) => item.type === "serpapi" && item.enabled)
-      ?? store.engines.find((item) => item.type === "serpapi")
-      ?? store.engines[0];
-    return serpApiEngine?.id ?? resolveDefaultEngineId(store);
+      ?? store.engines.find((item) => item.type === "serpapi");
+    return serpApiEngine?.id ?? "serpapi";
   }
 
   if (normalized === "qianfan") {
     const qianfanEngine = store.engines.find((item) => item.type === "qianfan" && item.enabled)
-      ?? store.engines.find((item) => item.type === "qianfan")
-      ?? store.engines[0];
-    return qianfanEngine?.id ?? resolveDefaultEngineId(store);
+      ?? store.engines.find((item) => item.type === "qianfan");
+    return qianfanEngine?.id ?? "qianfan";
   }
 
   if (store.engines.some((item) => item.id === normalized)) {
@@ -184,7 +185,7 @@ function readLegacyMarketSearchEngineStore(): SearchEngineStore | null {
       return null;
     }
     const parsed = JSON.parse(content);
-    const normalized = normalizeSearchEngineStore(parsed);
+    const normalized = normalizeSearchEngineStorePayload(parsed);
     if (normalized.engines.length === 0) {
       return null;
     }
@@ -267,7 +268,7 @@ function createDefaultQianfanSearchEngineProfileFromEnv(): QianfanSearchEnginePr
   };
 }
 
-function normalizeSearchEngineStore(input: unknown): SearchEngineStore {
+export function normalizeSearchEngineStorePayload(input: unknown): SearchEngineStore {
   const source = input && typeof input === "object" ? input as Record<string, unknown> : {};
   const rawEngines = Array.isArray(source.engines) ? source.engines : [];
   const engines: SearchEngineProfile[] = [];
@@ -281,6 +282,8 @@ function normalizeSearchEngineStore(input: unknown): SearchEngineStore {
 
   if (engines.length === 0) {
     engines.push(...buildDefaultSearchEngineProfilesFromEnv());
+  } else {
+    appendMissingBuiltInProfiles(engines);
   }
 
   const defaultEngineIdRaw = normalizeEngineId(source.defaultEngineId);
@@ -293,6 +296,29 @@ function normalizeSearchEngineStore(input: unknown): SearchEngineStore {
     defaultEngineId,
     engines
   };
+}
+
+function appendMissingBuiltInProfiles(engines: SearchEngineProfile[]): void {
+  const hasSerpApi = engines.some((item) => item.type === "serpapi");
+  const hasQianfan = engines.some((item) => item.type === "qianfan");
+
+  // Migrate the legacy single-engine bootstrap store into the new dual built-in profiles.
+  // Keep the scope narrow so explicit user-managed profile sets are not silently expanded.
+  if (!hasQianfan && isLegacySingleSerpApiStore(engines)) {
+    engines.push(createDefaultQianfanSearchEngineProfileFromEnv());
+  }
+
+  if (!hasSerpApi && isLegacySingleQianfanStore(engines)) {
+    engines.unshift(createDefaultSerpApiSearchEngineProfileFromEnv());
+  }
+}
+
+function isLegacySingleSerpApiStore(engines: SearchEngineProfile[]): boolean {
+  return engines.length === 1 && engines[0]?.id === DEFAULT_SERPAPI_ENGINE_ID && engines[0]?.type === "serpapi";
+}
+
+function isLegacySingleQianfanStore(engines: SearchEngineProfile[]): boolean {
+  return engines.length === 1 && engines[0]?.id === DEFAULT_QIANFAN_ENGINE_ID && engines[0]?.type === "qianfan";
 }
 
 function normalizeSearchEngineProfile(input: unknown, index: number): SearchEngineProfile | null {

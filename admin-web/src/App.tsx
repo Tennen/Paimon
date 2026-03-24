@@ -2553,6 +2553,9 @@ function normalizeMarketSearchEngine(raw: unknown): string {
   if (["serpapi", "serp-api", "serp_api", "google-news", "google_news"].includes(value)) {
     return "serpapi";
   }
+  if (["qianfan", "baidu", "baidu-search", "baidu_search", "qianfan-baidu", "qianfan_baidu"].includes(value)) {
+    return "qianfan";
+  }
   return value.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "default";
 }
 
@@ -2609,7 +2612,12 @@ function resolveMarketSearchEngineId(raw: unknown, store: SearchEngineStore | nu
   if (normalized === "serpapi") {
     const serpApiEngineId = store.engines.find((item) => item.type === "serpapi" && item.enabled)?.id
       ?? store.engines.find((item) => item.type === "serpapi")?.id;
-    return serpApiEngineId || resolveDefaultMarketSearchEngineId(store) || normalized;
+    return serpApiEngineId || normalized;
+  }
+  if (normalized === "qianfan") {
+    const qianfanEngineId = store.engines.find((item) => item.type === "qianfan" && item.enabled)?.id
+      ?? store.engines.find((item) => item.type === "qianfan")?.id;
+    return qianfanEngineId || normalized;
   }
   if (store.engines.some((item) => item.id === normalized)) {
     return normalized;
