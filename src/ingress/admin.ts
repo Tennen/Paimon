@@ -155,7 +155,6 @@ type BootstrapMarketTasksPayload = {
 type RunMarketOncePayload = {
   userId: string;
   phase: MarketPhase;
-  withExplanation?: boolean;
 };
 
 type RunMarketOncePayloadParseResult =
@@ -1604,17 +1603,16 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
       const payload = parsed.payload;
 
-      const baseMessage = `/market ${payload.phase}`;
-      const message = payload.withExplanation === false
-        ? `${baseMessage} --no-llm`
-        : baseMessage;
+      const message = `/market ${payload.phase}`;
 
       try {
         const result = await this.scheduler.runMessageNow(payload.userId, message);
         res.json({
           ok: true,
           phase: payload.phase,
-          message,
+          message: result.acceptedAsync
+            ? `已受理 ${payload.phase} 图片报告任务，稍后通过图片链路推送`
+            : `已触发 ${payload.phase} 图片报告推送`,
           acceptedAsync: result.acceptedAsync,
           responseText: result.responseText,
           imageCount: result.imageCount
@@ -2193,7 +2191,7 @@ function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayloadParseR
   }
 
   const body = rawBody as Record<string, unknown>;
-  const allowedKeys = new Set(["userId", "phase", "withExplanation"]);
+  const allowedKeys = new Set(["userId", "phase"]);
   const invalidKeys = Object.keys(body).filter((key) => !allowedKeys.has(key));
   if (invalidKeys.length > 0) {
     return { error: `unsupported fields: ${invalidKeys.join(", ")}` };
@@ -2207,14 +2205,6 @@ function parseRunMarketOncePayload(rawBody: unknown): RunMarketOncePayloadParseR
   const phase = parseMarketPhase(body.phase);
   if (!phase) {
     return { error: "phase must be midday or close" };
-  }
-
-  if ("withExplanation" in body) {
-    const withExplanation = parseOptionalBoolean(body.withExplanation);
-    if (withExplanation === undefined) {
-      return { error: "withExplanation must be boolean" };
-    }
-    return { payload: { userId, phase, withExplanation } };
   }
 
   return { payload: { userId, phase } };

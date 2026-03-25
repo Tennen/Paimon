@@ -449,7 +449,6 @@ export type MarketSectionProps = {
   marketFundSaveStates: Array<"saved" | "dirty" | "saving">;
   bootstrappingMarketTasks: boolean;
   runningMarketOncePhase: MarketPhase | null;
-  marketRunOnceWithExplanation: boolean;
   enabledUsers: PushUser[];
   marketTaskUserId: string;
   marketMiddayTime: string;
@@ -486,8 +485,7 @@ export type MarketSectionProps = {
   onImportMarketCodes: () => void;
   onRefresh: () => void;
   onBootstrapMarketTasks: () => void;
-  onMarketRunOnceWithExplanationChange: (value: boolean) => void;
-  onRunMarketOnce: (phase: MarketPhase, withExplanation: boolean) => void;
+  onRunMarketOnce: (phase: MarketPhase) => void;
 };
 
 export type MarketSecuritySearchItem = {

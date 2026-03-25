@@ -2,7 +2,6 @@
 import { parseCommand } from "./commands";
 import {
   buildHelpText,
-  buildRunResponseText,
   formatPortfolio,
   formatPortfolioAddResult,
   formatStatus
@@ -37,24 +36,16 @@ export async function execute(input) {
   }
 
   const phase = command.phase;
-  const withExplanation = command.withExplanation;
-  const result = await runAnalysis(phase, withExplanation);
-
-  const text = withExplanation ? "" : buildRunResponseText(result);
-  let image = null;
-  const markdownReport = withExplanation
-    ? requireExplanationMarkdown(result.explanation, "missing markdown report for explanation mode")
-    : "";
-  if (withExplanation) {
-    image = await renderMarketExplanationImage({
-      phase,
-      markdown: markdownReport
-    });
-  }
+  const result = await runAnalysis(phase);
+  const markdownReport = requireExplanationMarkdown(result.explanation, "missing markdown report for market analysis");
+  const image = await renderMarketExplanationImage({
+    phase,
+    markdown: markdownReport
+  });
 
   return {
-    text,
-    ...(withExplanation ? { image } : {}),
+    text: "",
+    image,
     result: {
       runId: result.persisted.id,
       phase: result.signalResult.phase,
@@ -63,7 +54,7 @@ export async function execute(input) {
       generatedAt: result.signalResult.generatedAt,
       signalResult: result.signalResult,
       explanation: result.explanation,
-      ...(markdownReport ? { markdownReport } : {})
+      markdownReport
     }
   };
 }

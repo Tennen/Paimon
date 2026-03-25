@@ -153,7 +153,7 @@ data/              # Runtime data files
 - 全局搜索引擎 profile 持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
 - `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
 - Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
-- 微信文本输出由 `src/integrations/market-analysis/formatters.ts` 负责（主要用于 `--no-llm` 等纯文本路径）；解释模式下由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/md2img/` 的 unified + Playwright 渲染链路输出移动端图片。两条链路都应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。
+- `src/integrations/market-analysis/formatters.ts` 仅保留帮助、状态与持仓类文本格式化；分析执行链路固定由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/md2img/` 的 unified + Playwright 渲染链路输出移动端图片。该链路应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。
 - markdown 图片渲染模块位于 `src/integrations/md2img/`，固定目录为 `markdown/`、`render/`、`styles/` + `index.ts`；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
 
 ## Structural Change Checklist

@@ -5,12 +5,13 @@ import { requireExplanationMarkdown } from "./reporting/markdown_output_adapter"
 import { createMarketImagePipelineError } from "./reporting/pipeline_errors";
 import { persistRun, readAnalysisConfig, readPortfolio } from "./storage";
 
-export async function runAnalysis(phase, withExplanation) {
+export async function runAnalysis(phase) {
   const portfolio = readPortfolio();
   const analysisConfig = readAnalysisConfig();
-  const explanationEnabled = withExplanation && isLlmExplanationEnabled();
-  const useBatchMarkdownReport = explanationEnabled && shouldUseLlmReport(analysisConfig.analysisEngine);
-  if (withExplanation && !useBatchMarkdownReport) {
+  if (!isLlmExplanationEnabled()) {
+    throw createMarketImagePipelineError("markdown report pipeline requires MARKET_ANALYSIS_LLM_ENABLED=true");
+  }
+  if (!shouldUseLlmReport(analysisConfig.analysisEngine)) {
     throw createMarketImagePipelineError("markdown report pipeline requires codex analysis engine");
   }
   if (!isFundAnalysisEnabled(analysisConfig)) {
@@ -29,38 +30,32 @@ export async function runAnalysis(phase, withExplanation) {
   let explanation = analysisResult.explanation;
   const optionalNewsContext = analysisResult.optionalNewsContext;
 
-  if (useBatchMarkdownReport) {
-    let report = null;
-    try {
-      report = await generateMarketLlmReport({
-        phase,
-        portfolio,
-        marketData,
-        signalResult,
-        optionalNewsContext,
-        analysisEngine: analysisConfig.analysisEngine
-      });
-    } catch (error) {
-      const detail = (error && error.message) ? error.message : String(error || "unknown error");
-      throw createMarketImagePipelineError(`failed to generate markdown report: ${detail}`, error);
-    }
-
-    const markdown = requireExplanationMarkdown(report);
-
-    explanation = {
-      summary: report.summary,
-      provider: report.provider,
-      model: report.model,
-      generatedAt: report.generatedAt,
-      markdown,
-      inputPath: report.inputPath,
-      outputPath: report.outputPath
-    };
+  let report = null;
+  try {
+    report = await generateMarketLlmReport({
+      phase,
+      portfolio,
+      marketData,
+      signalResult,
+      optionalNewsContext,
+      analysisEngine: analysisConfig.analysisEngine
+    });
+  } catch (error) {
+    const detail = (error && error.message) ? error.message : String(error || "unknown error");
+    throw createMarketImagePipelineError(`failed to generate markdown report: ${detail}`, error);
   }
 
-  if (withExplanation) {
-    requireExplanationMarkdown(explanation);
-  }
+  const markdown = requireExplanationMarkdown(report);
+
+  explanation = {
+    summary: report.summary,
+    provider: report.provider,
+    model: report.model,
+    generatedAt: report.generatedAt,
+    markdown,
+    inputPath: report.inputPath,
+    outputPath: report.outputPath
+  };
 
   const persisted = persistRun({
     phase,

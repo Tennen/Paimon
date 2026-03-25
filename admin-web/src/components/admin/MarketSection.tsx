@@ -19,7 +19,6 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -554,31 +553,23 @@ export function MarketSection(props: MarketSectionProps) {
         <Separator />
 
         <div className="space-y-3">
-          <h3 className="text-sm font-medium">手动生成一次报告</h3>
-          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
-            <Label htmlFor="market-with-explanation">是否生成 LLM 解释</Label>
-            <Switch
-              id="market-with-explanation"
-              checked={props.marketRunOnceWithExplanation}
-              onCheckedChange={props.onMarketRunOnceWithExplanationChange}
-              disabled={props.runningMarketOncePhase !== null}
-            />
-          </div>
+          <h3 className="text-sm font-medium">手动生成一次图片报告</h3>
+          <p className="text-xs text-muted-foreground">分析命令固定走 markdown 图片报告链路，不再提供纯文本模式。</p>
           <div className="flex flex-wrap gap-2">
             <Button
               type="button"
               disabled={!props.marketTaskUserId || props.runningMarketOncePhase !== null}
-              onClick={() => props.onRunMarketOnce("midday", props.marketRunOnceWithExplanation)}
+              onClick={() => props.onRunMarketOnce("midday")}
             >
-              {props.runningMarketOncePhase === "midday" ? "盘中生成中..." : "立即生成盘中报告"}
+              {props.runningMarketOncePhase === "midday" ? "盘中图片报告生成中..." : "立即生成盘中图片报告"}
             </Button>
             <Button
               type="button"
               variant="secondary"
               disabled={!props.marketTaskUserId || props.runningMarketOncePhase !== null}
-              onClick={() => props.onRunMarketOnce("close", props.marketRunOnceWithExplanation)}
+              onClick={() => props.onRunMarketOnce("close")}
             >
-              {props.runningMarketOncePhase === "close" ? "收盘生成中..." : "立即生成收盘报告"}
+              {props.runningMarketOncePhase === "close" ? "收盘图片报告生成中..." : "立即生成收盘图片报告"}
             </Button>
           </div>
           {!props.marketTaskUserId ? (

@@ -31,13 +31,11 @@ export function parseCommand(input) {
     };
   }
 
-  const withExplanation = !/--no-llm\b/i.test(body);
   const explicitPhase = detectPhaseFromText(body);
   if (explicitPhase) {
     return {
       kind: "run",
-      phase: explicitPhase,
-      withExplanation
+      phase: explicitPhase
     };
   }
 
@@ -45,23 +43,20 @@ export function parseCommand(input) {
     const rest = body.replace(/^run\b/i, "").trim();
     return {
       kind: "run",
-      phase: detectPhaseFromText(rest) || inferPhaseFromLocalTime(),
-      withExplanation
+      phase: detectPhaseFromText(rest) || inferPhaseFromLocalTime()
     };
   }
 
   if (!fromSlash) {
     return {
       kind: "run",
-      phase: inferPhaseFromLocalTime(),
-      withExplanation
+      phase: inferPhaseFromLocalTime()
     };
   }
 
   return {
     kind: "run",
-    phase: inferPhaseFromLocalTime(),
-    withExplanation
+    phase: inferPhaseFromLocalTime()
   };
 }
 

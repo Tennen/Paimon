@@ -164,7 +164,6 @@ export default function App() {
   const [marketSavedCash, setMarketSavedCash] = useState(0);
   const [bootstrappingMarketTasks, setBootstrappingMarketTasks] = useState(false);
   const [runningMarketOncePhase, setRunningMarketOncePhase] = useState<MarketPhase | null>(null);
-  const [marketRunOnceWithExplanation, setMarketRunOnceWithExplanation] = useState(true);
   const [marketTaskUserId, setMarketTaskUserId] = useState("");
   const [marketMiddayTime, setMarketMiddayTime] = useState("13:30");
   const [marketCloseTime, setMarketCloseTime] = useState("15:15");
@@ -1651,7 +1650,7 @@ export default function App() {
     }
   }
 
-  async function handleRunMarketOnce(phase: MarketPhase, withExplanation: boolean): Promise<void> {
+  async function handleRunMarketOnce(phase: MarketPhase): Promise<void> {
     if (!marketTaskUserId) {
       setNotice({ type: "error", title: "请先选择推送用户" });
       return;
@@ -1666,8 +1665,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           userId: marketTaskUserId,
-          phase,
-          withExplanation
+          phase
         })
       });
       await loadMarketRuns();
@@ -1675,13 +1673,13 @@ export default function App() {
         setNotice({
           type: "info",
           title: "Market 报告已异步受理",
-          text: payload.responseText ?? payload.message
+          text: payload.responseText || payload.message
         });
       } else {
         setNotice({
           type: "success",
           title: "Market 报告已生成",
-          text: payload.responseText ?? payload.message
+          text: payload.responseText || payload.message
         });
       }
     } catch (error) {
@@ -2219,7 +2217,6 @@ export default function App() {
               marketFundSaveStates={marketFundSaveStates}
               bootstrappingMarketTasks={bootstrappingMarketTasks}
               runningMarketOncePhase={runningMarketOncePhase}
-              marketRunOnceWithExplanation={marketRunOnceWithExplanation}
               enabledUsers={enabledUsers}
               marketTaskUserId={marketTaskUserId}
               marketMiddayTime={marketMiddayTime}
@@ -2256,8 +2253,7 @@ export default function App() {
               onImportMarketCodes={() => void handleImportMarketCodes()}
               onRefresh={() => void Promise.all([loadMarketConfig(), loadMarketRuns()])}
               onBootstrapMarketTasks={() => void handleBootstrapMarketTasks()}
-              onMarketRunOnceWithExplanationChange={setMarketRunOnceWithExplanation}
-              onRunMarketOnce={(phase, withExplanation) => void handleRunMarketOnce(phase, withExplanation)}
+              onRunMarketOnce={(phase) => void handleRunMarketOnce(phase)}
             />
           ) : null}
 

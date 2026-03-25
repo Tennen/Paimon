@@ -126,7 +126,7 @@ test("runAnalysis should fail when codex markdown generation fails", { concurren
   try {
     await withIsolatedMarketState(async () => {
       await assert.rejects(
-        () => runAnalysis("close", true),
+        () => runAnalysis("close"),
         (error: unknown) => {
           assert.equal(error instanceof Error, true);
           const typedError = error as Error & { code?: string };
@@ -186,7 +186,7 @@ test("service execute should not fallback to pure text when markdown image rende
   }
 });
 
-test("service execute should return image-only response when explanation is enabled", { concurrency: false }, async () => {
+test("service execute should return image-only response for market analysis", { concurrency: false }, async () => {
   const originalChat = CodexLLMEngine.prototype.chat;
   const originalRequire = Module.prototype.require;
   (CodexLLMEngine.prototype as unknown as { chat: () => Promise<string> }).chat = async () => {

@@ -107,6 +107,7 @@ This file defines hard constraints for coding agents working in this repository.
 
 - Keep request/response schemas backward compatible unless the change explicitly includes migration.
 - For user-directed logic iterations or refactors, default to replacing old logic and related storage/display contracts in the same change; do not add backward-compatibility shims unless the user explicitly asks for compatibility or migration.
+- When a user explicitly switches a feature/command/runtime from an old path to a new path, treat the old path as removed unless the user asks for compatibility. Do not add legacy-mode flags, compat branches, silent fallbacks, or explicit "old flag removed" error handling just to acknowledge the old path; update the active path directly and delete the obsolete branch.
 - If admin API schema changes, update `admin-web/src/types/admin.ts` and affected UI components in the same change.
 - New env vars must be documented in `.env.example`; remove dead env vars when no longer used.
 - LLM provider selection contract must stay centralized in `src/engines/llm/engine_factory.ts`.

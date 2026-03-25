@@ -377,25 +377,14 @@ STT_FAST_WHISPER_MODEL=small
 
 基金流程会在数据层做分层降级：新闻与 LLM 失败默认不终止主流程，但若单只基金的基础行情/净值序列获取失败，则直接跳过该基金后续特征、规则与 LLM 分析，并在日志中记录基础数据接口错误；这种情况代表流程数据异常，不会被误判为基金高风险。输出仍统一为结构化决策仪表盘（`buy/add/hold/reduce/redeem/watch`）。基金 prompt 与报告结构会尽量贴近股票分析侧的“核心结论 / 数据视角 / 舆情情报 / 执行计划”四块架构，只是把股票指标替换为基金适用指标（收益、回撤、相对基准、跟踪偏离、申赎与基金经理事件等）。
 
-当命令启用解释模式（`withExplanation=true`）时，`/market` 要求 `analysisEngine` 实际 provider 为 `codex` 且命令未带 `--no-llm`；系统会切换为单次批量 markdown 报告模式：先整理上下文 markdown，再由 codex 生成最终 markdown，并强制渲染图片用于推送。
+`/market` 现在固定走 markdown 图片报告链路：要求 `analysisEngine` 实际 provider 为 `codex`，先组装基金分析 markdown 上下文，再交给 codex 生成最终报告，并通过 unified + Playwright 管线渲染移动端图片。
 
-解释模式下会先组装基金分析 markdown 上下文，再交给 codex 生成最终报告并通过 unified + Playwright 管线渲染移动端图片，不再维护股票旧链路或旧版补充段落。
-
-该链路为强制模式，不再向下兼容纯文本解释回退：
+该链路为唯一模式，不再支持纯文本分析输出：
 
 - `codex` markdown 生成失败、markdown 为空、或长图渲染失败，都会直接报错 `MARKET_IMAGE_PIPELINE_FAILED`
 - 缺失依赖识别覆盖 `MODULE_NOT_FOUND`、ESM `ERR_MODULE_NOT_FOUND` 与 “Cannot find package/module” 消息；运行环境缺少 `playwright`、`unified` 或 remark/rehype 渲染依赖时会直接报错（不会发送纯文本兜底）
 - 动态安装与模块解析以项目 package root 为准（不依赖任意启动 cwd）；排障可执行 `npm ls playwright unified remark-parse remark-gfm remark-rehype rehype-stringify`
 - 企业微信图片发送必须走 WeCom bridge；直连 `/ingress/wecom` 通道会明确返回“当前通道不支持图片回复，请使用 WeCom bridge 通道。”
-
-纯文本输出（例如 `--no-llm`）会按单基金展示：
-
-- 核心结论、数据视角、情报观察、执行计划四块
-- 决策动作、评分、置信度
-- 执行建议与仓位调整提示
-- 关键指标摘要（如 `ret20d`、`maxDD`、`excess20d`、`coverage`）
-- 风险提示与数据完整性标记
-- 新闻检索状态（`SerpAPI 命中/未命中/未启用`，以及回退新闻源状态）
 
 持仓字段说明（Admin 与持久化一致）：
 
@@ -544,7 +533,7 @@ npm start
 - 在公网机器上部署 `tools/wecom-bridge.go` 或 `tools/wecom-bridge.js`
 - 本地 Paimon 通过 `WECOM_BRIDGE_URL` 主动连接 bridge 的 SSE 流
 - 这样企业微信请求先到 bridge，再由 bridge 转发给本地 Agent
-- 包含图片的响应（如 `/market` 解释模式长图）仅支持 bridge 发送；直连回调通道不会降级为纯文本图片说明
+- 包含图片的响应（如 `/market` 图片报告）仅支持 bridge 发送；直连回调通道不会降级为纯文本图片说明
 
 这类模式适合家庭网络、本地开发机或 NAS 环境。
 
