@@ -2,7 +2,7 @@ import { LLMChatMessage } from "../../../engines/llm/llm";
 import { ConversationWindowService } from "../../../memory/conversationWindowService";
 import { ConversationSkillLease } from "../../../memory/conversationWindowStore";
 import { Response, ToolExecution } from "../../../types";
-import { buildToolResponse, buildToolResultResponse, ConversationRuntimeSupport, isLlmMemoryContextEnabled, resolveMemoryDecision } from "../shared";
+import { buildToolObservationText, buildToolResponse, buildToolResultResponse, ConversationRuntimeSupport, isLlmMemoryContextEnabled, resolveMemoryDecision } from "../shared";
 import { ConversationRuntime, ConversationTurnInput } from "../types";
 import {
   AgentFollowupMode,
@@ -232,7 +232,7 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
       });
       this.support.writeLlmAudit(input.envelope, "planning", input.start, planningEngine);
       console.log(
-        `[ConversationAgent] session=${input.envelope.sessionId} planning_step=${step}/${this.maxSteps} decision=${action.decision} selected_skill=${input.selectedSkillName ?? "-"} history_messages=${input.historyMessages.length} trace_items=${trace.length}`
+        `[ConversationAgent] session=${input.envelope.sessionId} planning_iteration=${step} max_iterations=${this.maxSteps} decision=${action.decision} selected_skill=${input.selectedSkillName ?? "-"} history_messages=${input.historyMessages.length} trace_items=${trace.length}`
       );
 
       if (action.decision === "reroute") {
@@ -258,13 +258,26 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
         args: action.params
       };
       console.log(
-        `[ConversationAgent] session=${input.envelope.sessionId} tool_call step=${step}/${this.maxSteps} tool=${action.tool} action=${action.action}`
+        `[ConversationAgent] session=${input.envelope.sessionId} tool_call iteration=${step} max_iterations=${this.maxSteps} tool=${action.tool} action=${action.action}`
       );
       const toolResult = await this.support.createToolExecutor()(toolExecution, input.memory, input.envelope);
       lastToolResponse = buildToolResponse(toolResult.result, "", "", true);
+      const toolObservationText = buildToolObservationText(toolResult.result);
       console.log(
-        `[ConversationAgent] session=${input.envelope.sessionId} tool_result step=${step}/${this.maxSteps} ok=${toolResult.result.ok} text=${JSON.stringify(buildToolResultResponse(toolResult.result).text ?? "")}`
+        `[ConversationAgent] session=${input.envelope.sessionId} tool_result iteration=${step} max_iterations=${this.maxSteps} ok=${toolResult.result.ok} text=${JSON.stringify(toolObservationText)}`
       );
+      if (hasVisualResponse(lastToolResponse)) {
+        console.log(
+          `[ConversationAgent] session=${input.envelope.sessionId} terminal_tool_result iteration=${step} max_iterations=${this.maxSteps} reason=visual_output`
+        );
+        return {
+          kind: "response",
+          response: lastToolResponse,
+          ...(input.selectedSkillName ? { selectedSkillName: input.selectedSkillName } : {}),
+          objective: input.objective || "",
+          followupMode: "none"
+        };
+      }
       trace.push({
         step,
         action: {
@@ -275,7 +288,7 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
         },
         observation: {
           ok: toolResult.result.ok,
-          text: buildToolResultResponse(toolResult.result).text
+          text: toolObservationText
         }
       });
     }
@@ -324,6 +337,14 @@ function extractToolRuntimeData(toolsContext: Record<string, Record<string, unkn
   }
   const entries = Object.entries(toolsContext).filter(([name]) => name !== "_tools");
   return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
+function hasVisualResponse(response: Response | null): boolean {
+  if (!response?.data || typeof response.data !== "object") {
+    return false;
+  }
+  const data = response.data as Record<string, unknown>;
+  return Boolean(data.image) || (Array.isArray(data.images) && data.images.length > 0);
 }
 
 function readPositiveInt(raw: unknown, envRaw: unknown, fallback: number): number {

@@ -189,6 +189,38 @@ export function buildToolResultResponse(result: { ok: boolean; output?: unknown;
   return { text: "OK" };
 }
 
+export function buildToolObservationText(result: { ok: boolean; output?: unknown; error?: string }): string {
+  if (!result.ok) {
+    return result.error ? `Tool error: ${result.error}` : "Tool failed";
+  }
+  const output = result.output as Record<string, unknown> | string | undefined;
+  if (typeof output === "string") {
+    return output.trim() || "OK";
+  }
+  if (output && typeof output === "object") {
+    const text = output.text;
+    if (typeof text === "string" && text.trim()) {
+      return text.trim();
+    }
+    const image = output.image;
+    const images = Array.isArray(output.images) ? output.images : [];
+    if (image && typeof image === "object" && !Array.isArray(image)) {
+      const filename = typeof (image as Record<string, unknown>).filename === "string"
+        ? (image as Record<string, unknown>).filename
+        : "";
+      return filename ? `Tool succeeded and returned image output (${filename}).` : "Tool succeeded and returned image output.";
+    }
+    if (images.length > 0) {
+      return `Tool succeeded and returned ${images.length} image outputs.`;
+    }
+  }
+  const sanitized = sanitizeToolResult(output);
+  if (sanitized !== undefined) {
+    return JSON.stringify(sanitized, null, 2);
+  }
+  return "OK";
+}
+
 export function resolveMemoryDecision(
   result: { decision: "respond" | "use_skill" | "use_planning"; memory_mode?: "on" | "off"; memory_query?: string },
   text: string
