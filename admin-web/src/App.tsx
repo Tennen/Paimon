@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ConversationBenchmarkSection } from "@/components/admin/ConversationBenchmarkSection";
 import { DirectInputMappingSection } from "@/components/admin/DirectInputMappingSection";
 import { EvolutionSection } from "@/components/admin/EvolutionSection";
 import { FeatureMenu } from "@/components/admin/FeatureMenu";
@@ -18,6 +19,7 @@ import { WritingOrganizerSection } from "@/components/admin/WritingOrganizerSect
 import { buildEvolutionQueueRows } from "@/lib/evolutionQueueRows";
 import {
   AdminConfig,
+  ConversationBenchmarkResponse,
   DEFAULT_DIRECT_INPUT_MAPPING_CONFIG,
   DEFAULT_TOPIC_SUMMARY_CONFIG,
   DEFAULT_TOPIC_SUMMARY_STATE,
@@ -95,7 +97,11 @@ const EMPTY_MEMORY_DRAFT: SystemMemoryDraft = {
 
 const EMPTY_RUNTIME_DRAFT: SystemRuntimeDraft = {
   storageDriver: "json-file",
-  storageSqlitePath: "data/storage/metadata.sqlite"
+  storageSqlitePath: "data/storage/metadata.sqlite",
+  mainConversationMode: "classic",
+  conversationWindowTimeoutSeconds: "180",
+  conversationWindowMaxTurns: "6",
+  conversationAgentMaxSteps: "4"
 };
 
 const DEFAULT_SYSTEM_OPERATION_STATE: SystemOperationState = {
@@ -128,6 +134,8 @@ export default function App() {
   const [runtimeDraft, setRuntimeDraft] = useState<SystemRuntimeDraft>(EMPTY_RUNTIME_DRAFT);
 
   const [notice, setNotice] = useState<Notice>(null);
+  const [conversationBenchmarkResult, setConversationBenchmarkResult] = useState<ConversationBenchmarkResponse | null>(null);
+  const [runningConversationBenchmark, setRunningConversationBenchmark] = useState(false);
 
   const [systemOperationState, setSystemOperationState] = useState<SystemOperationState>(DEFAULT_SYSTEM_OPERATION_STATE);
   const [savingCodexConfig, setSavingCodexConfig] = useState(false);
@@ -356,7 +364,11 @@ export default function App() {
     });
     setRuntimeDraft({
       storageDriver: payload.storageDriver === "sqlite" ? "sqlite" : "json-file",
-      storageSqlitePath: payload.storageSqlitePath || "data/storage/metadata.sqlite"
+      storageSqlitePath: payload.storageSqlitePath || "data/storage/metadata.sqlite",
+      mainConversationMode: payload.mainConversationMode ?? "classic",
+      conversationWindowTimeoutSeconds: payload.conversationWindowTimeoutSeconds || "180",
+      conversationWindowMaxTurns: payload.conversationWindowMaxTurns || "6",
+      conversationAgentMaxSteps: payload.conversationAgentMaxSteps || "4"
     });
   }
 
@@ -824,7 +836,11 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           storageDriver: runtimeDraft.storageDriver,
-          storageSqlitePath: runtimeDraft.storageSqlitePath.trim()
+          storageSqlitePath: runtimeDraft.storageSqlitePath.trim(),
+          mainConversationMode: runtimeDraft.mainConversationMode,
+          conversationWindowTimeoutSeconds: runtimeDraft.conversationWindowTimeoutSeconds.trim(),
+          conversationWindowMaxTurns: runtimeDraft.conversationWindowMaxTurns.trim(),
+          conversationAgentMaxSteps: runtimeDraft.conversationAgentMaxSteps.trim()
         })
       });
       await loadConfig();
@@ -836,6 +852,29 @@ export default function App() {
       notifyError("保存运行时配置失败", error);
     } finally {
       setSavingRuntimeConfig(false);
+    }
+  }
+
+  async function handleRunConversationBenchmark(input: {
+    turns: string[];
+    repeatCount: number;
+    modes: Array<"classic" | "windowed-agent">;
+  }): Promise<void> {
+    setRunningConversationBenchmark(true);
+    try {
+      const payload = await request<ConversationBenchmarkResponse>("/admin/api/conversation/benchmark", {
+        method: "POST",
+        body: JSON.stringify(input)
+      });
+      setConversationBenchmarkResult(payload);
+      setNotice({
+        type: "success",
+        title: "对话 Benchmark 已完成"
+      });
+    } catch (error) {
+      notifyError("运行对话 Benchmark 失败", error);
+    } finally {
+      setRunningConversationBenchmark(false);
     }
   }
 
@@ -2175,6 +2214,16 @@ export default function App() {
               onPullRepo={() => void handlePullRepo()}
               onBuildRepo={() => void handleBuildRepo()}
               onDeployRepo={() => void handleDeployRepo()}
+            />
+          ) : null}
+
+          {activeMenu === "conversation" ? (
+            <ConversationBenchmarkSection
+              config={config}
+              runningBenchmark={runningConversationBenchmark}
+              benchmarkResult={conversationBenchmarkResult}
+              onRunBenchmark={(input) => void handleRunConversationBenchmark(input)}
+              onRefreshConfig={() => void loadConfig()}
             />
           ) : null}
 

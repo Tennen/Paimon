@@ -16,6 +16,7 @@ type FeatureMenuProps = {
 export function FeatureMenu(props: FeatureMenuProps) {
   const items: Array<{ key: MenuKey; label: string }> = [
     { key: "system", label: "系统设置" },
+    { key: "conversation", label: "对话 Benchmark" },
     { key: "messages", label: "消息任务" },
     { key: "direct_input", label: "输入映射" },
     { key: "wecom", label: "企业微信菜单" },

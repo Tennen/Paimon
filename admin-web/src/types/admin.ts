@@ -203,6 +203,8 @@ export type SearchEnginesPayload = {
   defaultEngine: SearchEngineProfile;
 };
 
+export type MainConversationMode = "classic" | "windowed-agent";
+
 export type AdminConfig = {
   llmProviders?: LLMProvidersPayload;
   searchEngines?: SearchEnginesPayload;
@@ -232,6 +234,10 @@ export type AdminConfig = {
   storageDriver: string;
   storageDriverEffective?: string;
   storageSqlitePath: string;
+  mainConversationMode: MainConversationMode;
+  conversationWindowTimeoutSeconds: string;
+  conversationWindowMaxTurns: string;
+  conversationAgentMaxSteps: string;
   llmMemoryContextEnabled: boolean;
   memoryCompactEveryRounds: string;
   memoryCompactMaxBatchSize: string;
@@ -769,7 +775,36 @@ export type TaskFormState = {
   enabled: boolean;
 };
 
-export type MenuKey = "system" | "messages" | "direct_input" | "wecom" | "market" | "topic" | "writing" | "evolution";
+export type ConversationBenchmarkTurnResult = {
+  turnIndex: number;
+  prompt: string;
+  latencyMs: number;
+  responseText: string;
+};
+
+export type ConversationBenchmarkConversationResult = {
+  repeat: number;
+  totalMs: number;
+  turns: ConversationBenchmarkTurnResult[];
+};
+
+export type ConversationBenchmarkSummary = {
+  mode: MainConversationMode;
+  repeatCount: number;
+  turnCount: number;
+  totalMs: number;
+  avgConversationMs: number;
+  avgTurnMs: number;
+  p95TurnMs: number;
+  conversations: ConversationBenchmarkConversationResult[];
+};
+
+export type ConversationBenchmarkResponse = {
+  ok: true;
+  summaries: ConversationBenchmarkSummary[];
+};
+
+export type MenuKey = "system" | "conversation" | "messages" | "direct_input" | "wecom" | "market" | "topic" | "writing" | "evolution";
 
 export const EMPTY_USER_FORM: UserFormState = {
   name: "",

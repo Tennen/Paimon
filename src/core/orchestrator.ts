@@ -2,10 +2,10 @@ import { Envelope, Image, Response, ToolExecution } from "../types";
 import { policyCheck } from "../policy";
 import { ToolRouter } from "../tools/toolRouter";
 import { writeAudit } from "../auditLogger";
-import { LLMEngine, LLMExecutionStep, LLMPlanMeta, LLMRuntimeContext } from "../engines/llm/llm";
+import { LLMEngine, LLMExecutionStep, LLMPlanMeta } from "../engines/llm/llm";
 import { MemoryStore } from "../memory/memoryStore";
 import { SkillManager } from "../skills/skillManager";
-import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry, ToolSchemaItem } from "../tools/toolRegistry";
+import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry } from "../tools/toolRegistry";
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { readWeComClickEventContext } from "../integrations/wecom/eventEnvelope";
 import { sttRuntime } from "../engines/stt";
@@ -15,6 +15,11 @@ import { MemoryCompactor } from "../memory/memoryCompactor";
 import { HybridMemoryService } from "../memory/hybridMemoryService";
 import { ObservableMenuService } from "../observable/menuService";
 import { DirectInputMappingService, ResolvedDirectInputMapping } from "../config/directInputMappingService";
+import { ConversationRuntimeSupport } from "./conversation/shared";
+import { ClassicConversationRuntime } from "./conversation/classic/runtime";
+import { WindowedAgentConversationRuntime } from "./conversation/agent/runtime";
+import { resolveMainConversationMode } from "./conversation/mode";
+import { ConversationWindowService } from "../memory/conversationWindowService";
 
 export type OrchestratorLLMResolver = (step: LLMExecutionStep) => LLMEngine;
 type ObservableMenuEventResolver = Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">;
@@ -30,12 +35,15 @@ export class Orchestrator {
   private readonly memoryCompactor: MemoryCompactor;
   private readonly hybridMemoryService: HybridMemoryService;
   private readonly skillManager: SkillManager;
-  private readonly maxIterations: number;
   private readonly toolRegistry: ToolRegistry;
   private readonly callbackDispatcher: CallbackDispatcher;
   private readonly asyncDirectQueues = new Map<string, Promise<void>>();
   private readonly observableMenuService?: ObservableMenuEventResolver;
   private readonly directInputResolver?: DirectInputResolver;
+  private readonly conversationWindowService: ConversationWindowService;
+  private readonly conversationSupport: ConversationRuntimeSupport;
+  private readonly classicRuntime: ClassicConversationRuntime;
+  private readonly windowedAgentRuntime: WindowedAgentConversationRuntime;
 
   constructor(
     toolRouter: ToolRouter,
@@ -49,7 +57,8 @@ export class Orchestrator {
     hybridMemoryService?: HybridMemoryService,
     llmEngineResolver?: OrchestratorLLMResolver,
     observableMenuService?: ObservableMenuEventResolver,
-    directInputResolver?: DirectInputResolver
+    directInputResolver?: DirectInputResolver,
+    conversationWindowService?: ConversationWindowService
   ) {
     this.toolRouter = toolRouter;
     this.defaultLLMEngine = llmEngine;
@@ -59,23 +68,25 @@ export class Orchestrator {
     this.memoryCompactor = memoryCompactor ?? new MemoryCompactor({ rawStore: rawMemoryStore });
     this.hybridMemoryService = hybridMemoryService ?? new HybridMemoryService({ rawStore: rawMemoryStore });
     this.skillManager = skillManager;
-    this.maxIterations = Number(process.env.LLM_MAX_ITERATIONS ?? "5");
     this.toolRegistry = toolRegistry;
     this.callbackDispatcher = callbackDispatcher;
     this.observableMenuService = observableMenuService;
     this.directInputResolver = directInputResolver;
-  }
-
-  private resolveLLMEngine(step: LLMExecutionStep): LLMEngine {
-    if (!this.llmEngineResolver) {
-      return this.defaultLLMEngine;
-    }
-    try {
-      return this.llmEngineResolver(step);
-    } catch (error) {
-      console.error(`[Orchestrator] resolveLLMEngine failed for step=${step}, fallback to default`, error);
-      return this.defaultLLMEngine;
-    }
+    this.conversationWindowService = conversationWindowService ?? new ConversationWindowService();
+    this.conversationSupport = new ConversationRuntimeSupport({
+      toolRouter: this.toolRouter,
+      defaultLLMEngine: this.defaultLLMEngine,
+      skillManager: this.skillManager,
+      toolRegistry: this.toolRegistry,
+      hybridMemoryService: this.hybridMemoryService,
+      llmEngineResolver: this.llmEngineResolver,
+      writeLlmAudit: (envelope, step, start, engine) => this.writeLlmAudit(envelope, step, start, engine)
+    });
+    this.classicRuntime = new ClassicConversationRuntime(this.conversationSupport);
+    this.windowedAgentRuntime = new WindowedAgentConversationRuntime(
+      this.conversationSupport,
+      this.conversationWindowService
+    );
   }
 
   async handle(envelope: Envelope): Promise<Response> {
@@ -121,49 +132,15 @@ export class Orchestrator {
         return directRouteResponse;
       }
 
-      // Step 1: Routing - Decide direct response / planning / tool-oriented skill path
-      const routingResult = await this.routingStep(text, workingEnvelope, start, readSessionMemory);
-      if (routingResult.response) {
-        this.processed.set(workingEnvelope.requestId, routingResult.response);
-        this.appendMemory(workingEnvelope, originalText, routingResult.response);
-        return routingResult.response;
-      }
-
-      // Step 2: Planning - Local thinking + direct response or tool call plan
-      const planningResult = await this.planningStep(
-        routingResult.skillName,
-        routingResult.planningThinkingBudget,
+      const conversationMode = resolveMainConversationMode(workingEnvelope.meta);
+      const response = await (conversationMode === "windowed-agent" ? this.windowedAgentRuntime : this.classicRuntime).handleTurn({
         text,
-        routingResult.memory,
-        workingEnvelope,
-        start
-      );
-      if (planningResult.response) {
-        this.processed.set(workingEnvelope.requestId, planningResult.response);
-        this.appendMemory(workingEnvelope, originalText, planningResult.response);
-        return planningResult.response;
-      }
-
-      // Step 3: Tool Call - Execute the planned tool action
-      if (!planningResult.toolExecution) {
-        const response = { text: "I don't understand. Please try rephrasing." };
-        this.processed.set(workingEnvelope.requestId, response);
-        this.appendMemory(workingEnvelope, originalText, response);
-        return response;
-      }
-      const toolResult = await this.toolCallStep(planningResult.toolExecution, text, routingResult.memory, workingEnvelope, start);
-
-      // Step 4: Respond - Generate final response based on tool result and prepared templates
-      const response = await this.respondStep(
-        toolResult.result,
-        planningResult.successResponse || "Task completed successfully",
-        planningResult.failureResponse || "Tool execution failed",
-        planningResult.preferToolResult ?? false,
-        originalText,
-        workingEnvelope,
-        start
-      );
-
+        envelope: workingEnvelope,
+        start,
+        readSessionMemory
+      });
+      this.processed.set(workingEnvelope.requestId, response);
+      this.appendMemory(workingEnvelope, originalText, response);
       return response;
     } catch (error) {
       if (dispatchedMenuEventId) {
@@ -456,164 +433,6 @@ export class Orchestrator {
     }
   }
 
-  private async routingStep(
-    text: string,
-    envelope: Envelope,
-    start: number,
-    readSessionMemory: () => string
-  ): Promise<{ response?: Response; skillName?: string; planningThinkingBudget?: number; memory: string }> {
-    const llmEngine = this.resolveLLMEngine("routing");
-    const extraSkills = buildExtraSkillsContext(this.toolRegistry);
-    const skillsContext = buildSkillsContext(this.skillManager, undefined, extraSkills);
-
-    const runtimeContext: LLMRuntimeContext = {
-      isoTime: new Date().toISOString(),
-      userTimezone: "Asia/Shanghai",
-      // small model may confuse with memory, so we pass an empty string
-      // memory,
-      skills_context: skillsContext,
-      // tools_context: buildToolsSchemaContext(this.toolRegistry),
-    };
-
-    const result = await llmEngine.route(text, runtimeContext);
-    const memoryDecision = resolveMemoryDecision(result, text);
-    const memoryContextEnabled = isLlmMemoryContextEnabled();
-    const memory = memoryContextEnabled && memoryDecision.enabled
-      ? this.loadMemoryForNextStep(envelope.sessionId, memoryDecision.query, readSessionMemory)
-      : "";
-
-    // Write audit log
-    const llmMeta: LLMPlanMeta = {
-      llm_provider: llmEngine.getProviderName(),
-      model: llmEngine.getModelForStep("routing"),
-      retries: 0,
-      parse_ok: true,
-      raw_output_length: 0,
-      fallback: false
-    };
-    this.writeLlmAudit(envelope, llmMeta, "routing", start);
-
-    if (result.decision === "respond") {
-      const response = { text: result.response_text || "OK" };
-      this.appendMemory(envelope, text, response);
-      return { response, memory };
-    }
-
-    if (result.decision === "use_skill" && result.skill_name) {
-      return {
-        skillName: result.skill_name,
-        planningThinkingBudget: result.planning_thinking_budget,
-        memory
-      };
-    }
-
-    if (result.decision === "use_planning") {
-      return {
-        planningThinkingBudget: result.planning_thinking_budget,
-        memory
-      };
-    }
-
-    const response = { text: "I don't understand. Please try rephrasing." };
-    this.appendMemory(envelope, text, response);
-    return { response, memory };
-  }
-
-  private async planningStep(
-    skillName: string | undefined,
-    planningThinkingBudget: number | undefined,
-    text: string,
-    memory: string,
-    envelope: Envelope,
-    start: number
-  ): Promise<{
-    response?: Response;
-    toolExecution?: ToolExecution;
-    successResponse?: string;
-    failureResponse?: string;
-    preferToolResult?: boolean;
-  }> {
-    const llmEngine = this.resolveLLMEngine("planning");
-    const selectedSkill = skillName ? this.skillManager.get(skillName) : undefined;
-    const toolName = selectedSkill?.tool;
-
-    // const actionHistory: Array<{ iteration: number; action: { type: string; params: Record<string, unknown> } }> = [];
-    const extraSkills = buildExtraSkillsContext(this.toolRegistry);
-    const detail = skillName
-      ? getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry)
-      : "";
-    const forceTools: string[] = [];
-
-    if (skillName === "homeassistant") {
-      forceTools.push("homeassistant");
-    }
-    if (skillName && selectedSkill?.terminal) {
-      forceTools.push("terminal");
-    }
-    if (toolName) {
-      forceTools.push(toolName);
-    }
-
-    const fullToolContext = this.toolRegistry.buildRuntimeContext();
-    const toolContext = skillName
-      ? filterToolContextForSkill(detail, fullToolContext, forceTools)
-      : null;
-
-    const runtimeContext: Record<string, unknown> = {
-      isoTime: new Date().toISOString(),
-      userTimezone: "Asia/Shanghai",
-      ...(memory ? { memory } : {}),
-      // action_history: actionHistory,
-      // skills_context: skillContext,
-      tools_context: toolContext,
-      skill_detail: detail,
-      planning_mode: skillName ? "skill_tool_planning" : "local_thinking",
-      skill_contract: selectedSkill?.tool
-        ? {
-            tool: selectedSkill.tool,
-            action: selectedSkill.action ?? "execute",
-            params: selectedSkill.params ?? ["input"]
-          }
-        : null
-    };
-
-    const plan = await llmEngine.plan(
-      text,
-      runtimeContext,
-      planningThinkingBudget === undefined
-        ? undefined
-        : { thinkingBudgetOverride: planningThinkingBudget }
-    );
-
-    // Write audit log
-    const llmMeta: LLMPlanMeta = {
-      llm_provider: llmEngine.getProviderName(),
-      model: llmEngine.getModelForStep("planning"),
-      retries: 0,
-      parse_ok: true,
-      raw_output_length: 0,
-      fallback: false
-    };
-    this.writeLlmAudit(envelope, llmMeta, "planning", start);
-
-    if (plan.decision === "respond") {
-      return {
-        response: { text: plan.response_text || "OK" }
-      };
-    }
-
-    return {
-      toolExecution: {
-        tool: plan.tool,
-        op: plan.op,
-        args: plan.args
-      },
-      successResponse: plan.success_response,
-      failureResponse: plan.failure_response,
-      preferToolResult: selectedSkill?.preferToolResult ?? false
-    };
-  }
-
   private async toolCallStep(
     toolExecution: ToolExecution,
     _text: string,
@@ -706,15 +525,23 @@ export class Orchestrator {
     return response;
   }
 
-  private writeLlmAudit(envelope: Envelope, llmMeta: LLMPlanMeta, actionType: string, start: number): void {
+  private writeLlmAudit(envelope: Envelope, step: LLMExecutionStep, start: number, engine: LLMEngine): void {
     const latencyMs = Date.now() - start;
     const ingressMessageId = (envelope.meta as Record<string, unknown> | undefined)?.ingress_message_id;
+    const llmMeta: LLMPlanMeta = {
+      llm_provider: engine.getProviderName(),
+      model: engine.getModelForStep(step),
+      retries: 0,
+      parse_ok: true,
+      raw_output_length: 0,
+      fallback: false
+    };
     writeAudit({
       requestId: envelope.requestId,
       sessionId: envelope.sessionId,
       source: envelope.source,
       ingress_message_id: typeof ingressMessageId === "string" ? ingressMessageId : undefined,
-      actionType: actionType as any,
+      actionType: step as any,
       latencyMs,
       tool: "llm",
       llm_provider: llmMeta.llm_provider,
@@ -724,25 +551,6 @@ export class Orchestrator {
       raw_output_length: llmMeta.raw_output_length,
       fallback: llmMeta.fallback
     });
-  }
-
-  private loadMemoryForNextStep(
-    sessionId: string,
-    query: string,
-    readSessionMemory: () => string
-  ): string {
-    if (!sessionId) {
-      return "";
-    }
-    try {
-      const hybrid = this.hybridMemoryService.build(sessionId, query);
-      if (hybrid?.memory) {
-        return hybrid.memory;
-      }
-    } catch (error) {
-      console.error("hybrid memory load failed:", error);
-    }
-    return readSessionMemory();
   }
 
   private appendMemory(envelope: Envelope, text: string, response: Response): void {
@@ -762,6 +570,9 @@ export class Orchestrator {
       meta: rawMeta,
       createdAt: envelope.receivedAt
     });
+    if (rawMeta.benchmark === true) {
+      return;
+    }
     void this.memoryCompactor.maybeCompact({
       sessionId: envelope.sessionId,
       requestId: envelope.requestId,
@@ -805,44 +616,6 @@ function isReAgentResetInput(userText: string): boolean {
     return false;
   }
   return parseReAgentCommand(userText).kind === "reset";
-}
-
-function resolveMemoryDecision(
-  result: { decision: "respond" | "use_skill" | "use_planning"; memory_mode?: "on" | "off"; memory_query?: string },
-  text: string
-): { enabled: boolean; query: string } {
-  if (result.decision === "respond") {
-    return { enabled: false, query: text };
-  }
-  const defaultEnabled = true;
-  const enabled = result.memory_mode === "on"
-    ? true
-    : result.memory_mode === "off"
-      ? false
-      : defaultEnabled;
-  const query = typeof result.memory_query === "string" && result.memory_query.trim().length > 0
-    ? result.memory_query.trim()
-    : text;
-  return { enabled, query };
-}
-
-function isLlmMemoryContextEnabled(): boolean {
-  const raw = process.env.LLM_MEMORY_CONTEXT_ENABLED;
-  if (raw === undefined || raw === null) {
-    return true;
-  }
-
-  const normalized = String(raw).trim().toLowerCase();
-  if (!normalized) {
-    return true;
-  }
-  if (["true", "1", "yes", "on"].includes(normalized)) {
-    return true;
-  }
-  if (["false", "0", "no", "off"].includes(normalized)) {
-    return false;
-  }
-  return true;
 }
 
 function sanitizeToolResult(input: unknown): unknown {
@@ -905,127 +678,6 @@ function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?
     return { text: JSON.stringify(sanitized, null, 2) };
   }
   return { text: "OK" };
-}
-
-function buildSkillsContext(
-  skillManager: SkillManager,
-  onlyNames?: string[],
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {}
-): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> | null {
-  const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
-  const entries = skills.map((skill) => {
-    const command = skill.metadata?.command ?? skill.command;
-    const keywords = skill.metadata?.keywords ?? skill.keywords;
-    return [
-      skill.name,
-      {
-        description: skill.description,
-        command,
-        terminal: skill.terminal,
-        ...(skill.tool ? { tool: skill.tool } : {}),
-        ...(skill.action ? { action: skill.action } : {}),
-        ...(skill.params && skill.params.length > 0 ? { params: skill.params } : {}),
-        ...(keywords ? { keywords } : {})
-      }
-    ] as const;
-  });
-  const extraEntries = Object.entries(extraSkills).filter(([name]) => !onlyNames || onlyNames.includes(name));
-  const merged = Object.fromEntries([...entries, ...extraEntries]);
-  if (Object.keys(merged).length === 0) return null;
-  return merged;
-}
-
-function buildExtraSkillsContext(
-  toolRegistry: ToolRegistry
-): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> {
-  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {};
-  const haSchema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
-  if (haSchema) {
-    extra.homeassistant = {
-      description: "Control and query Home Assistant devices (services, state, snapshots).",
-      command: "homeassistant",
-      terminal: false,
-      tool: "homeassistant",
-      action: "call_service",
-      ...(haSchema.keywords ? { keywords: haSchema.keywords } : {})
-    };
-  }
-  return extra;
-}
-
-function getSkillDetail(
-  name: string,
-  skillManager: SkillManager,
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }>,
-  toolRegistry: ToolRegistry
-): string {
-  if (extraSkills[name] && name === "homeassistant") {
-    const schema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
-    return buildHomeAssistantSkillDetail(schema);
-  }
-  return skillManager.getDetail(name);
-}
-
-function buildHomeAssistantSkillDetail(schema?: ToolSchemaItem): string {
-  const keywordsLine = schema?.keywords ? `    \"keywords\": ${JSON.stringify(schema.keywords)}` : "";
-  const ops = (schema?.operations ?? []).map((op) => `- ${op.op}: params ${JSON.stringify(op.params)}`);
-  const operations = ops.length > 0
-    ? ["Operations", ...ops]
-    : [
-        "Operations",
-        "- call_service: params { domain, service, entity_id, data? }",
-        "- get_state: params { entity_id }",
-        "- camera_snapshot: params { entity_id }"
-      ];
-  return [
-    "---",
-    "name: homeassistant",
-    "description: Control and query Home Assistant devices (services, state, snapshots).",
-    "terminal: false",
-    "metadata:",
-    "  {",
-    "    \"tool\": \"homeassistant\"",
-    ...(keywordsLine ? [keywordsLine] : []),
-    "  }",
-    "---",
-    "",
-    "# Home Assistant Tool",
-    "",
-    "Use the `homeassistant` tool via tool.call to control devices and query state.",
-    "Refer to tools_context.homeassistant.entities for available entities.",
-    "",
-    ...operations
-  ].join("\n");
-}
-
-function buildToolsSchemaContext(registry: ToolRegistry): Record<string, Record<string, unknown>> {
-  return { _tools: { schema: registry.listSchema() } };
-}
-
-function filterToolContextForSkill(
-  detail: string,
-  toolContext: Record<string, Record<string, unknown>>,
-  forceTools: string[] = []
-): Record<string, Record<string, unknown>> | null {
-  const lower = detail.toLowerCase();
-  const forced = new Set(forceTools);
-  const entries = Object.entries(toolContext).filter(([name]) => name !== "_tools");
-  const matches = entries.filter(([name]) => lower.includes(name.toLowerCase()) || forced.has(name));
-  const matchedNames = new Set<string>(matches.map(([name]) => name));
-  for (const name of forced) matchedNames.add(name);
-
-  const result: Record<string, Record<string, unknown>> = Object.fromEntries(matches);
-  const toolsSchema = (toolContext as Record<string, Record<string, unknown>>)._tools as { schema?: Array<{ name: string }> } | undefined;
-  const schemaList = Array.isArray(toolsSchema?.schema) ? toolsSchema?.schema : [];
-  if (schemaList.length > 0) {
-    const filteredSchema = schemaList.filter((item) => matchedNames.has(item.name));
-    if (filteredSchema.length > 0) {
-      result._tools = { schema: filteredSchema };
-    }
-  }
-
-  if (Object.keys(result).length === 0) return null;
-  return result;
 }
 
 function normalizeImages(images: Image[] | undefined): Image[] {

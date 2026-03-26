@@ -29,7 +29,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 各目录职责如下：
 
 - `src/ingress/`: 输入适配层，负责 HTTP、企业微信回调、SSE bridge、Admin API 等入口
-- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
+- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/conversation/` 承载主对话 runtime，`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
 - `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
 - `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
 - `src/observable/`: Admin 定义的菜单/触发器配置与回调事件分发
@@ -72,6 +72,9 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 支持 `Ollama`、`llama-server`、`OpenAI(ChatGPT API)`、`Gemini`、`gpt-plugin`、`codex-cli`
 - 支持多 Provider Profile（多条 `openai-like` / `gemini-like` / `ollama` / `llama-server` / `codex`，单条 `gpt-plugin`），并可按场景独立选择
 - 支持技能发现、技能规划、工具调用的分步式执行
+- 主对话支持两套 runtime：
+  - `classic`: 传统 `route -> planning -> tool/respond`
+  - `windowed-agent`: 3 分钟短窗口内保留真实 `messages`，并用短租约 `skill lease` 继续多轮
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
 - 支持 `/re` 子 agent ReAct 循环（默认本地模型 `qwen3.5:9b`）
@@ -94,6 +97,8 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 - Admin API 与 Admin Web 界面
 - 模型配置查看与更新
+- 主对话 runtime 切换（System -> 运行时）
+- 对话 benchmark 页面，用于对比 `classic` / `windowed-agent` 的实际耗时
 - 定时任务和推送用户管理
 - Direct Input Mapping 配置（固定文本 -> 目标输入）
 - 企业微信应用 click 菜单配置、发布与最近 `EventKey` 回调查看
@@ -493,6 +498,23 @@ MEMORY_RAG_SUMMARY_TOP_K=4
 - `MEMORY_RAW_RECORD_LIMIT`：最终注入上下文的 raw 回放条数上限
 - `MEMORY_RAG_SUMMARY_TOP_K`：`/re` 的 `rag` 模块检索 summary 数量上限
 
+#### 主对话运行时（可选）
+
+```env
+MAIN_CONVERSATION_MODE=classic
+CONVERSATION_WINDOW_TIMEOUT_SECONDS=180
+CONVERSATION_WINDOW_MAX_TURNS=6
+CONVERSATION_AGENT_MAX_STEPS=4
+```
+
+说明：
+
+- `MAIN_CONVERSATION_MODE`：主对话默认 runtime，`classic` 为旧的 `route -> planning` 链路，`windowed-agent` 为消息窗口 runtime
+- `CONVERSATION_WINDOW_TIMEOUT_SECONDS`：用户在收到回复后，下一条消息仍算同一个短窗口的超时时间
+- `CONVERSATION_WINDOW_MAX_TURNS`：短窗口最多保留多少轮真实 `user/assistant` 消息
+- `CONVERSATION_AGENT_MAX_STEPS`：`windowed-agent` 单轮内允许的最大 agent/tool 推理步数
+- 这些值也可以在 Admin `System -> 运行时` 页面修改；对话性能对比可在 Admin `对话 Benchmark` 页面执行
+
 ### 3. 本地开发启动
 
 ```bash
@@ -556,6 +578,7 @@ Memory 规则（global hybrid memory）：
 - `summary memory` 结构包含 `user_facts`、`environment`、`long_term_preferences`、`task_results` 与 `rawRefs`
 - 主 `Orchestrator` 已接入 `HybridMemoryService`：先做 `SummaryVectorIndex.search`（词法精确匹配 + 向量相似度融合排序），再按 `rawRefs` 通过 `RawMemoryStore.getByIds` 回补少量原文上下文
 - 当 summary 检索无命中时，主 `Orchestrator` 会回退到 `MemoryStore.read(sessionId)` 的会话记忆
+- `windowed-agent` 的短窗口对话历史单独保存在 `conversation window` store 中，只保留最近真实消息与可续租 skill；它不替代长期 hybrid memory
 - `/re` 会在该全局记忆上执行子 agent 循环
 
 ## Incremental Writing Organizer
@@ -593,6 +616,7 @@ Memory 规则（global hybrid memory）：
   - `data/memory/raw.json`（raw memory）
   - `data/memory/summary.json`（summary memory）
   - `data/memory/summary-index.json`（summary 向量索引）
+  - `data/memory/conversation-windows.json`（主对话短窗口状态）
 - 审计日志
 - 定时任务和推送用户
 - Topic Summary 配置与状态

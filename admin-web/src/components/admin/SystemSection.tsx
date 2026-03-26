@@ -23,6 +23,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { MemorySection } from "@/components/admin/MemorySection";
 import {
   AdminConfig,
+  MainConversationMode,
   LLMProviderProfile,
   LLMProviderStore,
   LLMProviderType,
@@ -44,6 +45,10 @@ export type SystemMemoryDraft = {
 export type SystemRuntimeDraft = {
   storageDriver: "json-file" | "sqlite";
   storageSqlitePath: string;
+  mainConversationMode: MainConversationMode;
+  conversationWindowTimeoutSeconds: string;
+  conversationWindowMaxTurns: string;
+  conversationAgentMaxSteps: string;
 };
 
 export type SystemOperationState = {
@@ -1251,6 +1256,51 @@ export function SystemSection(props: SystemSectionProps) {
                     placeholder="data/storage/metadata.sqlite"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>MAIN_CONVERSATION_MODE</Label>
+                  <Select
+                    value={props.runtimeDraft.mainConversationMode}
+                    onValueChange={(value) => props.onRuntimeDraftChange("mainConversationMode", normalizeConversationMode(value))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="classic">classic</SelectItem>
+                      <SelectItem value="windowed-agent">windowed-agent</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>CONVERSATION_WINDOW_TIMEOUT_SECONDS</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={props.runtimeDraft.conversationWindowTimeoutSeconds}
+                    onChange={(event) => props.onRuntimeDraftChange("conversationWindowTimeoutSeconds", event.target.value)}
+                    placeholder="180"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>CONVERSATION_WINDOW_MAX_TURNS</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={props.runtimeDraft.conversationWindowMaxTurns}
+                    onChange={(event) => props.onRuntimeDraftChange("conversationWindowMaxTurns", event.target.value)}
+                    placeholder="6"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>CONVERSATION_AGENT_MAX_STEPS</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={props.runtimeDraft.conversationAgentMaxSteps}
+                    onChange={(event) => props.onRuntimeDraftChange("conversationAgentMaxSteps", event.target.value)}
+                    placeholder="4"
+                  />
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" onClick={props.onSaveRuntimeConfig} disabled={props.savingRuntimeConfig}>
@@ -1268,6 +1318,10 @@ export function SystemSection(props: SystemSectionProps) {
                 <div className="mono md:col-span-2">
                   STORAGE_SQLITE_PATH: {props.config?.storageSqlitePath || "(default data/storage/metadata.sqlite)"}
                 </div>
+                <div className="mono">MAIN_CONVERSATION_MODE: {props.config?.mainConversationMode ?? "classic"}</div>
+                <div className="mono">CONVERSATION_WINDOW_TIMEOUT_SECONDS: {props.config?.conversationWindowTimeoutSeconds ?? "180"}</div>
+                <div className="mono">CONVERSATION_WINDOW_MAX_TURNS: {props.config?.conversationWindowMaxTurns ?? "6"}</div>
+                <div className="mono">CONVERSATION_AGENT_MAX_STEPS: {props.config?.conversationAgentMaxSteps ?? "4"}</div>
               </div>
             </CardContent>
           </Card>
@@ -1288,6 +1342,7 @@ export function SystemSection(props: SystemSectionProps) {
                 <div className="mono">routingProviderName: {selectedRoutingLabel}</div>
                 <div className="mono">planningProviderName: {selectedPlanningLabel}</div>
                 <div className="mono">providerCount: {providerItems.length}</div>
+                <div className="mono">conversationMode: {props.config?.mainConversationMode ?? "classic"}</div>
                 <div className="mono">llmMemoryContextEnabled: {String(props.config?.llmMemoryContextEnabled ?? true)}</div>
                 <div className="mono">codexModel: {props.config?.codexModel || "(follow Codex default)"}</div>
                 <div className="mono">codexReasoningEffort: {props.config?.codexReasoningEffort || "(follow Codex default)"}</div>
@@ -1317,6 +1372,10 @@ function normalizeStorageDriver(raw: string): "json-file" | "sqlite" {
     return "sqlite";
   }
   return "json-file";
+}
+
+function normalizeConversationMode(raw: string): MainConversationMode {
+  return raw === "windowed-agent" ? "windowed-agent" : "classic";
 }
 
 function normalizeSearchEngineId(raw: string): string {

@@ -25,6 +25,8 @@ This file defines hard constraints for coding agents working in this repository.
 - `src/core/`
   - Orchestration and tool routing.
   - No direct filesystem persistence and no vendor-specific API code.
+  - `src/core/conversation/` owns main conversation runtime variants, shared phase helpers, and benchmark services for the main dialogue chain.
+  - Keep main conversation orchestration split by stable responsibility (`shared`, `classic`, `agent`, `benchmark`, `types`) instead of growing `orchestrator.ts` into a single mixed-responsibility file.
   - `src/core/re-agent/` keeps ReAct loop/runtime orchestration only; tool/vendor protocol details stay outside core.
 
 - `src/config/`
@@ -85,6 +87,8 @@ This file defines hard constraints for coding agents working in this repository.
 - New independent LLM-callable tools go under `src/tools/`.
 - Standalone operational scripts go under repo root `tools/` (not `src/`).
 - New cross-cutting infrastructure modules go under `src/<infra-domain>/` and must be reusable.
+- When a main chain or runtime refactor introduces multiple phases/modes, create a dedicated subdirectory (for example `src/core/conversation/`) and split files by stable responsibility. Do not keep routing/bootstrap/planning/acting/admin benchmark wiring in one oversized file.
+- If a module starts mixing runtime state machine logic, prompt construction, persistence access coordination, and admin contracts, split it before adding more behavior. Prefer `types.ts`, `shared.ts`, per-mode `runtime.ts`, and adjacent service files over a single catch-all module.
 
 ## Skill Rules
 

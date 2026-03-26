@@ -68,6 +68,12 @@ import {
 } from "../integrations/search-engine/store";
 import { ObservableMenuService } from "../observable/menuService";
 import { DirectInputMappingService } from "../config/directInputMappingService";
+import {
+  ConversationBenchmarkRequest,
+  ConversationBenchmarkService
+} from "../core/conversation/benchmarkService";
+import { MainConversationMode } from "../core/conversation/types";
+import { normalizeMainConversationMode, readMainConversationMode } from "../core/conversation/mode";
 
 const execAsync = promisify(exec);
 
@@ -234,13 +240,15 @@ export class AdminIngressAdapter implements IngressAdapter {
   private readonly openAIQuotaManager: OpenAIQuotaManager;
   private readonly observableMenuService: ObservableMenuService;
   private readonly directInputMappingService: DirectInputMappingService;
+  private readonly conversationBenchmarkService?: ConversationBenchmarkService;
 
   constructor(
     envStore: EnvConfigStore,
     scheduler: SchedulerService,
     evolutionEngine?: EvolutionEngine,
     adminDistCandidates?: string[],
-    evolutionService?: EvolutionOperatorService
+    evolutionService?: EvolutionOperatorService,
+    conversationBenchmarkService?: ConversationBenchmarkService
   ) {
     this.envStore = envStore;
     this.scheduler = scheduler;
@@ -253,6 +261,7 @@ export class AdminIngressAdapter implements IngressAdapter {
     this.openAIQuotaManager = new OpenAIQuotaManager();
     this.observableMenuService = new ObservableMenuService();
     this.directInputMappingService = new DirectInputMappingService();
+    this.conversationBenchmarkService = conversationBenchmarkService;
   }
 
   register(app: Express, _sessionManager: SessionManager): void {
@@ -305,6 +314,10 @@ export class AdminIngressAdapter implements IngressAdapter {
         storageDriver: getEnvValue(envPath, "STORAGE_DRIVER") || getStorageDriver(),
         storageDriverEffective: getStorageDriver(),
         storageSqlitePath: getEnvValue(envPath, "STORAGE_SQLITE_PATH") || getStorageSqlitePath(),
+        mainConversationMode: readMainConversationMode(getEnvValue(envPath, "MAIN_CONVERSATION_MODE")),
+        conversationWindowTimeoutSeconds: getEnvValue(envPath, "CONVERSATION_WINDOW_TIMEOUT_SECONDS") || "180",
+        conversationWindowMaxTurns: getEnvValue(envPath, "CONVERSATION_WINDOW_MAX_TURNS") || "6",
+        conversationAgentMaxSteps: getEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS") || "4",
         llmMemoryContextEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_MEMORY_CONTEXT_ENABLED")) ?? true,
         memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
         memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
@@ -1155,6 +1168,10 @@ export class AdminIngressAdapter implements IngressAdapter {
       const body = (req.body ?? {}) as {
         storageDriver?: unknown;
         storageSqlitePath?: unknown;
+        mainConversationMode?: unknown;
+        conversationWindowTimeoutSeconds?: unknown;
+        conversationWindowMaxTurns?: unknown;
+        conversationAgentMaxSteps?: unknown;
       };
 
       if (body.storageDriver !== undefined && typeof body.storageDriver !== "string") {
@@ -1165,13 +1182,37 @@ export class AdminIngressAdapter implements IngressAdapter {
         res.status(400).json({ error: "storageSqlitePath must be string" });
         return;
       }
+      if (body.mainConversationMode !== undefined && typeof body.mainConversationMode !== "string") {
+        res.status(400).json({ error: "mainConversationMode must be string" });
+        return;
+      }
 
       const envPath = this.envStore.getPath();
       const storageDriver = normalizeOptionalString(body.storageDriver).toLowerCase();
       const storageSqlitePath = normalizeOptionalString(body.storageSqlitePath);
+      const mainConversationMode = normalizeOptionalString(body.mainConversationMode);
+      const conversationWindowTimeoutSeconds = normalizeOptionalIntegerString(body.conversationWindowTimeoutSeconds);
+      const conversationWindowMaxTurns = normalizeOptionalIntegerString(body.conversationWindowMaxTurns);
+      const conversationAgentMaxSteps = normalizeOptionalIntegerString(body.conversationAgentMaxSteps);
 
       if (storageDriver && !["json-file", "sqlite"].includes(storageDriver)) {
         res.status(400).json({ error: "STORAGE_DRIVER must be json-file or sqlite" });
+        return;
+      }
+      if (mainConversationMode && !["classic", "windowed-agent"].includes(mainConversationMode)) {
+        res.status(400).json({ error: "MAIN_CONVERSATION_MODE must be classic or windowed-agent" });
+        return;
+      }
+      if (conversationWindowTimeoutSeconds === null) {
+        res.status(400).json({ error: "CONVERSATION_WINDOW_TIMEOUT_SECONDS must be positive integer or empty" });
+        return;
+      }
+      if (conversationWindowMaxTurns === null) {
+        res.status(400).json({ error: "CONVERSATION_WINDOW_MAX_TURNS must be positive integer or empty" });
+        return;
+      }
+      if (conversationAgentMaxSteps === null) {
+        res.status(400).json({ error: "CONVERSATION_AGENT_MAX_STEPS must be positive integer or empty" });
         return;
       }
 
@@ -1187,6 +1228,16 @@ export class AdminIngressAdapter implements IngressAdapter {
         } else if (body.storageSqlitePath !== undefined) {
           unsetEnvValue(envPath, "STORAGE_SQLITE_PATH");
         }
+
+        if (mainConversationMode) {
+          setEnvValue(envPath, "MAIN_CONVERSATION_MODE", normalizeMainConversationMode(mainConversationMode));
+        } else if (body.mainConversationMode !== undefined) {
+          unsetEnvValue(envPath, "MAIN_CONVERSATION_MODE");
+        }
+
+        writeOptionalEnvValue(envPath, "CONVERSATION_WINDOW_TIMEOUT_SECONDS", conversationWindowTimeoutSeconds, body.conversationWindowTimeoutSeconds);
+        writeOptionalEnvValue(envPath, "CONVERSATION_WINDOW_MAX_TURNS", conversationWindowMaxTurns, body.conversationWindowMaxTurns);
+        writeOptionalEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS", conversationAgentMaxSteps, body.conversationAgentMaxSteps);
       } catch (error) {
         res.status(500).json({ error: (error as Error).message ?? "failed to save runtime config" });
         return;
@@ -1196,8 +1247,56 @@ export class AdminIngressAdapter implements IngressAdapter {
         ok: true,
         storageDriver: getEnvValue(envPath, "STORAGE_DRIVER") || getStorageDriver(),
         storageDriverEffective: getStorageDriver(),
-        storageSqlitePath: getEnvValue(envPath, "STORAGE_SQLITE_PATH") || getStorageSqlitePath()
+        storageSqlitePath: getEnvValue(envPath, "STORAGE_SQLITE_PATH") || getStorageSqlitePath(),
+        mainConversationMode: readMainConversationMode(getEnvValue(envPath, "MAIN_CONVERSATION_MODE")),
+        conversationWindowTimeoutSeconds: getEnvValue(envPath, "CONVERSATION_WINDOW_TIMEOUT_SECONDS") || "180",
+        conversationWindowMaxTurns: getEnvValue(envPath, "CONVERSATION_WINDOW_MAX_TURNS") || "6",
+        conversationAgentMaxSteps: getEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS") || "4"
       });
+    });
+
+    app.post("/admin/api/conversation/benchmark", async (req: Request, res: ExResponse) => {
+      if (!this.conversationBenchmarkService) {
+        res.status(501).json({ error: "conversation benchmark is not enabled" });
+        return;
+      }
+
+      const body = (req.body ?? {}) as {
+        turns?: unknown;
+        repeatCount?: unknown;
+        modes?: unknown;
+      };
+      const turns = Array.isArray(body.turns)
+        ? body.turns.map((item) => normalizeOptionalString(item)).filter(Boolean)
+        : [];
+      if (turns.length === 0) {
+        res.status(400).json({ error: "turns must be a non-empty string array" });
+        return;
+      }
+
+      const repeatCountRaw = normalizeOptionalIntegerString(body.repeatCount);
+      if (repeatCountRaw === null) {
+        res.status(400).json({ error: "repeatCount must be positive integer" });
+        return;
+      }
+      const repeatCount = Math.max(1, Math.min(10, Number(repeatCountRaw || "1")));
+      const modes = Array.isArray(body.modes)
+        ? body.modes
+          .map((item) => normalizeMainConversationMode(item))
+          .filter((item, index, list) => list.indexOf(item) === index)
+        : (["classic", "windowed-agent"] as MainConversationMode[]);
+
+      try {
+        const payload = await this.conversationBenchmarkService.run({
+          turns,
+          repeatCount,
+          modes
+        } satisfies ConversationBenchmarkRequest);
+        res.json(payload);
+      } catch (error) {
+        console.error("[admin] conversation benchmark failed", error);
+        res.status(500).json({ error: (error as Error).message ?? "conversation benchmark failed" });
+      }
     });
 
     app.post("/admin/api/restart", (_req: Request, res: ExResponse) => {
@@ -3246,6 +3345,19 @@ function normalizeOptionalIntegerString(value: unknown): string | null {
   }
 
   return String(Math.floor(parsed));
+}
+
+function writeOptionalEnvValue(envPath: string, envKey: string, value: string | null, originalInput: unknown): void {
+  if (value === null) {
+    return;
+  }
+  if (value) {
+    setEnvValue(envPath, envKey, value);
+    return;
+  }
+  if (originalInput !== undefined) {
+    unsetEnvValue(envPath, envKey);
+  }
 }
 
 function normalizeOptionalNumberString(value: unknown): string | null {

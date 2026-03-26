@@ -18,6 +18,11 @@ export class SessionManager {
       .then(() => this.orchestrator.handle(envelope));
 
     this.queues.set(sessionId, next);
+    void next.finally(() => {
+      if (this.queues.get(sessionId) === next) {
+        this.queues.delete(sessionId);
+      }
+    });
     return next;
   }
 

@@ -8,6 +8,10 @@ export type LLMRuntimeContext = {
   isoTime?: string;
   userTimezone?: string;
   memory?: string;
+  skill_detail?: string;
+  planning_mode?: string;
+  skill_contract?: Record<string, unknown> | null;
+  thinking_budget?: Record<string, unknown> | null;
   action_history?: Array<{
     iteration: number;
     action: { type: string; params: Record<string, unknown> };
@@ -15,6 +19,7 @@ export type LLMRuntimeContext = {
   tools_context?: Record<string, Record<string, unknown>> | null;
   skills_context?: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> | null;
   next_step_context?: Record<string, unknown> | null;
+  [key: string]: unknown;
 };
 
 export type LLMPlanMeta = {

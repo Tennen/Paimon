@@ -16,6 +16,7 @@ If these docs diverge, align them in the same change. For implementation constra
 src/
   config/          # Runtime config services/read-write helpers
   core/            # Orchestrator and runtime flow
+    conversation/  # Main conversation runtimes (classic/windowed-agent), shared helpers, benchmark
     re-agent/      # /re sub-agent runtime (ReAct loop + module contracts)
   engines/         # Provider runtimes
     llm/           # LLM provider adapters (ollama/llama-server/openai/gemini/gpt-plugin/codex) + provider store/factory
@@ -59,6 +60,7 @@ data/              # Runtime data files
 
 - Inbound request translation only -> `src/ingress/`.
 - Core orchestration/runtime loop -> `src/core/` (including `src/core/re-agent/`).
+- Main dialogue runtime variants and shared conversation helpers -> `src/core/conversation/`.
 - Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
 - Third-party protocol/client adapters -> `src/integrations/<domain>/`.
 - Shared codex execution/config/markdown-report adapters -> `src/integrations/codex/`.
@@ -87,6 +89,21 @@ data/              # Runtime data files
   - `/re <question>`
   - `/re help`
   - `/re reset`
+
+## Main Conversation Runtime
+
+- Main conversation flow is split between:
+  - `src/core/orchestrator.ts`: ingress normalization, direct-command handling, runtime selection, memory append/audit wiring
+  - `src/core/conversation/classic/`: legacy `route -> plan -> tool/respond` chain
+  - `src/core/conversation/agent/`: windowed message-based runtime with short-lived skill lease
+  - `src/core/conversation/shared.ts`: tool execution, memory retrieval, skill/tool context helpers
+  - `src/core/conversation/benchmarkService.ts`: admin benchmark runner for comparing runtime modes
+- Runtime mode selection is controlled by `MAIN_CONVERSATION_MODE` and can be overridden per request in admin benchmark runs.
+- Windowed main dialogue state belongs in `src/memory/conversationWindowService.ts` + `src/memory/conversationWindowStore.ts`.
+- Keep short-window message history separate from long-term hybrid memory:
+  - window state stores recent user/assistant turns plus optional active skill lease
+  - raw/summary/session memory remain the long-term memory source
+- For large main-chain refactors, continue splitting by stable responsibility under `src/core/conversation/`; do not collapse bootstrap, planning, acting, benchmark, and admin config back into one file.
 
 ## LLM Provider Selection
 

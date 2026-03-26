@@ -10,6 +10,12 @@ import { HANotifyIngressAdapter } from "./ingress/haNotify";
 import { WeComIngressAdapter } from "./ingress/wecom";
 import { WeComBridgeIngressAdapter } from "./ingress/wecomBridge";
 import { MemoryStore } from "./memory/memoryStore";
+import { RawMemoryStore } from "./memory/rawMemoryStore";
+import { SummaryMemoryStore } from "./memory/summaryMemoryStore";
+import { SummaryVectorIndex } from "./memory/summaryVectorIndex";
+import { MemoryCompactor } from "./memory/memoryCompactor";
+import { HybridMemoryService } from "./memory/hybridMemoryService";
+import { ConversationWindowService } from "./memory/conversationWindowService";
 import { SkillManager } from "./skills/skillManager";
 import { ToolRegistry, loadTools } from "./tools/toolRegistry";
 import { CallbackDispatcher } from "./integrations/wecom/callbackDispatcher";
@@ -24,6 +30,7 @@ import { registerSystemShortcuts } from "./core/systemShortcuts";
 import { ReAgentRuntime } from "./core/re-agent/runtime";
 import { ObservableMenuService } from "./observable/menuService";
 import { DirectInputMappingService } from "./config/directInputMappingService";
+import { ConversationBenchmarkService } from "./core/conversation/benchmarkService";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -31,6 +38,19 @@ app.use(express.json({ limit: "1mb" }));
 
 const skillManager = new SkillManager();
 const memoryStore = new MemoryStore();
+const rawMemoryStore = new RawMemoryStore();
+const summaryMemoryStore = new SummaryMemoryStore();
+const summaryVectorIndex = new SummaryVectorIndex();
+const memoryCompactor = new MemoryCompactor({
+  rawStore: rawMemoryStore,
+  summaryStore: summaryMemoryStore,
+  summaryVectorIndex
+});
+const hybridMemoryService = new HybridMemoryService({
+  rawStore: rawMemoryStore,
+  summaryVectorIndex
+});
+const conversationWindowService = new ConversationWindowService();
 const envStore = new EnvConfigStore();
 const evolutionEngine = new EvolutionEngine();
 const codexConfigService = new CodexConfigService(envStore);
@@ -59,21 +79,37 @@ const orchestrator = new Orchestrator(
   skillManager,
   registry,
   callbackDispatcher,
-  undefined,
-  undefined,
-  undefined,
+  rawMemoryStore,
+  memoryCompactor,
+  hybridMemoryService,
   mainFlowLLMResolver,
   observableMenuService,
-  directInputMappingService
+  directInputMappingService,
+  conversationWindowService
 );
 const sessionManager = new SessionManager(orchestrator);
+const conversationBenchmarkService = new ConversationBenchmarkService({
+  sessionManager,
+  memoryStore,
+  rawMemoryStore,
+  summaryMemoryStore,
+  summaryVectorIndex,
+  windowService: conversationWindowService
+});
 const scheduler = new SchedulerService(sessionManager);
 
 new HttpIngressAdapter().register(app, sessionManager);
 new HANotifyIngressAdapter().register(app, sessionManager);
 new WeComIngressAdapter().register(app, sessionManager);
 new WeComBridgeIngressAdapter().register(app, sessionManager);
-new AdminIngressAdapter(envStore, scheduler, evolutionEngine, undefined, evolutionService).register(app, sessionManager);
+new AdminIngressAdapter(
+  envStore,
+  scheduler,
+  evolutionEngine,
+  undefined,
+  evolutionService,
+  conversationBenchmarkService
+).register(app, sessionManager);
 
 const port = Number(process.env.PORT ?? 3000);
 
