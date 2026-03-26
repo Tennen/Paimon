@@ -2,12 +2,12 @@
 name: apple-reminders
 description: Manage Apple Reminders via the `remindctl` CLI on macOS (list, add, edit, complete, delete). Supports lists, date filters, and JSON/plain output.
 terminal: true
+command: remindctl
 install: brew install steipete/tap/remindctl
-metadata:
-  {
-    "command": "remindctl",
-    "keywords": ["reminder", "reminders", "todo", "to-do", "task", "tasks", "checklist", "待办", "提醒", "提醒事项", "备忘", "事项"]
-  }
+keywords: ["reminder", "reminders", "todo", "to-do", "task", "tasks", "checklist", "待办", "提醒", "提醒事项", "备忘", "事项"]
+tool: terminal
+action: exec
+params: ["command", "args"]
 ---
 
 # Apple Reminders CLI (remindctl)

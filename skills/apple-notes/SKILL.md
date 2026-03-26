@@ -2,12 +2,12 @@
 name: apple-notes
 description: Manage Apple Notes via the `memo` CLI on macOS (create, view, edit, delete, search, move, and export notes). Supports folders and interactive note operations.
 terminal: true
+command: memo
 install: brew tap antoniorodr/memo && brew install antoniorodr/memo/memo
-metadata:
-  {
-    "command": "memo",
-    "keywords": ["note", "notes", "apple notes", "memo", "notebook", "folder", "folders", "search notes", "笔记", "备忘录", "便签"]
-  }
+keywords: ["note", "notes", "apple notes", "memo", "notebook", "folder", "folders", "search notes", "笔记", "备忘录", "便签"]
+tool: terminal
+action: exec
+params: ["command", "args"]
 ---
 
 # Apple Notes CLI
