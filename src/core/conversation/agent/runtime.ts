@@ -48,6 +48,12 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
     const historyMessages = windowSnapshot?.messages ?? [];
     const activeLease = windowSnapshot?.activeSkill;
 
+    if (activeLease) {
+      console.log(
+        `[ConversationAgent] session=${envelope.sessionId} reuse_skill=${activeLease.skillName} followup_mode=${activeLease.followupMode} history_messages=${historyMessages.length}`
+      );
+    }
+
     let selectedSkillName = activeLease?.skillName;
     let objective = activeLease?.objective ?? "";
     let memory = "";
@@ -73,6 +79,9 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
         }
       });
       this.support.writeLlmAudit(envelope, "routing", start, routingEngine);
+      console.log(
+        `[ConversationAgent] session=${envelope.sessionId} bootstrap decision=${bootstrap.decision}${bootstrap.decision === "use_skill" ? ` skill=${bootstrap.skill_name}` : ""} history_messages=${historyMessages.length}`
+      );
 
       if (bootstrap.decision === "respond") {
         response = { text: bootstrap.response_text || "OK" };
@@ -116,6 +125,9 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
           }
         });
         this.support.writeLlmAudit(envelope, "routing", start, routingEngine);
+        console.log(
+          `[ConversationAgent] session=${envelope.sessionId} reroute_bootstrap decision=${bootstrap.decision}${bootstrap.decision === "use_skill" ? ` skill=${bootstrap.skill_name}` : ""} history_messages=${historyMessages.length}`
+        );
         if (bootstrap.decision === "respond") {
           finalAttempt = {
             kind: "response",
@@ -219,6 +231,9 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
         }
       });
       this.support.writeLlmAudit(input.envelope, "planning", input.start, planningEngine);
+      console.log(
+        `[ConversationAgent] session=${input.envelope.sessionId} planning_step=${step}/${this.maxSteps} decision=${action.decision} selected_skill=${input.selectedSkillName ?? "-"} history_messages=${input.historyMessages.length} trace_items=${trace.length}`
+      );
 
       if (action.decision === "reroute") {
         return { kind: "reroute", ...(action.reason ? { reason: action.reason } : {}) };
@@ -242,8 +257,14 @@ export class WindowedAgentConversationRuntime implements ConversationRuntime {
         op: action.action,
         args: action.params
       };
+      console.log(
+        `[ConversationAgent] session=${input.envelope.sessionId} tool_call step=${step}/${this.maxSteps} tool=${action.tool} action=${action.action}`
+      );
       const toolResult = await this.support.createToolExecutor()(toolExecution, input.memory, input.envelope);
       lastToolResponse = buildToolResponse(toolResult.result, "", "", true);
+      console.log(
+        `[ConversationAgent] session=${input.envelope.sessionId} tool_result step=${step}/${this.maxSteps} ok=${toolResult.result.ok} text=${JSON.stringify(buildToolResultResponse(toolResult.result).text ?? "")}`
+      );
       trace.push({
         step,
         action: {
