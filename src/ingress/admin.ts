@@ -22,6 +22,12 @@ import {
   parseOptionalBoolean,
   writeOptionalEnvValue
 } from "./admin/utils";
+import {
+  DEFAULT_ADMIN_DIST_CANDIDATES,
+  TOPIC_SUMMARY_CONFIG_STORE,
+  TOPIC_SUMMARY_STATE_STORE,
+  WRITING_ORGANIZER_INDEX_STORE
+} from "./admin/constants";
 import { IngressAdapter } from "./types";
 import { registerAdminWebRoutes } from "./admin/adminWeb";
 import { SessionManager } from "../core/sessionManager";
@@ -93,11 +99,6 @@ import {
 } from "../core/conversation/benchmarkService";
 import { MainConversationMode } from "../core/conversation/types";
 import { normalizeMainConversationMode, readMainConversationMode } from "../core/conversation/mode";
-
-const DEFAULT_ADMIN_DIST_CANDIDATES = [
-  path.resolve(process.cwd(), "dist/admin-web"),
-  path.resolve(process.cwd(), "admin-web/dist")
-];
 
 type MarketPhase = "midday" | "close";
 
@@ -218,9 +219,6 @@ type WritingTopicSetStatePayload = {
 const MARKET_PORTFOLIO_STORE = DATA_STORE.MARKET_PORTFOLIO;
 const MARKET_CONFIG_STORE = DATA_STORE.MARKET_CONFIG;
 const MARKET_STATE_STORE = DATA_STORE.MARKET_STATE;
-const TOPIC_SUMMARY_CONFIG_STORE = DATA_STORE.TOPIC_SUMMARY_CONFIG;
-const TOPIC_SUMMARY_STATE_STORE = DATA_STORE.TOPIC_SUMMARY_STATE;
-const WRITING_ORGANIZER_INDEX_STORE = DATA_STORE.WRITING_ORGANIZER_INDEX;
 const MARKET_SECURITY_SEARCH_TIMEOUT_MS = 8000;
 const MARKET_PORTFOLIO_IMPORT_MAX_CODES = 120;
 const EASTMONEY_SEARCH_TOKEN = "D43BF722C8E33BDC906FB84D85E326E8";
