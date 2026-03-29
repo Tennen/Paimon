@@ -17,7 +17,6 @@ src/
   config/          # Runtime config services/read-write helpers
   core/            # Orchestrator and runtime flow
     conversation/  # Main conversation runtimes (classic/windowed-agent), shared helpers, benchmark
-    re-agent/      # /re sub-agent runtime (ReAct loop + module contracts)
   engines/         # Provider runtimes
     llm/           # LLM provider adapters (ollama/llama-server/openai/gemini/gpt-plugin/codex) + provider store/factory
     stt/           # STT provider adapters
@@ -29,10 +28,7 @@ src/
     homeassistant/
     market-analysis/
     md2img/
-    mcp/
-    multiagent/
     openai/
-    rag/
     system-maintenance/
     terminal/
     topic-summary/
@@ -59,7 +55,7 @@ data/              # Runtime data files
 ## Placement Rules (Quick)
 
 - Inbound request translation only -> `src/ingress/`.
-- Core orchestration/runtime loop -> `src/core/` (including `src/core/re-agent/`).
+- Core orchestration/runtime loop -> `src/core/`.
 - Main dialogue runtime variants and shared conversation helpers -> `src/core/conversation/`.
 - Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
 - Third-party protocol/client adapters -> `src/integrations/<domain>/`.
@@ -76,19 +72,16 @@ data/              # Runtime data files
 - LLM-callable tools (schema + execute handler) -> `src/tools/`.
 - Persistent state access -> `src/storage/persistence.ts` API only.
 - Runtime config services -> `src/config/`.
+- Any project source/admin-web/tool/test/doc file over 500 lines should be split by stable responsibility, usually into an adjacent module directory plus smaller files such as `types.ts`, `runtime.ts`, `storage.ts`, `handlers.ts`, or per-domain panels/hooks.
+- Any repo-maintained source/doc/tool/admin-web file over 500 lines should be treated as a refactor trigger: split it by stable responsibility into smaller files/directories instead of extending the oversized file.
 
-## `/re` Runtime And Memory Routing
+## Memory Routing
 
-- `/re` runtime loop stays in `src/core/re-agent/`.
 - All dialogue traffic appends to unified session memory and raw memory.
 - Raw memory keeps original records; summary memory is derived and references raw ids/refs.
 - Main orchestrator (`src/core/orchestrator.ts`) uses `HybridMemoryService` for planning context: summary vector retrieval first, raw replay by `rawRefs` second.
 - If no summary hit is found, orchestrator falls back to session memory (`MemoryStore.read(sessionId)`).
 - Retrieval is summary-first, with optional raw backfill by references.
-- Keep `/re` command contract stable:
-  - `/re <question>`
-  - `/re help`
-  - `/re reset`
 
 ## Main Conversation Runtime
 

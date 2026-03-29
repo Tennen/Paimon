@@ -29,9 +29,9 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 各目录职责如下：
 
 - `src/ingress/`: 输入适配层，负责 HTTP、企业微信回调、SSE bridge、Admin API 等入口
-- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/conversation/` 承载主对话 runtime，`src/core/re-agent/` 提供 `/re` 子 agent 的 ReAct 运行时
+- `src/core/`: 核心编排层，负责会话顺序、LLM 调度、工具执行流程；`src/core/conversation/` 承载主对话 runtime
 - `src/tools/`: 暴露给编排层和 LLM 的工具定义，例如 `homeassistant`、`terminal`
-- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator、RAG、MCP、Multi-agent 等集成
+- `src/integrations/`: 外部系统适配层，封装 Home Assistant、企业微信、Topic Summary、Market Analysis、Evolution Operator 等集成
 - `src/observable/`: Admin 定义的菜单/触发器配置与回调事件分发
 - `src/storage/`: 统一持久化入口，所有状态数据都通过这里读写
 - `src/scheduler/`: 定时任务和推送用户管理
@@ -44,7 +44,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 
 1. 输入先通过 `ingress` 层转成统一的 `Envelope`
 2. `SessionManager` 保证同一会话按顺序处理
-3. `Orchestrator` 决定是直接命令（含 `/re` 子 agent）、快捷指令，还是交给主 LLM 规划
+3. `Orchestrator` 决定是直接命令、快捷指令，还是交给主 LLM 规划
 4. `ToolRouter` 调用对应工具
 5. 工具通过 `integrations` 访问外部系统
 6. 结果写入记忆/审计/业务存储，并回传给调用方
@@ -77,7 +77,6 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
   - `windowed-agent`: 3 分钟短窗口内保留真实 `messages`，并用短租约 `skill lease` 继续多轮
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
-- 支持 `/re` 子 agent ReAct 循环（默认本地模型 `qwen3.5:9b`）
 
 ### 3. 工具与业务能力
 
@@ -88,7 +87,6 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `market-analysis`: 基金分析、持仓管理、盘中/收盘分析结果沉淀
 - `chatgpt-bridge`: 把请求转发到外部 ChatGPT bridge 运行时
 - `evolution-operator`: 用于排队、执行、跟踪代码演化任务
-- `re-agent modules`: 子 agent 可调用 `rag`、`mcp`、`multiagent` 三类模块
 - `system shortcuts`: 内置 `/sync`、`/build`、`/restart`、`/deploy` 等运维捷径
   - `/build` 会先执行 `npm install`，再执行 `npm run build`
   - `/deploy` 会执行同步代码 + `npm install` + `npm run build` + `pm2 restart 0`
@@ -174,11 +172,6 @@ LLM_PROVIDER=ollama
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3:4b
 OLLAMA_PLANNING_MODEL=qwen3:8b
-RE_AGENT_MODEL=qwen3.5:9b
-RE_AGENT_MAX_STEPS=6
-RE_AGENT_TIMEOUT_MS=30000
-MCP_ENDPOINT=
-MCP_TIMEOUT_MS=15000
 
 HA_BASE_URL=http://homeassistant.local:8123
 HA_TOKEN=your_home_assistant_token
@@ -274,7 +267,6 @@ LLM_CODEX_SANDBOX=read-only
 - 主编排（Orchestrator）支持独立配置 `routing` 与 `planning` provider（未单独设置时回退到 default）
 - `topic-summary` 的 `summaryEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin` 仍兼容旧配置）
 - `market-analysis` 的 `analysisEngine` 推荐直接选择 `provider-id`（Admin 页面直接从 LLM provider 列表选择；`local/gpt_plugin/gemini` 仍兼容旧配置，其中 `gemini` 为 legacy selector）
-- `/re` 子 agent 可通过 `RE_AGENT_LLM_PROVIDER` 独立指定 provider
 
 #### 启用企业微信
 
@@ -485,7 +477,6 @@ MEMORY_COMPACT_MAX_BATCH_SIZE=8
 MEMORY_SUMMARY_TOP_K=4
 MEMORY_RAW_REF_LIMIT=8
 MEMORY_RAW_RECORD_LIMIT=3
-MEMORY_RAG_SUMMARY_TOP_K=4
 ```
 
 说明：
@@ -493,10 +484,9 @@ MEMORY_RAG_SUMMARY_TOP_K=4
 - `LLM_MEMORY_CONTEXT_ENABLED`：是否在主对话 routing/planning 阶段检索 memory 并注入 prompt（默认 `true`）
 - `MEMORY_COMPACT_EVERY_ROUNDS`：触发一次 summary compact 的最小 raw 轮次阈值
 - `MEMORY_COMPACT_MAX_BATCH_SIZE`：单次 compact 最大处理 raw 条数
-- `MEMORY_SUMMARY_TOP_K`：主 orchestrator / `/re` runtime 的 summary 命中条数上限
+- `MEMORY_SUMMARY_TOP_K`：主 orchestrator 的 summary 命中条数上限
 - `MEMORY_RAW_REF_LIMIT`：summary 命中后允许回补的 rawRefs 数量上限
 - `MEMORY_RAW_RECORD_LIMIT`：最终注入上下文的 raw 回放条数上限
-- `MEMORY_RAG_SUMMARY_TOP_K`：`/re` 的 `rag` 模块检索 summary 数量上限
 
 #### 主对话运行时（可选）
 
@@ -563,14 +553,7 @@ npm start
 
 - 菜单发布同样复用 WeCom bridge 的代理能力，因此企业微信有 IP 限制时，Admin 发布菜单也应经过 bridge
 
-## `/re` 子 Agent 用法
-
-- `/re <问题>`：触发子 agent 对话（ReAct 循环）
-- `/re help`：查看子 agent 帮助
-- `/re reset`：重置当前会话全局记忆（会清空主会话记忆与 raw/summary 双层记忆及其索引）
-- 子 agent 输出统一以 `/re` 前缀返回，便于和主对话区分
-
-Memory 规则（global hybrid memory）：
+## Hybrid Memory 规则
 
 - 所有会话消息都会写入统一的 `MemoryStore` 会话记忆
 - 所有会话消息都会完整写入 `raw memory`（不改写原文）
@@ -579,7 +562,6 @@ Memory 规则（global hybrid memory）：
 - 主 `Orchestrator` 已接入 `HybridMemoryService`：先做 `SummaryVectorIndex.search`（词法精确匹配 + 向量相似度融合排序），再按 `rawRefs` 通过 `RawMemoryStore.getByIds` 回补少量原文上下文
 - 当 summary 检索无命中时，主 `Orchestrator` 会回退到 `MemoryStore.read(sessionId)` 的会话记忆
 - `windowed-agent` 的短窗口对话历史单独保存在 `conversation window` store 中，只保留最近真实消息与可续租 skill；它不替代长期 hybrid memory
-- `/re` 会在该全局记忆上执行子 agent 循环
 
 ## Incremental Writing Organizer
 

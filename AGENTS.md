@@ -27,7 +27,6 @@ This file defines hard constraints for coding agents working in this repository.
   - No direct filesystem persistence and no vendor-specific API code.
   - `src/core/conversation/` owns main conversation runtime variants, shared phase helpers, and benchmark services for the main dialogue chain.
   - Keep main conversation orchestration split by stable responsibility (`shared`, `classic`, `agent`, `benchmark`, `types`) instead of growing `orchestrator.ts` into a single mixed-responsibility file.
-  - `src/core/re-agent/` keeps ReAct loop/runtime orchestration only; tool/vendor protocol details stay outside core.
 
 - `src/config/`
   - Runtime configuration readers/writers and config services only.
@@ -87,8 +86,10 @@ This file defines hard constraints for coding agents working in this repository.
 - New independent LLM-callable tools go under `src/tools/`.
 - Standalone operational scripts go under repo root `tools/` (not `src/`).
 - New cross-cutting infrastructure modules go under `src/<infra-domain>/` and must be reusable.
+- Any source file, admin-web file, tool script, test, or project doc that grows beyond 500 lines must be split into logically grouped files and, when helpful, an adjacent subdirectory named after the module. Do not keep adding code to a >500 line file.
 - When a main chain or runtime refactor introduces multiple phases/modes, create a dedicated subdirectory (for example `src/core/conversation/`) and split files by stable responsibility. Do not keep routing/bootstrap/planning/acting/admin benchmark wiring in one oversized file.
 - If a module starts mixing runtime state machine logic, prompt construction, persistence access coordination, and admin contracts, split it before adding more behavior. Prefer `types.ts`, `shared.ts`, per-mode `runtime.ts`, and adjacent service files over a single catch-all module.
+- Any source, tool, admin-web, or repo-maintained documentation file that grows beyond 500 lines must be split into smaller files/directories by stable logic or module responsibility. Do not keep adding to a >500 line file once that threshold is crossed.
 
 ## Skill Rules
 
@@ -131,12 +132,6 @@ This file defines hard constraints for coding agents working in this repository.
   - summary memory is derived/structured and references raw records via ids/refs
 - Do not couple memory logic to concrete filesystem paths.
 - Changes to memory schema must include normalization/migration in memory service layer.
-
-## Re-Agent Rules
-
-- `/re` runtime contract belongs in `src/core/re-agent/` + `src/memory/`, not in ingress/integration shims.
-- Keep `/re` command semantics stable unless change explicitly includes README/docs updates.
-- If `/re` command contract or memory routing changes, sync `README.md` and `docs/PROJECT_STRUCTURE.md`.
 
 ## Code Style Rules
 

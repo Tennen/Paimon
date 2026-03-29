@@ -9,7 +9,6 @@ import { DirectShortcutMatch, DirectToolCallMatch, ToolRegistry } from "../tools
 import { CallbackDispatcher } from "../integrations/wecom/callbackDispatcher";
 import { readWeComClickEventContext } from "../integrations/wecom/eventEnvelope";
 import { sttRuntime } from "../engines/stt";
-import { isReAgentCommandInput, parseReAgentCommand } from "./re-agent";
 import { RawMemoryMeta, RawMemoryStore } from "../memory/rawMemoryStore";
 import { MemoryCompactor } from "../memory/memoryCompactor";
 import { HybridMemoryService } from "../memory/hybridMemoryService";
@@ -20,6 +19,15 @@ import { ClassicConversationRuntime } from "./conversation/classic/runtime";
 import { WindowedAgentConversationRuntime } from "./conversation/agent/runtime";
 import { resolveMainConversationMode } from "./conversation/mode";
 import { ConversationWindowService } from "../memory/conversationWindowService";
+import { DirectCommandRuntime } from "./orchestrator_direct";
+import {
+  buildToolResultResponse,
+  formatMemoryEntry,
+  inferNonTextMemoryMarker,
+  isGenericResponseText,
+  normalizeImages,
+  normalizeRawMemoryMeta
+} from "./orchestrator_shared";
 
 export type OrchestratorLLMResolver = (step: LLMExecutionStep) => LLMEngine;
 type ObservableMenuEventResolver = Pick<ObservableMenuService, "handleWeComClickEvent" | "markEventDispatchFailed">;
@@ -44,6 +52,7 @@ export class Orchestrator {
   private readonly conversationSupport: ConversationRuntimeSupport;
   private readonly classicRuntime: ClassicConversationRuntime;
   private readonly windowedAgentRuntime: WindowedAgentConversationRuntime;
+  private readonly directCommandRuntime: DirectCommandRuntime;
 
   constructor(
     toolRouter: ToolRouter,
@@ -87,6 +96,17 @@ export class Orchestrator {
       this.conversationSupport,
       this.conversationWindowService
     );
+    this.directCommandRuntime = new DirectCommandRuntime({
+      toolRegistry: this.toolRegistry,
+      callbackDispatcher: this.callbackDispatcher,
+      processed: this.processed,
+      appendMemory: (targetEnvelope, text, response) => this.appendMemory(targetEnvelope, text, response),
+      readSessionMemory: (sessionId) => this.readSessionMemory(sessionId),
+      toolCallStep: (toolExecution, text, memory, targetEnvelope, targetStart) =>
+        this.toolCallStep(toolExecution, text, memory, targetEnvelope, targetStart),
+      respondStep: (toolResult, successResponse, failureResponse, preferToolResult, text, targetEnvelope, targetStart) =>
+        this.respondStep(toolResult, successResponse, failureResponse, preferToolResult, text, targetEnvelope, targetStart)
+    });
   }
 
   async handle(envelope: Envelope): Promise<Response> {
@@ -121,7 +141,7 @@ export class Orchestrator {
       const originalText = await sttRuntime.transcribe(workingEnvelope);
       const mapped = this.resolveMappedInput(originalText);
       const text = mapped?.targetText ?? originalText;
-      const directRouteResponse = await this.handleDirectCommandRoute(
+      const directRouteResponse = await this.directCommandRuntime.handleDirectCommandRoute(
         text,
         workingEnvelope,
         start,
@@ -186,233 +206,6 @@ export class Orchestrator {
       },
       dispatchedMenuEventId: handled.event.id
     };
-  }
-
-  // New step-based processing methods
-  private async handleDirectCommandRoute(
-    text: string,
-    envelope: Envelope,
-    start: number,
-    readSessionMemory: () => string,
-    memoryText: string = text
-  ): Promise<Response | null> {
-    const shortcutMatched = this.toolRegistry.matchDirectShortcut(text);
-    if (shortcutMatched) {
-      if (shortcutMatched.async) {
-        const taskId = createAsyncTaskId(shortcutMatched.command);
-        const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
-        const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
-          this.executeAsyncDirectShortcut(shortcutMatched, text, envelope, taskEnvelope, Date.now(), memoryText)
-        );
-
-        try {
-          const settled = await waitForPromiseWithTimeout(executionPromise, shortcutMatched.acceptedDelayMs);
-          if (settled.completed) {
-            this.processed.set(envelope.requestId, settled.value.response);
-            return settled.value.response;
-          }
-        } catch (error) {
-          const fallback: Response = {
-            text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
-          };
-          this.processed.set(envelope.requestId, fallback);
-          this.appendMemory(envelope, memoryText, fallback);
-          return fallback;
-        }
-
-        void executionPromise
-          .then(async ({ taskEnvelope: doneEnvelope, response }) => {
-            await this.callbackDispatcher.send(doneEnvelope, response);
-          })
-          .catch(async (error) => {
-            const fallback: Response = {
-              text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
-            };
-            this.processed.set(taskEnvelope.requestId, fallback);
-            this.appendMemory(taskEnvelope, memoryText, fallback);
-            await this.callbackDispatcher.send(taskEnvelope, fallback);
-          });
-
-        const acceptedResponse: Response = {
-          text: shortcutMatched.acceptedText || "任务已受理，正在处理中，稍后回调结果。",
-          data: {
-            asyncTask: {
-              id: taskId,
-              status: "accepted"
-            }
-          }
-        };
-        this.processed.set(envelope.requestId, acceptedResponse);
-        this.appendMemory(envelope, memoryText, acceptedResponse);
-        return acceptedResponse;
-      }
-
-      return this.executeDirectShortcut(shortcutMatched, text, readSessionMemory(), envelope, start, memoryText);
-    }
-
-    const matched = this.toolRegistry.matchDirectToolCall(text);
-    if (!matched) {
-      return null;
-    }
-
-    if (matched.async) {
-      const taskId = createAsyncTaskId(matched.command);
-      const taskEnvelope = createAsyncTaskEnvelope(envelope, taskId);
-      const executionPromise = this.enqueueAsyncDirectTask(envelope.sessionId, () =>
-        this.executeAsyncDirectToolCall(matched, text, envelope, taskEnvelope, Date.now(), memoryText)
-      );
-
-      try {
-        const settled = await waitForPromiseWithTimeout(executionPromise, matched.acceptedDelayMs);
-        if (settled.completed) {
-          this.processed.set(envelope.requestId, settled.value.response);
-          return settled.value.response;
-        }
-      } catch (error) {
-        const fallback: Response = {
-          text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
-        };
-        this.processed.set(envelope.requestId, fallback);
-        this.appendMemory(envelope, memoryText, fallback);
-        return fallback;
-      }
-
-      void executionPromise
-        .then(async ({ taskEnvelope: doneEnvelope, response }) => {
-          await this.callbackDispatcher.send(doneEnvelope, response);
-        })
-        .catch(async (error) => {
-          const fallback: Response = {
-            text: `异步任务失败: ${(error as Error).message ?? "unknown error"}`
-          };
-          this.processed.set(taskEnvelope.requestId, fallback);
-          this.appendMemory(taskEnvelope, memoryText, fallback);
-          await this.callbackDispatcher.send(taskEnvelope, fallback);
-        });
-
-      const acceptedText = matched.acceptedText || "任务已受理，正在处理中，稍后回调结果。";
-      const acceptedResponse: Response = {
-        text: acceptedText,
-        data: {
-          asyncTask: {
-            id: taskId,
-            status: "accepted"
-          }
-        }
-      };
-      this.processed.set(envelope.requestId, acceptedResponse);
-      this.appendMemory(envelope, memoryText, acceptedResponse);
-      return acceptedResponse;
-    }
-
-    const toolExecution: ToolExecution = {
-      tool: matched.tool,
-      op: matched.op,
-      args: matched.args
-    };
-    const toolResult = await this.toolCallStep(toolExecution, text, readSessionMemory(), envelope, start);
-    const response = await this.respondStep(
-      toolResult.result,
-      "",
-      "",
-      matched.preferToolResult,
-      memoryText,
-      envelope,
-      start
-    );
-    return response;
-  }
-
-  private enqueueAsyncDirectTask<T>(sessionId: string, task: () => Promise<T>): Promise<T> {
-    const prior = this.asyncDirectQueues.get(sessionId) ?? Promise.resolve();
-    const running = prior
-      .catch(() => undefined)
-      .then(() => runDeferred(task));
-    const next = running
-      .then(() => undefined)
-      .catch((error) => {
-        console.error("async direct task failed:", error);
-      });
-    this.asyncDirectQueues.set(sessionId, next);
-    void next.finally(() => {
-      if (this.asyncDirectQueues.get(sessionId) === next) {
-        this.asyncDirectQueues.delete(sessionId);
-      }
-    });
-    return running;
-  }
-
-  private async executeAsyncDirectToolCall(
-    matched: DirectToolCallMatch,
-    text: string,
-    envelope: Envelope,
-    taskEnvelope: Envelope,
-    start: number,
-    memoryText: string = text
-  ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.readSessionMemory(envelope.sessionId);
-    const toolExecution: ToolExecution = {
-      tool: matched.tool,
-      op: matched.op,
-      args: matched.args
-    };
-    const toolResult = await this.toolCallStep(toolExecution, text, latestMemory, taskEnvelope, start);
-    const response = await this.respondStep(
-      toolResult.result,
-      "",
-      "",
-      matched.preferToolResult,
-      memoryText,
-      taskEnvelope,
-      start
-    );
-    return { taskEnvelope, response };
-  }
-
-  private async executeDirectShortcut(
-    matched: DirectShortcutMatch,
-    text: string,
-    memory: string,
-    envelope: Envelope,
-    start: number,
-    memoryText: string = text
-  ): Promise<Response> {
-    const result = await matched.execute({
-      command: matched.command,
-      input: text,
-      rest: matched.rest,
-      sessionId: envelope.sessionId,
-      memory
-    });
-    return this.respondStep(
-      result,
-      "",
-      "",
-      matched.preferToolResult,
-      memoryText,
-      envelope,
-      start
-    );
-  }
-
-  private async executeAsyncDirectShortcut(
-    matched: DirectShortcutMatch,
-    text: string,
-    envelope: Envelope,
-    taskEnvelope: Envelope,
-    start: number,
-    memoryText: string = text
-  ): Promise<{ taskEnvelope: Envelope; response: Response }> {
-    const latestMemory = this.readSessionMemory(envelope.sessionId);
-    const response = await this.executeDirectShortcut(
-      matched,
-      text,
-      latestMemory,
-      taskEnvelope,
-      start,
-      memoryText
-    );
-    return { taskEnvelope, response };
   }
 
   private resolveMappedInput(input: string): ResolvedDirectInputMapping | null {
@@ -555,9 +348,6 @@ export class Orchestrator {
 
   private appendMemory(envelope: Envelope, text: string, response: Response): void {
     const memoryText = text || inferNonTextMemoryMarker(envelope.kind);
-    if (isReAgentResetInput(memoryText)) {
-      return;
-    }
     const entry = formatMemoryEntry(memoryText, response);
     this.memoryStore.append(envelope.sessionId, entry);
     const rawMeta = normalizeRawMemoryMeta(envelope.meta);
@@ -586,151 +376,4 @@ export class Orchestrator {
   private readSessionMemory(sessionId: string): string {
     return this.memoryStore.read(sessionId);
   }
-}
-
-function inferNonTextMemoryMarker(kind: string): string {
-  if (kind === "image") {
-    return "[image]";
-  }
-  if (kind === "audio" || kind === "voice") {
-    return "[audio]";
-  }
-  return "";
-}
-
-function formatMemoryEntry(userText: string, response: Response): string {
-  const now = new Date().toISOString();
-  const assistantText = response.text ?? "";
-  return `- ${now}\\n  - user: ${userText}\\n  - assistant: ${assistantText}`;
-}
-
-function normalizeRawMemoryMeta(meta: unknown): RawMemoryMeta {
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
-    return {};
-  }
-  return { ...(meta as Record<string, unknown>) };
-}
-
-function isReAgentResetInput(userText: string): boolean {
-  if (!isReAgentCommandInput(userText)) {
-    return false;
-  }
-  return parseReAgentCommand(userText).kind === "reset";
-}
-
-function sanitizeToolResult(input: unknown): unknown {
-  if (!input || typeof input !== "object") return input;
-  if (Array.isArray(input)) {
-    return input.map((item) => sanitizeToolResult(item));
-  }
-  const obj = input as Record<string, unknown>;
-  if (typeof obj.data === "string" && (typeof obj.contentType === "string" || typeof obj.filename === "string")) {
-    return {
-      ...(typeof obj.contentType === "string" ? { contentType: obj.contentType } : {}),
-      ...(typeof obj.filename === "string" ? { filename: obj.filename } : {}),
-      size: obj.data.length
-    };
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (key === "image" && value && typeof value === "object") {
-      const image = value as Record<string, unknown>;
-      out[key] = {
-        ...(typeof image.contentType === "string" ? { contentType: image.contentType } : {}),
-        ...(typeof image.filename === "string" ? { filename: image.filename } : {}),
-        ...(typeof image.size === "number" ? { size: image.size } : {})
-      };
-      continue;
-    }
-    if (key === "images" && Array.isArray(value)) {
-      out[key] = value.map((item) => sanitizeToolResult(item));
-      continue;
-    }
-    out[key] = sanitizeToolResult(value);
-  }
-  return out;
-}
-
-function buildToolResultResponse(result: { ok: boolean; output?: unknown; error?: string }): Response {
-  if (!result.ok) {
-    const errorText = result.error ? `Tool error: ${result.error}` : "Tool failed";
-    return { text: errorText };
-  }
-  const output = result.output as Record<string, unknown> | string | undefined;
-  if (typeof output === "string") {
-    return { text: output.trim() || "OK" };
-  }
-  if (output && typeof output === "object") {
-    const text = output.text;
-    const hasTextField = Object.prototype.hasOwnProperty.call(output, "text");
-    if (hasTextField && typeof text === "string") {
-      return { text: text.trim() };
-    }
-
-    const hasImageField = Object.prototype.hasOwnProperty.call(output, "image")
-      || Object.prototype.hasOwnProperty.call(output, "images");
-    if (hasImageField) {
-      return { text: "" };
-    }
-  }
-  const sanitized = sanitizeToolResult(output);
-  if (sanitized !== undefined) {
-    return { text: JSON.stringify(sanitized, null, 2) };
-  }
-  return { text: "OK" };
-}
-
-function normalizeImages(images: Image[] | undefined): Image[] {
-  if (!Array.isArray(images)) return [];
-  return images.filter((image) => Boolean(image && typeof image.data === "string" && image.data.length > 0));
-}
-
-function isGenericResponseText(text: string | undefined): boolean {
-  const normalized = String(text ?? "").trim().toLowerCase();
-  return normalized.length === 0 || normalized === "ok" || normalized === "tool failed";
-}
-
-function createAsyncTaskId(command: string): string {
-  const normalized = String(command ?? "").trim().replace(/[^a-z0-9]+/gi, "").toLowerCase() || "task";
-  return `${normalized}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function createAsyncTaskEnvelope(envelope: Envelope, taskId: string): Envelope {
-  return {
-    ...envelope,
-    requestId: `${envelope.requestId}:async:${taskId}`
-  };
-}
-
-async function waitForPromiseWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number
-): Promise<{ completed: true; value: T } | { completed: false }> {
-  if (timeoutMs <= 0) {
-    return { completed: false };
-  }
-
-  let timer: NodeJS.Timeout | null = null;
-  const timeout = new Promise<{ completed: false }>((resolve) => {
-    timer = setTimeout(() => resolve({ completed: false }), timeoutMs);
-  });
-
-  const settled = await Promise.race([
-    promise.then((value) => ({ completed: true as const, value })),
-    timeout
-  ]);
-
-  if (timer) {
-    clearTimeout(timer);
-  }
-
-  return settled;
-}
-
-function runDeferred<T>(task: () => Promise<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    setImmediate(() => {
-      void task().then(resolve).catch(reject);
-    });
-  });
 }

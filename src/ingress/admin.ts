@@ -324,7 +324,6 @@ export class AdminIngressAdapter implements IngressAdapter {
         memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
         memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
         memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
-        memoryRagSummaryTopK: getEnvValue(envPath, "MEMORY_RAG_SUMMARY_TOP_K"),
         envPath,
         taskStore: this.scheduler.getTaskStore(),
         userStore: this.scheduler.getUserStore(),
@@ -1106,7 +1105,6 @@ export class AdminIngressAdapter implements IngressAdapter {
         memorySummaryTopK?: unknown;
         memoryRawRefLimit?: unknown;
         memoryRawRecordLimit?: unknown;
-        memoryRagSummaryTopK?: unknown;
       };
 
       const envPath = this.envStore.getPath();
@@ -1115,8 +1113,7 @@ export class AdminIngressAdapter implements IngressAdapter {
         { envKey: "MEMORY_COMPACT_MAX_BATCH_SIZE", value: normalizeOptionalIntegerString(body.memoryCompactMaxBatchSize) },
         { envKey: "MEMORY_SUMMARY_TOP_K", value: normalizeOptionalIntegerString(body.memorySummaryTopK) },
         { envKey: "MEMORY_RAW_REF_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRefLimit) },
-        { envKey: "MEMORY_RAW_RECORD_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRecordLimit) },
-        { envKey: "MEMORY_RAG_SUMMARY_TOP_K", value: normalizeOptionalIntegerString(body.memoryRagSummaryTopK) }
+        { envKey: "MEMORY_RAW_RECORD_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRecordLimit) }
       ];
 
       const invalid = updates.find((item) => item.value === null);
@@ -1159,8 +1156,7 @@ export class AdminIngressAdapter implements IngressAdapter {
         memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
         memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
         memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
-        memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
-        memoryRagSummaryTopK: getEnvValue(envPath, "MEMORY_RAG_SUMMARY_TOP_K")
+        memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT")
       });
     });
 

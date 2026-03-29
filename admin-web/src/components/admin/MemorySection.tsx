@@ -20,7 +20,6 @@ type MemorySectionProps = {
   memorySummaryTopKDraft: string;
   memoryRawRefLimitDraft: string;
   memoryRawRecordLimitDraft: string;
-  memoryRagSummaryTopKDraft: string;
   savingMemoryConfig: boolean;
   onLlmMemoryContextEnabledDraftChange: (value: boolean) => void;
   onMemoryCompactEveryRoundsDraftChange: (value: string) => void;
@@ -28,7 +27,6 @@ type MemorySectionProps = {
   onMemorySummaryTopKDraftChange: (value: string) => void;
   onMemoryRawRefLimitDraftChange: (value: string) => void;
   onMemoryRawRecordLimitDraftChange: (value: string) => void;
-  onMemoryRagSummaryTopKDraftChange: (value: string) => void;
   onSaveMemoryConfig: () => void;
   onRefresh: () => void;
 };
@@ -102,16 +100,6 @@ export function MemorySection(props: MemorySectionProps) {
               placeholder="默认 3"
             />
           </div>
-          <div className="space-y-2">
-            <Label>MEMORY_RAG_SUMMARY_TOP_K</Label>
-            <Input
-              type="number"
-              min={1}
-              value={props.memoryRagSummaryTopKDraft}
-              onChange={(event) => props.onMemoryRagSummaryTopKDraftChange(event.target.value)}
-              placeholder="默认 4"
-            />
-          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -133,7 +121,6 @@ export function MemorySection(props: MemorySectionProps) {
           <div className="mono">MEMORY_SUMMARY_TOP_K: {props.config?.memorySummaryTopK || "(default 4)"}</div>
           <div className="mono">MEMORY_RAW_REF_LIMIT: {props.config?.memoryRawRefLimit || "(default 8)"}</div>
           <div className="mono">MEMORY_RAW_RECORD_LIMIT: {props.config?.memoryRawRecordLimit || "(default 3)"}</div>
-          <div className="mono md:col-span-2">MEMORY_RAG_SUMMARY_TOP_K: {props.config?.memoryRagSummaryTopK || "(default 4)"}</div>
         </div>
       </CardContent>
     </Card>

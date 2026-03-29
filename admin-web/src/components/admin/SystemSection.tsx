@@ -39,7 +39,6 @@ export type SystemMemoryDraft = {
   memorySummaryTopK: string;
   memoryRawRefLimit: string;
   memoryRawRecordLimit: string;
-  memoryRagSummaryTopK: string;
 };
 
 export type SystemRuntimeDraft = {
@@ -1210,7 +1209,6 @@ export function SystemSection(props: SystemSectionProps) {
           memorySummaryTopKDraft={props.memoryDraft.memorySummaryTopK}
           memoryRawRefLimitDraft={props.memoryDraft.memoryRawRefLimit}
           memoryRawRecordLimitDraft={props.memoryDraft.memoryRawRecordLimit}
-          memoryRagSummaryTopKDraft={props.memoryDraft.memoryRagSummaryTopK}
           savingMemoryConfig={props.savingMemoryConfig}
           onLlmMemoryContextEnabledDraftChange={(value) => props.onMemoryDraftChange("llmMemoryContextEnabled", value)}
           onMemoryCompactEveryRoundsDraftChange={(value) => props.onMemoryDraftChange("memoryCompactEveryRounds", value)}
@@ -1218,7 +1216,6 @@ export function SystemSection(props: SystemSectionProps) {
           onMemorySummaryTopKDraftChange={(value) => props.onMemoryDraftChange("memorySummaryTopK", value)}
           onMemoryRawRefLimitDraftChange={(value) => props.onMemoryDraftChange("memoryRawRefLimit", value)}
           onMemoryRawRecordLimitDraftChange={(value) => props.onMemoryDraftChange("memoryRawRecordLimit", value)}
-          onMemoryRagSummaryTopKDraftChange={(value) => props.onMemoryDraftChange("memoryRagSummaryTopK", value)}
           onSaveMemoryConfig={props.onSaveMemoryConfig}
           onRefresh={props.onRefreshConfig}
         />
