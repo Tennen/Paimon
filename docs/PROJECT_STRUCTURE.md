@@ -46,6 +46,9 @@ Repo root:
 
 ```text
 admin-web/         # Admin frontend
+  src/
+    components/admin/
+      hooks/       # Page-level admin state/data hooks and per-domain helpers
 docs/              # Design/structure docs
 skills/            # Skill packages (declarative SKILL.md only)
 tools/             # Standalone scripts/binaries/helpers
@@ -72,6 +75,7 @@ data/              # Runtime data files
 - LLM-callable tools (schema + execute handler) -> `src/tools/`.
 - Persistent state access -> `src/storage/persistence.ts` API only.
 - Runtime config services -> `src/config/`.
+- Admin page-level state/data-loading hooks -> `admin-web/src/components/admin/hooks/`; keep section components focused on view rendering and local UI-only draft state.
 - Any project source/admin-web/tool/test/doc file over 500 lines should be split by stable responsibility, usually into an adjacent module directory plus smaller files such as `types.ts`, `runtime.ts`, `storage.ts`, `handlers.ts`, or per-domain panels/hooks.
 - Any repo-maintained source/doc/tool/admin-web file over 500 lines should be treated as a refactor trigger: split it by stable responsibility into smaller files/directories instead of extending the oversized file.
 

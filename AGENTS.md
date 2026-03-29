@@ -79,6 +79,8 @@ This file defines hard constraints for coding agents working in this repository.
 - `admin-web/`
   - Admin UI only.
   - Must consume backend contracts from shared type definitions (`admin-web/src/types/admin.ts`).
+  - Page-level admin state/data-loading logic should live in `admin-web/src/components/admin/hooks/`; section components should stay focused on rendering and local UI draft state.
+  - When one admin domain grows, split it into adjacent domain hooks/utils (for example `useMarketPortfolioState`, `useMarketExecutionState`, `systemAdminUtils`) instead of pushing more state orchestration back into `App.tsx` or a single section file.
 
 ## Directory Rules
 
