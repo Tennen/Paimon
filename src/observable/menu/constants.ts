@@ -1,0 +1,7 @@
+import { DATA_STORE } from "../../storage/persistence";
+
+export const OBSERVABLE_MENU_CONFIG_STORE = DATA_STORE.OBSERVABLE_MENU_CONFIG;
+export const OBSERVABLE_EVENT_LOG_STORE = DATA_STORE.OBSERVABLE_EVENT_LOG;
+export const MAX_ROOT_BUTTONS = 3;
+export const MAX_SUB_BUTTONS = 5;
+export const MAX_EVENT_LOG_ITEMS = 50;

@@ -119,7 +119,7 @@ data/              # Runtime data files
   - `src/ingress/wecomBridge.ts`: local bridge client that proactively connects to bridge SSE and uses active send APIs for outbound replies.
   - `tools/wecom-bridge.go` / `tools/wecom-bridge.js`: public bridge receiver/proxy that accepts external WeCom callbacks and exposes proxy endpoints such as `/stream` and `/proxy/*`.
 - WeCom click-menu callbacks should enter core as raw event envelopes first. `EventKey -> dispatchText` resolution is centralized in `src/core/orchestrator.ts`, so `src/ingress/wecom.ts` and `src/ingress/wecomBridge.ts` stay transport-only.
-- 企业微信菜单配置和事件日志保存在 `src/observable/menuService.ts`，持久化 key 为：
+- 企业微信菜单配置和事件日志由 `src/observable/menuService.ts` 作为入口协调，拆分到 `src/observable/menu/{store,normalize,publish}.ts`；持久化 key 为：
   - `observable.menu_config`
   - `observable.event_log`
 - 企业微信菜单发布 API client 在 `src/integrations/wecom/menuClient.ts`，并通过 WeCom bridge 的 `/proxy/menu/create` 代理出口访问企业微信。

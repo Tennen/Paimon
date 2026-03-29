@@ -70,6 +70,7 @@ This file defines hard constraints for coding agents working in this repository.
   - Admin-defined trigger/menu config and callback-event dispatch only.
   - No direct vendor HTTP/API client code here; WeCom API access stays in `src/integrations/wecom/`.
   - No ingress parsing here; ingress only translates requests into observable service calls.
+  - When menu config/event handling grows, keep `menuService.ts` as the entrypoint and split normalization/store/publish helpers into an adjacent `src/observable/menu/` subdirectory.
 
 - `src/scheduler/`, `src/memory/`
   - Domain services and state management.
