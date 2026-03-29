@@ -1,10 +1,10 @@
-import fs from "fs";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
-import express, { Express, Request, Response as ExResponse } from "express";
+import { Express, Request, Response as ExResponse } from "express";
 import dotenv from "dotenv";
 import { IngressAdapter } from "./types";
+import { registerAdminWebRoutes } from "./admin/adminWeb";
 import { SessionManager } from "../core/sessionManager";
 import { EnvConfigStore } from "../config/envConfigStore";
 import {
@@ -266,7 +266,7 @@ export class AdminIngressAdapter implements IngressAdapter {
 
   register(app: Express, _sessionManager: SessionManager): void {
     this.registerApiRoutes(app);
-    this.registerAdminWebRoutes(app);
+    registerAdminWebRoutes(app, this.adminDistCandidates);
   }
 
   private registerApiRoutes(app: Express): void {
@@ -2017,55 +2017,6 @@ export class AdminIngressAdapter implements IngressAdapter {
       }
     });
 
-  }
-
-  private registerAdminWebRoutes(app: Express): void {
-    const adminDist = this.resolveAdminDist();
-
-    if (!adminDist) {
-      app.get("/admin", (_req, res) => {
-        res.status(503).send("Admin web build not found. Run: npm run build:admin");
-      });
-      app.get("/admin/*", (req, res, next) => {
-        if (req.path.startsWith("/admin/api/")) {
-          next();
-          return;
-        }
-        res.status(503).send("Admin web build not found. Run: npm run build:admin");
-      });
-      return;
-    }
-
-    const assetsDir = path.join(adminDist, "assets");
-    if (fs.existsSync(assetsDir)) {
-      app.use("/admin/assets", express.static(assetsDir, {
-        immutable: true,
-        maxAge: "365d"
-      }));
-    }
-
-    const indexFile = path.join(adminDist, "index.html");
-    app.get("/admin", (_req, res) => {
-      res.sendFile(indexFile);
-    });
-
-    app.get("/admin/*", (req, res, next) => {
-      if (req.path.startsWith("/admin/api/")) {
-        next();
-        return;
-      }
-      res.sendFile(indexFile);
-    });
-  }
-
-  private resolveAdminDist(): string | null {
-    for (const candidate of this.adminDistCandidates) {
-      const indexFile = path.join(candidate, "index.html");
-      if (fs.existsSync(indexFile)) {
-        return candidate;
-      }
-    }
-    return null;
   }
 }
 
