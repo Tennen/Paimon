@@ -20,6 +20,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useSystemSectionState } from "@/components/admin/hooks/useSystemSectionState";
 import { MemorySection } from "@/components/admin/MemorySection";
 import {
   AdminConfig,
@@ -210,7 +211,8 @@ const EMPTY_PROVIDER_DRAFT: SystemProviderDraft = {
   quotaMonthlyBudgetUsdLimit: ""
 };
 
-export function SystemSection(props: SystemSectionProps) {
+export function SystemSection() {
+  const props = useSystemSectionState();
   const [activeModule, setActiveModule] = useState<SystemModule>("operations");
   const [editingProviderId, setEditingProviderId] = useState("");
   const [providerDraft, setProviderDraft] = useState<SystemProviderDraft>(EMPTY_PROVIDER_DRAFT);

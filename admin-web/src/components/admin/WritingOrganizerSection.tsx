@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { useWritingOrganizerSectionState } from "@/components/admin/hooks/useWritingOrganizerSectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import { WritingOrganizerSectionProps, WritingStateSection } from "@/types/admin";
 
@@ -26,7 +27,8 @@ const STATE_SECTION_OPTIONS: Array<{ value: WritingStateSection; label: string }
   { value: "draft", label: "draft" }
 ];
 
-export function WritingOrganizerSection(props: WritingOrganizerSectionProps) {
+export function WritingOrganizerSection() {
+  const props = useWritingOrganizerSectionState();
   return (
     <Card>
       <CardHeader>

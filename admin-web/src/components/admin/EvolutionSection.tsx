@@ -27,6 +27,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useEvolutionSectionState } from "@/components/admin/hooks/useEvolutionSectionState";
 import { formatDateTime, formatEvolutionStatus, getEvolutionStatusBadgeVariant } from "@/lib/adminFormat";
 import { EvolutionQueueRow } from "@/lib/evolutionQueueRows";
 import {
@@ -80,7 +81,8 @@ function formatEvolutionQueueSource(source: EvolutionQueueRow["source"]): string
   return EVOLUTION_QUEUE_SOURCE_LABEL[source] ?? source;
 }
 
-export function EvolutionSection(props: EvolutionSectionProps) {
+export function EvolutionSection() {
+  const props = useEvolutionSectionState();
   const [activeModule, setActiveModule] = useState<EvolutionModule>("goal");
 
   return (

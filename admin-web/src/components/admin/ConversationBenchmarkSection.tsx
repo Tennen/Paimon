@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useConversationBenchmarkSectionState } from "@/components/admin/hooks/useConversationBenchmarkSectionState";
 import {
   AdminConfig,
   ConversationBenchmarkResponse,
@@ -33,7 +34,8 @@ const DEFAULT_TURNS = [
   "那再总结成三条建议"
 ].join("\n");
 
-export function ConversationBenchmarkSection(props: ConversationBenchmarkSectionProps) {
+export function ConversationBenchmarkSection() {
+  const props = useConversationBenchmarkSectionState();
   const [turnsDraft, setTurnsDraft] = useState(DEFAULT_TURNS);
   const [repeatCountDraft, setRepeatCountDraft] = useState("2");
   const [includeClassic, setIncludeClassic] = useState(true);

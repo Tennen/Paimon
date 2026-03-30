@@ -20,6 +20,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useWeComMenuSectionState } from "@/components/admin/hooks/useWeComMenuSectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
   WeComMenuButton,
@@ -42,7 +43,9 @@ type WeComMenuSectionProps = {
   onPublish: () => void;
 };
 
-export function WeComMenuSection(props: WeComMenuSectionProps) {
+export function WeComMenuSection() {
+  const props = useWeComMenuSectionState();
+
   function updateRootButton(index: number, patch: Partial<WeComMenuButton>): void {
     const nextButtons = props.config.buttons.map((button, buttonIndex) => {
       if (buttonIndex !== index) {

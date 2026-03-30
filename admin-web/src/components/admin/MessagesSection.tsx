@@ -21,6 +21,7 @@ import {
   TableRow
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useMessagesSectionState } from "@/components/admin/hooks/useMessagesSectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
   PushUser,
@@ -54,7 +55,8 @@ type MessagesSectionProps = {
   onRunTask: (task: ScheduledTask) => void;
 };
 
-export function MessagesSection(props: MessagesSectionProps) {
+export function MessagesSection() {
+  const props = useMessagesSectionState();
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_1.25fr]">
       <Card>

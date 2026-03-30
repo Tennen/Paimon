@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+import { useMarketSectionState } from "@/components/admin/hooks/useMarketSectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
   MarketAnalysisEngine,
@@ -35,7 +36,8 @@ import {
   MarketSectionProps
 } from "@/types/admin";
 
-export function MarketSection(props: MarketSectionProps) {
+export function MarketSection() {
+  const props = useMarketSectionState();
   const [openSearchSelectorIndex, setOpenSearchSelectorIndex] = useState<number | null>(null);
   const [selectorPosition, setSelectorPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const searchSelectorButtonRefs = useRef<Record<number, HTMLButtonElement | null>>({});

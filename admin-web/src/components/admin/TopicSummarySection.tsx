@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+import { useTopicSummarySectionState } from "@/components/admin/hooks/useTopicSummarySectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
   LLMProviderProfile,
@@ -84,7 +85,8 @@ const DEFAULT_LANGUAGE_OPTIONS: Array<{ value: TopicSummaryDigestLanguage; label
   { value: "en", label: "en（English）" }
 ];
 
-export function TopicSummarySection(props: TopicSummarySectionProps) {
+export function TopicSummarySection() {
+  const props = useTopicSummarySectionState();
   const [activeModule, setActiveModule] = useState<TopicSummaryModule>("config");
   const enabledCount = props.topicSummaryConfig.sources.filter((item) => item.enabled).length;
   const selectedProfile = props.topicSummaryProfiles.find((item) => item.id === props.topicSummarySelectedProfileId) ?? null;

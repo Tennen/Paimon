@@ -18,6 +18,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useDirectInputMappingSectionState } from "@/components/admin/hooks/useDirectInputMappingSectionState";
 import { formatDateTime } from "@/lib/adminFormat";
 import {
   DirectInputMappingConfig,
@@ -32,7 +33,9 @@ type DirectInputMappingSectionProps = {
   onSave: () => void;
 };
 
-export function DirectInputMappingSection(props: DirectInputMappingSectionProps) {
+export function DirectInputMappingSection() {
+  const props = useDirectInputMappingSectionState();
+
   function updateRule(index: number, patch: Partial<DirectInputMappingRule>): void {
     props.onConfigChange({
       ...props.config,
