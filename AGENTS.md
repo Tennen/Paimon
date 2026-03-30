@@ -160,5 +160,6 @@ This file defines hard constraints for coding agents working in this repository.
 - Run at least:
   - `npx tsc -p tsconfig.json`
   - `npm run test:evolution`
+- For large-scope changes, use module-scoped incremental commits by default; only skip this when the change cannot be reasonably covered by small-step commits.
 - If user-visible command/API/config changes, sync README sections in the same change.
 - If directory/module placement changes, sync both `AGENTS.md` and `docs/PROJECT_STRUCTURE.md` in the same change.
