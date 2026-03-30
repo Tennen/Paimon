@@ -40,6 +40,8 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - `admin-web/`: 后台前端
 - `tools/`: 独立脚本和桥接程序
 
+结构与放置规则的权威文档见 `docs/PROJECT_STRUCTURE.md`；实现约束见 `AGENTS.md`。
+
 ### 请求处理流程
 
 1. 输入先通过 `ingress` 层转成统一的 `Envelope`
@@ -55,6 +57,17 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 外部平台调用和 Agent 编排解耦
 - 数据持久化集中管理，避免业务逻辑散落到文件路径上
 - 新能力优先通过 `tool + integration` 的方式接入，而不是堆到入口层
+
+### Admin Web 前端架构（Zustand）
+
+当前 admin 前端采用“全局 store + section 自取状态”的结构：
+
+- `admin-web/src/App.tsx`：仅负责页面布局、菜单切换、全局提示展示
+- `admin-web/src/components/admin/hooks/store/`：按 domain 拆分 Zustand slice（system/messages/market/topic/writing/evolution 等）
+- `admin-web/src/components/admin/hooks/use*SectionState.ts`：每个 section 的状态选择和动作绑定
+- `admin-web/src/components/admin/*Section.tsx`：专注渲染与 UI 局部草稿状态，避免跨域状态编排
+
+这样可以避免 `App.tsx` 大规模透传 props，也让各功能模块的状态边界更清晰。
 
 ## 当前已有能力
 
@@ -676,6 +689,9 @@ sqlite3 data/writing/index/metadata.sqlite \"SELECT count(*) FROM documents;\"
 - 新的 LLM 可调用工具放到 `src/tools/*Tool.ts`
 - 新的输入协议放到 `src/ingress/`
 - 新的技能只在 `skills/<name>/SKILL.md` 中声明契约，不把运行逻辑塞进技能目录
+- admin-web 侧新增能力时，优先按 `hooks/store slice -> use*SectionState -> Section` 的分层扩展，而不是把状态编排回推到 `App.tsx`
+
+结构相关细则统一以 `docs/PROJECT_STRUCTURE.md` 为准。
 
 这也是当前项目保持可维护性的核心约束。
 
