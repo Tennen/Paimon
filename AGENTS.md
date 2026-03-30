@@ -4,95 +4,21 @@ This file defines hard constraints for coding agents working in this repository.
 
 ## What Belongs Here
 
-- `AGENTS.md` is for implementation constraints, architecture boundaries, and change safety rules.
+- `AGENTS.md` is for implementation constraints, code rules, and change safety rules.
 - `README.md` is for product capabilities, setup, and operator-facing usage.
-- `docs/PROJECT_STRUCTURE.md` is the detailed module map and placement reference.
-- When behavior/config/API changes are user-visible, update both docs in the same change.
+- `docs/PROJECT_STRUCTURE.md` is the canonical structure/module placement reference.
+- When behavior/config/API changes are user-visible, update `README.md` in the same change.
+- When directory/module placement changes, update both `AGENTS.md` and `docs/PROJECT_STRUCTURE.md` in the same change.
 
-## Architecture Boundaries
+## Structure Rules (Authoritative Reference)
 
-- `src/ingress/`
-  - Transport adapters only (HTTP, WeCom callback, bridge stream, admin routes).
-  - Parse/validate request and translate to internal envelope/service calls.
-  - Do not embed external API client logic here.
-  - WeCom transport split must stay explicit:
-    - `src/ingress/wecom.ts` is the direct public WeCom callback ingress. It receives external WeCom HTTP/XML callbacks and returns synchronous callback replies.
-    - `src/ingress/wecomBridge.ts` is the local bridge client. It proactively connects to `WECOM_BRIDGE_URL` SSE, consumes bridge-delivered payloads, and sends outbound replies via `src/integrations/wecom/sender.ts`.
-    - `tools/wecom-bridge.go` / `tools/wecom-bridge.js` are the public bridge receivers/proxies. They accept external WeCom callbacks and expose bridge-side proxy endpoints.
-    - Do not treat `src/ingress/wecomBridge.ts` as another direct WeCom callback receiver; raw WeCom callback payload/protocol changes belong in `src/ingress/wecom.ts` or `tools/wecom-bridge.*` depending deployment mode.
-    - When a WeCom callback carries `EventKey`, ingress should only normalize it into an internal event envelope. `EventKey -> dispatchText` resolution belongs in core orchestration, not in individual ingress adapters.
-
-- `src/core/`
-  - Orchestration and tool routing.
-  - No direct filesystem persistence and no vendor-specific API code.
-  - `src/core/conversation/` owns main conversation runtime variants, shared phase helpers, and benchmark services for the main dialogue chain.
-  - Keep main conversation orchestration split by stable responsibility (`shared`, `classic`, `agent`, `benchmark`, `types`) instead of growing `orchestrator.ts` into a single mixed-responsibility file.
-
-- `src/config/`
-  - Runtime configuration readers/writers and config services only.
-  - No business orchestration logic.
-
-- `src/engines/llm/`
-  - Provider runtime adapters only (`ollama`, `llama-server`, `openai`, etc.).
-  - Keep a unified `LLMEngine` contract; do not add skill/business workflow branching here.
-  - Provider-specific quota/account state belongs in `src/integrations/<provider>/` + `src/storage/`.
-
-- `src/engines/stt/`
-  - STT provider runtime adapters only (`fast-whisper`, etc.).
-  - Keep provider selection/retry/timeout behavior here, not in ingress/core.
-
-- `src/integrations/`
-  - External system adapters and domain runtime modules.
-  - Encapsulate HTTP/WebSocket/protocol details.
-  - Default: no cross-domain orchestration/business workflow state.
-  - Shared codex capabilities (CLI adapter/config/markdown report runner) belong in `src/integrations/codex/`.
-  - Dedicated markdown-to-image rendering runtime belongs in `src/integrations/md2img/`; other user-facing message/media adapters stay in `src/integrations/user-message/` when needed.
-  - Runtime-domain exceptions currently allowed:
-    - `src/integrations/evolution-operator/`
-    - `src/integrations/topic-summary/`
-    - `src/integrations/market-analysis/`
-    - `src/integrations/writing-organizer/`
-  - Prefer flat domain roots (`src/integrations/<domain>/`), no `integrations/tools` layer.
-  - Flatness has a limit: if one domain directory grows beyond 10 files, or if multiple files in that directory clearly belong to different abstraction layers or capability groups, you must split it into subdirectories.
-  - When splitting a domain, group by stable capability or responsibility (for example `fund/`, `reporting/`, `adapters/`) and keep cross-capability entrypoints in the domain root.
-
-- `src/tools/`
-  - Independent tool definitions exposed to orchestration/LLM (for example: `terminal`, `homeassistant`).
-  - Register schemas/handlers and call integrations.
-  - Must not contain skill-specific orchestration logic or persistence policy.
-
-- `src/storage/`
-  - Single persistence gateway.
-  - Callers should use `registerStore`, `getStore`, `setStore`.
-  - Business modules must not depend on file paths.
-
-- `src/observable/`
-  - Admin-defined trigger/menu config and callback-event dispatch only.
-  - No direct vendor HTTP/API client code here; WeCom API access stays in `src/integrations/wecom/`.
-  - No ingress parsing here; ingress only translates requests into observable service calls.
-  - When menu config/event handling grows, keep `menuService.ts` as the entrypoint and split normalization/store/publish helpers into an adjacent `src/observable/menu/` subdirectory.
-
-- `src/scheduler/`, `src/memory/`
-  - Domain services and state management.
-  - Persistence access only through `src/storage/persistence.ts`.
-
-- `admin-web/`
-  - Admin UI only.
-  - Must consume backend contracts from shared type definitions (`admin-web/src/types/admin.ts`).
-  - Page-level admin state/data-loading logic should live in `admin-web/src/components/admin/hooks/`; section components should stay focused on rendering and local UI draft state.
-  - When one admin domain grows, split it into adjacent domain hooks/utils (for example `useMarketPortfolioState`, `useMarketExecutionState`, `systemAdminUtils`) instead of pushing more state orchestration back into `App.tsx` or a single section file.
-
-## Directory Rules
-
-- New external platform clients go under `src/integrations/<platform>/`.
-- New integration modules stay flat under `src/integrations/<domain>/`.
-- New independent LLM-callable tools go under `src/tools/`.
-- Standalone operational scripts go under repo root `tools/` (not `src/`).
-- New cross-cutting infrastructure modules go under `src/<infra-domain>/` and must be reusable.
-- Any source file, admin-web file, tool script, test, or project doc that grows beyond 500 lines must be split into logically grouped files and, when helpful, an adjacent subdirectory named after the module. Do not keep adding code to a >500 line file.
-- When a main chain or runtime refactor introduces multiple phases/modes, create a dedicated subdirectory (for example `src/core/conversation/`) and split files by stable responsibility. Do not keep routing/bootstrap/planning/acting/admin benchmark wiring in one oversized file.
-- If a module starts mixing runtime state machine logic, prompt construction, persistence access coordination, and admin contracts, split it before adding more behavior. Prefer `types.ts`, `shared.ts`, per-mode `runtime.ts`, and adjacent service files over a single catch-all module.
-- Any source, tool, admin-web, or repo-maintained documentation file that grows beyond 500 lines must be split into smaller files/directories by stable logic or module responsibility. Do not keep adding to a >500 line file once that threshold is crossed.
+- All structure and placement rules must follow `docs/PROJECT_STRUCTURE.md`.
+- This includes (but is not limited to):
+  - backend/admin-web directory boundaries
+  - ingress/core/integrations/tools/storage/observable boundaries
+  - admin-web Zustand/store/section hook layering
+  - directory evolution and file-splitting thresholds
+- Do not duplicate or fork structure rules here. If a structure rule changes, update `docs/PROJECT_STRUCTURE.md` first, then keep this file aligned by reference.
 
 ## Skill Rules
 

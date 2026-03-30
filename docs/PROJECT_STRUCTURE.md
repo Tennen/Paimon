@@ -1,16 +1,16 @@
 # Project Structure Reference
 
-This document describes the current module layout and placement decisions.
+This document is the canonical source for module placement and structural boundaries in this repository.
 
 ## Doc Responsibilities
 
-- `AGENTS.md`: hard constraints for coding agents (architecture boundaries, code rules, change safety).
-- `README.md`: product capability, setup, and operator-facing usage.
-- `docs/PROJECT_STRUCTURE.md` (this file): detailed module map and placement examples.
+- `AGENTS.md`: coding constraints and safety rules for implementation.
+- `README.md`: product capability, setup, operator usage.
+- `docs/PROJECT_STRUCTURE.md` (this file): authoritative structure map, placement rules, and refactor boundaries.
 
-If these docs diverge, align them in the same change. For implementation constraints, `AGENTS.md` is authoritative.
+If structure-related guidance conflicts between docs, follow this file and then sync `AGENTS.md`/`README.md` in the same change.
 
-## Current Structure
+## Current Structure Snapshot
 
 ```text
 src/
@@ -18,10 +18,10 @@ src/
   core/            # Orchestrator and runtime flow
     conversation/  # Main conversation runtimes (classic/windowed-agent), shared helpers, benchmark
   engines/         # Provider runtimes
-    llm/           # LLM provider adapters (ollama/llama-server/openai/gemini/gpt-plugin/codex) + provider store/factory
+    llm/           # LLM provider adapters + provider store/factory
     stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
-  integrations/    # Outbound adapters and domain runtimes (flat by domain)
+  integrations/    # Outbound adapters and domain runtimes
     codex/
     chatgpt-bridge/
     evolution-operator/
@@ -29,13 +29,14 @@ src/
     market-analysis/
     md2img/
     openai/
+    search-engine/
     system-maintenance/
     terminal/
     topic-summary/
     writing-organizer/
     wecom/
-  memory/          # Memory domain (session/raw/summary/index/compaction/hybrid retrieval)
-  observable/      # Admin-defined menu/trigger config + callback event dispatch
+  memory/          # Memory domain
+  observable/      # Admin-defined menu/trigger config + callback dispatch
   scheduler/       # Scheduler and push-user domain
   skills/          # Skill metadata manager only
   storage/         # Persistence abstraction (register/get/set)
@@ -45,72 +46,135 @@ src/
 Repo root:
 
 ```text
-admin-web/         # Admin frontend
+admin-web/
   src/
-    components/admin/
-      hooks/       # Page-level admin state/data hooks and per-domain helpers
-docs/              # Design/structure docs
-skills/            # Skill packages (declarative SKILL.md only)
-tools/             # Standalone scripts/binaries/helpers
-data/              # Runtime data files
+    App.tsx                    # Layout/menu shell only (no cross-domain state orchestration)
+    components/admin/          # Section components (view + UI-local draft state)
+      hooks/
+        useAdminStore.ts       # Zustand store entry
+        useAdminBootstrap.ts   # Bootstrap/polling lifecycle
+        use*SectionState.ts    # Section-level state selectors/actions
+        store/                 # Zustand slices by stable domain responsibility
+docs/
+skills/
+tools/
+data/
 ```
 
-## Placement Rules (Quick)
+## Canonical Placement And Boundary Rules
 
-- Inbound request translation only -> `src/ingress/`.
-- Core orchestration/runtime loop -> `src/core/`.
-- Main dialogue runtime variants and shared conversation helpers -> `src/core/conversation/`.
-- Provider runtime implementation -> `src/engines/llm/` or `src/engines/stt/`.
-- Third-party protocol/client adapters -> `src/integrations/<domain>/`.
-- Shared codex execution/config/markdown-report adapters -> `src/integrations/codex/`.
-- Markdown-to-image rendering pipeline -> `src/integrations/md2img/`.
-- Other user-facing message/media adapters -> `src/integrations/user-message/` when the repo still needs them.
-- System maintenance command runners for `/sync` `/build` `/restart` `/deploy` and admin repo operations -> `src/integrations/system-maintenance/`; build/deploy flows should install dependencies before `npm run build`.
-- Domain runtime exceptions under integrations are allowed only for explicit runtime domains:
-  - `evolution-operator`
-  - `topic-summary`
-  - `market-analysis`
-  - `writing-organizer`
-- Admin-defined external trigger/menu config + callback dispatch -> `src/observable/`.
-- LLM-callable tools (schema + execute handler) -> `src/tools/`.
-- Persistent state access -> `src/storage/persistence.ts` API only.
-- Runtime config services -> `src/config/`.
-- Admin page-level state/data-loading hooks -> `admin-web/src/components/admin/hooks/`; keep section components focused on view rendering and local UI-only draft state.
-- Any project source/admin-web/tool/test/doc file over 500 lines should be split by stable responsibility, usually into an adjacent module directory plus smaller files such as `types.ts`, `runtime.ts`, `storage.ts`, `handlers.ts`, or per-domain panels/hooks.
-- Any repo-maintained source/doc/tool/admin-web file over 500 lines should be treated as a refactor trigger: split it by stable responsibility into smaller files/directories instead of extending the oversized file.
+### Backend Boundaries
+
+- `src/ingress/`
+  - Transport adapters only (HTTP, WeCom callback, bridge stream, admin routes).
+  - Parse/validate external input and translate to internal envelope/service calls.
+  - No vendor API client logic.
+  - WeCom split is explicit and fixed:
+    - `src/ingress/wecom.ts`: direct public WeCom callback ingress (HTTP/XML callback + sync callback reply).
+    - `src/ingress/wecomBridge.ts`: local bridge client (connects to `WECOM_BRIDGE_URL` SSE, consumes bridge payloads, sends outbound replies via `src/integrations/wecom/sender.ts`).
+    - `tools/wecom-bridge.go` / `tools/wecom-bridge.js`: public bridge receiver/proxy.
+  - `EventKey -> dispatchText` resolution belongs to core orchestration (`src/core/orchestrator.ts`), not ingress.
+
+- `src/core/`
+  - Orchestration and tool routing only.
+  - No direct filesystem persistence and no vendor-specific API code.
+  - Main conversation runtime stays split in `src/core/conversation/` by stable responsibility (`shared`, `classic`, `agent`, `benchmark`, `types`).
+  - Do not collapse multi-mode runtime back into one catch-all orchestrator module.
+
+- `src/config/`
+  - Runtime configuration readers/writers and config services only.
+  - No business orchestration.
+
+- `src/engines/llm/`
+  - Provider runtime adapters only (`ollama`, `llama-server`, `openai`, `gemini`, `gpt-plugin`, `codex`, etc.).
+  - Keep unified `LLMEngine` contract.
+  - No skill/business workflow branching.
+  - Provider-specific quota/account state belongs in `src/integrations/<provider>/` + `src/storage/`.
+
+- `src/engines/stt/`
+  - STT provider runtime adapters only.
+  - Provider selection/retry/timeout behavior lives here, not in ingress/core.
+
+- `src/integrations/`
+  - External system adapters and domain runtime modules.
+  - Encapsulate HTTP/WebSocket/protocol details.
+  - Default rule: no cross-domain orchestration/business workflow state.
+  - Shared codex execution/config/report helpers belong in `src/integrations/codex/`.
+  - Markdown-to-image runtime belongs in `src/integrations/md2img/`.
+  - Other user-facing message/media adapters belong in `src/integrations/user-message/` when needed.
+  - Runtime-domain exceptions (explicitly allowed):
+    - `src/integrations/evolution-operator/`
+    - `src/integrations/topic-summary/`
+    - `src/integrations/market-analysis/`
+    - `src/integrations/writing-organizer/`
+  - Prefer flat domain roots (`src/integrations/<domain>/`), no `integrations/tools` layer.
+  - Flatness limit: when one domain directory grows beyond 10 files, or files clearly split into different abstraction layers/capability groups, split into subdirectories by stable responsibility.
+
+- `src/tools/`
+  - Independent LLM-callable tool definitions.
+  - Register schemas/handlers and call integrations.
+  - No skill-specific orchestration logic or persistence policy.
+
+- `src/storage/`
+  - Single persistence gateway.
+  - Use `registerStore`, `getStore`, `setStore`.
+  - Business modules must not depend on file paths.
+
+- `src/observable/`
+  - Admin-defined trigger/menu config and callback-event dispatch only.
+  - No vendor HTTP/API client code (WeCom API access stays in `src/integrations/wecom/`).
+  - No ingress parsing.
+  - `menuService.ts` is the entrypoint; split menu normalization/store/publish helpers under `src/observable/menu/` when needed.
+
+- `src/scheduler/`, `src/memory/`
+  - Domain services and state management.
+  - Persistence access only through `src/storage/persistence.ts`.
+
+### Admin-Web Boundaries
+
+- `admin-web/` is UI-only.
+- Must consume backend contracts from shared type definitions in `admin-web/src/types/admin.ts`.
+- `admin-web/src/App.tsx` is layout/menu shell only.
+- Global page/admin domain state is centralized in Zustand slices under `admin-web/src/components/admin/hooks/store/`.
+- Section state binding should be implemented in section hooks (`use*SectionState.ts`) under `admin-web/src/components/admin/hooks/`.
+- Section components should focus on rendering and UI-local draft state; avoid cross-domain orchestration inside sections.
+
+## Directory Evolution Rules
+
+- New external platform clients -> `src/integrations/<platform>/`.
+- New integration modules stay under `src/integrations/<domain>/`.
+- New independent LLM-callable tools -> `src/tools/`.
+- Standalone operational scripts -> repo root `tools/` (not `src/`).
+- New cross-cutting infrastructure modules -> `src/<infra-domain>/` and reusable by multiple domains.
+- Any source/admin-web/tool/test/doc file beyond 500 lines must be split by stable responsibility. Do not keep extending oversized files.
+- When a runtime introduces multiple phases/modes, create a dedicated subdirectory and split by stable role (`types.ts`, `shared.ts`, `runtime.ts`, services).
+- If a module mixes state machine logic, prompt construction, persistence coordination, and admin contracts, split before adding more behavior.
 
 ## Memory Routing
 
 - All dialogue traffic appends to unified session memory and raw memory.
 - Raw memory keeps original records; summary memory is derived and references raw ids/refs.
-- Main orchestrator (`src/core/orchestrator.ts`) uses `HybridMemoryService` for planning context: summary vector retrieval first, raw replay by `rawRefs` second.
+- Main orchestrator (`src/core/orchestrator.ts`) uses `HybridMemoryService` for planning context: summary retrieval first, raw replay by `rawRefs` second.
 - If no summary hit is found, orchestrator falls back to session memory (`MemoryStore.read(sessionId)`).
-- Retrieval is summary-first, with optional raw backfill by references.
 
 ## Main Conversation Runtime
 
 - Main conversation flow is split between:
-  - `src/core/orchestrator.ts`: ingress normalization, direct-command handling, runtime selection, memory append/audit wiring
-  - `src/core/conversation/classic/`: legacy `route -> plan -> tool/respond` chain
-  - `src/core/conversation/agent/`: windowed message-based runtime with short-lived skill lease
-  - `src/core/conversation/shared.ts`: tool execution, memory retrieval, skill/tool context helpers
-  - `src/core/conversation/benchmarkService.ts`: admin benchmark runner for comparing runtime modes
+  - `src/core/orchestrator.ts`: ingress normalization, direct-command handling, runtime selection, memory append/audit wiring.
+  - `src/core/conversation/classic/`: legacy `route -> plan -> tool/respond` chain.
+  - `src/core/conversation/agent/`: windowed message-based runtime with short-lived skill lease.
+  - `src/core/conversation/shared.ts`: tool execution, memory retrieval, skill/tool context helpers.
+  - `src/core/conversation/benchmarkService.ts`: admin benchmark runner for runtime mode comparison.
 - Runtime mode selection is controlled by `MAIN_CONVERSATION_MODE` and can be overridden per request in admin benchmark runs.
-- Windowed main dialogue state belongs in `src/memory/conversationWindowService.ts` + `src/memory/conversationWindowStore.ts`.
-- Keep short-window message history separate from long-term hybrid memory:
-  - window state stores recent user/assistant turns plus optional active skill lease
-  - raw/summary/session memory remain the long-term memory source
-- For large main-chain refactors, continue splitting by stable responsibility under `src/core/conversation/`; do not collapse bootstrap, planning, acting, benchmark, and admin config back into one file.
+- Windowed dialogue state belongs in `src/memory/conversationWindowService.ts` + `src/memory/conversationWindowStore.ts`.
 
 ## LLM Provider Selection
 
-- Main flow provider selection is persisted in `src/storage/persistence.ts` store key `llm.providers`.
+- Main flow provider selection is persisted in store key `llm.providers`.
 - `src/engines/llm/provider_store.ts` owns provider profiles and `default/routing/planning` selector ids.
-- `src/core/orchestrator.ts` resolves LLM engine by step:
-  - `routing` step can use a dedicated provider
-  - `planning` step can use a dedicated provider
-- Runtime domains `topic-summary` / `market-analysis` also persist provider selector fields (`summaryEngine` / `analysisEngine`) and should prefer explicit `provider-id` selections from the shared provider store.
-- Admin API management entry points are in `src/ingress/admin.ts`:
+- `src/core/orchestrator.ts` resolves routing/planning providers by step.
+- Runtime domains `topic-summary` / `market-analysis` should prefer explicit `provider-id` selections.
+- Admin API entry points (`src/ingress/admin.ts`):
   - `GET /admin/api/llm/providers`
   - `PUT /admin/api/llm/providers`
   - `POST /admin/api/llm/providers/default`
@@ -118,37 +182,33 @@ data/              # Runtime data files
 
 ## WeCom Menu Admin And Callback Routing
 
-- WeCom transport is split across three entry points and should not be conflated:
-  - `src/ingress/wecom.ts`: direct public callback ingress for WeCom HTTP/XML requests.
-  - `src/ingress/wecomBridge.ts`: local bridge client that proactively connects to bridge SSE and uses active send APIs for outbound replies.
-  - `tools/wecom-bridge.go` / `tools/wecom-bridge.js`: public bridge receiver/proxy that accepts external WeCom callbacks and exposes proxy endpoints such as `/stream` and `/proxy/*`.
-- WeCom click-menu callbacks should enter core as raw event envelopes first. `EventKey -> dispatchText` resolution is centralized in `src/core/orchestrator.ts`, so `src/ingress/wecom.ts` and `src/ingress/wecomBridge.ts` stay transport-only.
-- 企业微信菜单配置和事件日志由 `src/observable/menuService.ts` 作为入口协调，拆分到 `src/observable/menu/{store,normalize,publish}.ts`；持久化 key 为：
-  - `observable.menu_config`
-  - `observable.event_log`
-- 企业微信菜单发布 API client 在 `src/integrations/wecom/menuClient.ts`，并通过 WeCom bridge 的 `/proxy/menu/create` 代理出口访问企业微信。
-- `src/ingress/wecom.ts` 现在除文本/语音外，还负责接收 `MsgType=event` + `Event=click` 的企业微信菜单回调，并将 `EventKey` 转成内部可分发事件。
-- Admin API 入口在 `src/ingress/admin.ts`：
+- WeCom transport split:
+  - `src/ingress/wecom.ts`: direct callback ingress.
+  - `src/ingress/wecomBridge.ts`: local bridge SSE client.
+  - `tools/wecom-bridge.go` / `tools/wecom-bridge.js`: public bridge receiver/proxy.
+- Click callbacks enter core as raw event envelopes; centralized `EventKey` dispatch resolution remains in `src/core/orchestrator.ts`.
+- Menu config/event runtime entrypoint is `src/observable/menuService.ts` with helpers under `src/observable/menu/{store,normalize,publish}.ts`.
+- WeCom menu publish client is `src/integrations/wecom/menuClient.ts` and uses bridge proxy (`/proxy/menu/create`).
+- Admin API entry points:
   - `GET /admin/api/wecom/menu`
   - `PUT /admin/api/wecom/menu`
   - `POST /admin/api/wecom/menu/publish`
 
 ## Direct Input Mapping And `/ha` Direct Route
 
-- 通用“固定文本 -> 目标输入”配置保存在 `src/config/directInputMappingService.ts`，持久化 key 为：
-  - `direct-input.mappings`
-- Orchestrator 在 `src/core/orchestrator.ts` 中会先对普通文本执行这层映射，再进入现有 direct shortcut / direct toolcall 流程。
-- slash 命令本身不经过这层覆盖，避免 admin 配置拦截已有原生命令。
-- Admin API 入口在 `src/ingress/admin.ts`：
+- Direct input mapping config service: `src/config/directInputMappingService.ts`.
+- Store key: `direct-input.mappings`.
+- Orchestrator applies this mapping before normal direct shortcut/toolcall flow.
+- Slash commands are not overridden by direct input mapping.
+- Admin API:
   - `GET /admin/api/direct-input-mappings`
   - `PUT /admin/api/direct-input-mappings`
-- Home Assistant 的 `/ha` direct toolcall 语法由 `src/tools/homeAssistantTool.ts` 注册，命令解析和真实执行在 `src/integrations/homeassistant/service.ts`。
-- `friendly_name|entity_id -> entity/domain` 的解析由 `src/integrations/homeassistant/entityRegistry.ts` 负责，保持 vendor/runtime 细节留在 integration 层。
+- `/ha` command registration is in `src/tools/homeAssistantTool.ts`; real execution logic is in `src/integrations/homeassistant/service.ts`.
 
 ## Market Admin API Entry Points
 
-- Market admin APIs are owned by `src/ingress/admin.ts` and must keep transport/input normalization concerns in ingress.
-- Current market endpoints include:
+- Market admin APIs are owned by `src/ingress/admin.ts`.
+- Current endpoints:
   - `GET /admin/api/market/config`
   - `PUT /admin/api/market/config`
   - `GET /admin/api/market/securities/search`
@@ -158,23 +218,19 @@ data/              # Runtime data files
 
 ## Market Analysis Runtime Notes
 
-- `src/integrations/market-analysis/` 现按能力分层：`fund/` 放基金分析主链路，`reporting/` 放 markdown 报告与图片输出 adapter，root 只保留命令入口、运行时编排、格式化与存储。
-- 基金主流程 prompt 由 `src/integrations/market-analysis/fund/fund_prompt_builder.ts` 统一组装，结构尽量对齐股票分析侧“核心结论 / 数据视角 / 舆情情报 / 执行计划”的决策仪表盘架构，但基金指标改为收益、回撤、相对基准、跟踪偏离、申赎/基金经理事件等基金口径。
-- `src/integrations/market-analysis/fund/fund_analysis_service.ts` 对单基金设置基础数据守卫：基金自身价格/净值序列抓取失败时，只保留 ingestion 审计与失败日志，直接跳过后续 feature/rule/LLM，避免把流程数据异常误判为高风险基金。
-- 基金新闻检索现分两层：`src/integrations/market-analysis/fund/search_adapter.ts` 只负责基金 query 规划、静态上下文与回退新闻源；真正的搜索引擎执行、provider 协议、结果归一化位于 `src/integrations/search-engine/`。
-- `src/integrations/search-engine/store.ts` 管全局 profile 持久化与 selector 解析，`src/integrations/search-engine/service.ts` 暴露统一执行入口，provider 实现当前包括 `serpapi.ts` 与 `qianfan.ts`。
-- 当所选 Search Engine 未配置可用密钥、被禁用或调用失败时，主流程保持 fail-open，并在 `source_chain/errors` 中记录通用 `search_status:*` 与 provider 信息。
-- 全局搜索引擎 profile 持久化 key 为 `search.engines`（文件 `search-engines/profiles.json`）。
-- `querySuffix` 这类业务关键词不放在全局 profile；基金场景在 `market.config.fund.newsQuerySuffix` 配置。
-- Admin API 提供全局搜索引擎管理接口：`/admin/api/search-engines`、`/admin/api/search-engines/default`。
-- `src/integrations/market-analysis/formatters.ts` 仅保留帮助、状态与持仓类文本格式化；分析执行链路固定由 `src/integrations/market-analysis/reporting/llm_report_adapter.ts` 组装基金分析 markdown 上下文，再调用 `src/integrations/codex/markdownReport.ts` 生成 LLM 报告，并通过 `src/integrations/md2img/` 的 unified + Playwright 渲染链路输出移动端图片。该链路应按“核心结论 / 数据视角 / 情报观察 / 执行计划”展开，并保持基金信号、评分、关键指标、数据完整性、新闻检索状态与组合摘要的一致性。
-- markdown 图片渲染模块位于 `src/integrations/md2img/`，固定目录为 `markdown/`、`render/`、`styles/` + `index.ts`；其动态依赖安装与解析应以项目 package root 为准（不依赖进程启动 cwd）。
+- `src/integrations/market-analysis/` should stay layered by stable capability (for example `fund/`, `reporting/`, and root entrypoints).
+- `fund/fund_prompt_builder.ts` owns fund prompt construction.
+- `fund/fund_analysis_service.ts` must apply fund base-data guardrails (base quote/NAV failure => skip downstream feature/rule/LLM for that fund with explicit logging).
+- Fund news retrieval should separate planning (`market-analysis` side) from provider execution (`src/integrations/search-engine/`).
+- Search engine profiles are owned by `src/integrations/search-engine/store.ts` + `service.ts`; current providers include `serpapi.ts` and `qianfan.ts`.
+- When selected search engine is unavailable/disabled/failed, keep flow fail-open and log `search_status:*` with provider metadata.
+- Markdown report/image pipeline should stay in `market-analysis/reporting` + `src/integrations/codex/markdownReport.ts` + `src/integrations/md2img/`.
 
 ## Structural Change Checklist
 
 1. Move directories/files.
 2. Update imports (`rg` old paths).
-3. Update docs together: `AGENTS.md`, `README.md`, and this file when relevant.
+3. Update docs together when structure/placement changes: `AGENTS.md` + `docs/PROJECT_STRUCTURE.md`; update `README.md` when behavior/config/operator-facing usage changes.
 4. Run validation:
    - `npx tsc -p tsconfig.json`
    - `npm run test:evolution`
