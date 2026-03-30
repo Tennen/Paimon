@@ -25,7 +25,8 @@
     "remark-rehype": "^11.1.2",
     "undici": "^6.23.0",
     "unified": "^11.0.5",
-    "ws": "^8.17.0"
+    "ws": "^8.17.0",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@radix-ui/react-label": "^2.1.0",

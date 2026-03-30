@@ -201,6 +201,37 @@ export type SearchEnginesPayload = {
 
 export type MainConversationMode = "classic" | "windowed-agent";
 
+export type SystemMemoryDraft = {
+  llmMemoryContextEnabled: boolean;
+  memoryCompactEveryRounds: string;
+  memoryCompactMaxBatchSize: string;
+  memorySummaryTopK: string;
+  memoryRawRefLimit: string;
+  memoryRawRecordLimit: string;
+};
+
+export type SystemRuntimeDraft = {
+  storageDriver: "json-file" | "sqlite";
+  storageSqlitePath: string;
+  mainConversationMode: MainConversationMode;
+  conversationWindowTimeoutSeconds: string;
+  conversationWindowMaxTurns: string;
+  conversationAgentMaxSteps: string;
+};
+
+export type SystemOperationState = {
+  restarting: boolean;
+  pullingRepo: boolean;
+  buildingRepo: boolean;
+  deployingRepo: boolean;
+};
+
+export type MainFlowProviderSelectionDraft = {
+  defaultProviderId: string;
+  routingProviderId: string;
+  planningProviderId: string;
+};
+
 export type AdminConfig = {
   llmProviders?: LLMProvidersPayload;
   searchEngines?: SearchEnginesPayload;

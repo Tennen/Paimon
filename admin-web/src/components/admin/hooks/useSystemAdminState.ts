@@ -5,16 +5,18 @@ import type {
   DirectInputMappingSnapshot,
   LLMProviderProfile,
   LLMProviderStore,
+  MainFlowProviderSelectionDraft,
   Notice,
   SearchEngineProfile,
   SearchEngineStore,
+  SystemMemoryDraft,
+  SystemRuntimeDraft,
   WeComMenuConfig,
   WeComMenuEventRecord,
   WeComMenuPublishPayload,
   WeComMenuSnapshot
 } from "@/types/admin";
 import { DEFAULT_DIRECT_INPUT_MAPPING_CONFIG, DEFAULT_WECOM_MENU_CONFIG } from "@/types/admin";
-import type { SystemMemoryDraft, SystemRuntimeDraft } from "../SystemSection";
 import { request } from "./adminApi";
 import {
   normalizeConversationMode,
@@ -27,12 +29,6 @@ import {
 import { useSystemOperationsState } from "./useSystemOperationsState";
 
 type NoticeSetter = React.Dispatch<React.SetStateAction<Notice>>;
-
-type MainFlowProviderSelectionDraft = {
-  defaultProviderId: string;
-  routingProviderId: string;
-  planningProviderId: string;
-};
 
 type UseSystemAdminStateArgs = {
   config: AdminConfig | null;

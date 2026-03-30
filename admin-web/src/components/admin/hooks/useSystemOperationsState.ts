@@ -1,6 +1,5 @@
 import { useState } from "react";
-import type { Notice } from "@/types/admin";
-import type { SystemOperationState } from "../SystemSection";
+import type { Notice, SystemOperationState } from "@/types/admin";
 import { request } from "./adminApi";
 import { isLikelyRestartConnectionDrop } from "./systemAdminUtils";
 
