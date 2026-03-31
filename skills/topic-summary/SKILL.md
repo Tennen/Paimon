@@ -1,7 +1,7 @@
 ---
 name: topic-summary
 description: Generate daily AI engineering digest from configurable RSS sources, with source CRUD via direct command.
-keywords: ["topic summary", "rss", "digest", "ai news", "engineering", "日报", "新闻摘要", "订阅", "source", "profile", "batch"]
+keywords: ["topic summary", "rss", "digest", "ai news", "日报", "新闻摘要"]
 preferToolResult: true
 tool: skill.topic-summary
 action: execute

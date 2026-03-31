@@ -4,7 +4,7 @@ description: Manage Apple Notes via the `memo` CLI on macOS (create, view, edit,
 terminal: true
 command: memo
 install: brew tap antoniorodr/memo && brew install antoniorodr/memo/memo
-keywords: ["note", "notes", "apple notes", "memo", "notebook", "folder", "folders", "search notes", "笔记", "备忘录", "便签"]
+keywords: ["note", "memo", "notebook", "folder", "笔记", "备忘录", "便签"]
 tool: terminal
 action: exec
 params: ["command", "args"]

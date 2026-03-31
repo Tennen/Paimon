@@ -300,17 +300,17 @@ function buildSkillsContext(
   const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
   const entries = skills.map((skill) => {
     const command = skill.metadata?.command ?? skill.command;
-    const keywords = skill.metadata?.keywords ?? skill.keywords;
+    // const keywords = skill.metadata?.keywords ?? skill.keywords;
     return [
       skill.name,
       {
         description: skill.description,
-        command,
-        terminal: skill.terminal,
-        ...(skill.tool ? { tool: skill.tool } : {}),
-        ...(skill.action ? { action: skill.action } : {}),
-        ...(skill.params && skill.params.length > 0 ? { params: skill.params } : {}),
-        ...(keywords ? { keywords } : {})
+        // command,
+        // terminal: skill.terminal,
+        // ...(skill.tool ? { tool: skill.tool } : {}),
+        // ...(skill.action ? { action: skill.action } : {}),
+        // ...(skill.params && skill.params.length > 0 ? { params: skill.params } : {}),
+        // ...(keywords ? { keywords } : {})
       }
     ] as const;
   });

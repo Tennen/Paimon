@@ -1,7 +1,7 @@
 ---
 name: writing-organizer
 description: Organize fragmented writing inputs into topic-based summary/outline/draft with rolling raw storage and one-step restore. Use this when user asks to append notes, inspect topic state, run summarize, or rollback writing state.
-keywords: ["writing", "incremental writing", "organizer", "notes", "summary", "draft", "写作", "整理", "草稿"]
+keywords: ["writing", "organizer", "summary", "draft", "写作", "整理", "草稿"]
 preferToolResult: true
 tool: skill.writing-organizer
 action: execute
