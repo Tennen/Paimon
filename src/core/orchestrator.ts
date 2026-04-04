@@ -19,6 +19,7 @@ import { ClassicConversationRuntime } from "./conversation/classic/runtime";
 import { WindowedAgentConversationRuntime } from "./conversation/agent/runtime";
 import { resolveMainConversationMode } from "./conversation/mode";
 import { ConversationWindowService } from "../memory/conversationWindowService";
+import { ConversationContextService } from "../config/conversationContextService";
 import { DirectCommandRuntime } from "./orchestrator_direct";
 import {
   buildToolResultResponse,
@@ -67,7 +68,8 @@ export class Orchestrator {
     llmEngineResolver?: OrchestratorLLMResolver,
     observableMenuService?: ObservableMenuEventResolver,
     directInputResolver?: DirectInputResolver,
-    conversationWindowService?: ConversationWindowService
+    conversationWindowService?: ConversationWindowService,
+    conversationContextService?: ConversationContextService
   ) {
     this.toolRouter = toolRouter;
     this.defaultLLMEngine = llmEngine;
@@ -88,6 +90,7 @@ export class Orchestrator {
       skillManager: this.skillManager,
       toolRegistry: this.toolRegistry,
       hybridMemoryService: this.hybridMemoryService,
+      conversationContextService,
       llmEngineResolver: this.llmEngineResolver,
       writeLlmAudit: (envelope, step, start, engine) => this.writeLlmAudit(envelope, step, start, engine)
     });

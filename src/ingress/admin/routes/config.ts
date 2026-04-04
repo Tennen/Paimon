@@ -20,6 +20,11 @@ import {
   parseOptionalBoolean,
   writeOptionalEnvValue
 } from "../utils";
+import {
+  buildConversationContextAdminSnapshot,
+  getAvailableConversationContextNames,
+  normalizeOptionalStringArray
+} from "./conversationContextShared";
 
 export function registerConfigAdminRoutes(app: Express, context: AdminRouteContext): void {
   app.post("/admin/api/config/model", async (req: Request, res: ExResponse) => {
@@ -301,6 +306,12 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     const conversationWindowTimeoutSeconds = normalizeOptionalIntegerString(body.conversationWindowTimeoutSeconds);
     const conversationWindowMaxTurns = normalizeOptionalIntegerString(body.conversationWindowMaxTurns);
     const conversationAgentMaxSteps = normalizeOptionalIntegerString(body.conversationAgentMaxSteps);
+    const selectedSkillNames = body.selectedSkillNames === undefined
+      ? undefined
+      : normalizeOptionalStringArray(body.selectedSkillNames);
+    const selectedToolNames = body.selectedToolNames === undefined
+      ? undefined
+      : normalizeOptionalStringArray(body.selectedToolNames);
 
     if (storageDriver && !["json-file", "sqlite"].includes(storageDriver)) {
       res.status(400).json({ error: "STORAGE_DRIVER must be json-file or sqlite" });
@@ -320,6 +331,14 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     }
     if (conversationAgentMaxSteps === null) {
       res.status(400).json({ error: "CONVERSATION_AGENT_MAX_STEPS must be positive integer or empty" });
+      return;
+    }
+    if (body.selectedSkillNames !== undefined && selectedSkillNames === null) {
+      res.status(400).json({ error: "selectedSkillNames must be string[]" });
+      return;
+    }
+    if (body.selectedToolNames !== undefined && selectedToolNames === null) {
+      res.status(400).json({ error: "selectedToolNames must be string[]" });
       return;
     }
 
@@ -355,6 +374,18 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
         setEnvValue,
         unsetEnvValue
       );
+      if (selectedSkillNames !== undefined || selectedToolNames !== undefined) {
+        const availableNames = getAvailableConversationContextNames(context);
+        const current = context.conversationContextService.getSnapshot().config;
+        context.conversationContextService.saveConfig({
+          ...current,
+          ...(selectedSkillNames !== undefined ? { selectedSkillNames } : {}),
+          ...(selectedToolNames !== undefined ? { selectedToolNames } : {})
+        }, {
+          availableSkillNames: availableNames.skillNames,
+          availableToolNames: availableNames.toolNames
+        });
+      }
     } catch (error) {
       res.status(500).json({ error: (error as Error).message ?? "failed to save runtime config" });
       return;
@@ -368,7 +399,8 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
       mainConversationMode: readMainConversationMode(getEnvValue(envPath, "MAIN_CONVERSATION_MODE")),
       conversationWindowTimeoutSeconds: getEnvValue(envPath, "CONVERSATION_WINDOW_TIMEOUT_SECONDS") || "180",
       conversationWindowMaxTurns: getEnvValue(envPath, "CONVERSATION_WINDOW_MAX_TURNS") || "6",
-      conversationAgentMaxSteps: getEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS") || "4"
+      conversationAgentMaxSteps: getEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS") || "4",
+      conversationContext: buildConversationContextAdminSnapshot(context)
     });
   });
 

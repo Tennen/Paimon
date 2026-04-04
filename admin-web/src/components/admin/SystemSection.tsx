@@ -49,6 +49,8 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  selectedSkillNames: string[];
+  selectedToolNames: string[];
 };
 
 export type SystemOperationState = {
@@ -230,6 +232,10 @@ export function SystemSection() {
   const providerItems = providerStore?.providers ?? [];
   const searchEngineStore = props.searchEngineStore;
   const searchEngineItems = searchEngineStore?.engines ?? [];
+  const availableConversationSkills = props.config?.conversationContext?.availableSkills ?? [];
+  const availableConversationTools = props.config?.conversationContext?.availableTools ?? [];
+  const availableConversationSkillNames = availableConversationSkills.map((item) => item.name);
+  const availableConversationToolNames = availableConversationTools.map((item) => item.name);
   const defaultSearchEngineId = searchEngineStore?.defaultEngineId
     && searchEngineItems.some((item) => item.id === searchEngineStore.defaultEngineId)
     ? searchEngineStore.defaultEngineId
@@ -256,6 +262,23 @@ export function SystemSection() {
 
   function updateProviderDraft<K extends keyof SystemProviderDraft>(key: K, value: SystemProviderDraft[K]): void {
     setProviderDraft((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function toggleRuntimeSelection(
+    key: "selectedSkillNames" | "selectedToolNames",
+    name: string,
+    checked: boolean
+  ): void {
+    props.onRuntimeDraftChange(key, checked
+      ? Array.from(new Set([...props.runtimeDraft[key], name])).sort((left, right) => left.localeCompare(right))
+      : props.runtimeDraft[key].filter((item) => item !== name));
+  }
+
+  function replaceRuntimeSelection(
+    key: "selectedSkillNames" | "selectedToolNames",
+    value: string[]
+  ): void {
+    props.onRuntimeDraftChange(key, value.slice());
   }
 
   function startCreateProvider(type: LLMProviderType = "ollama"): void {
@@ -1301,6 +1324,111 @@ export function SystemSection() {
                   />
                 </div>
               </div>
+              <Separator />
+              <div className="grid gap-4 xl:grid-cols-2">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Routing Skills Context</CardTitle>
+                    <CardDescription>第一步注入给模型的 `skills_context`。只有选中的 skill 才会参与路由决策。</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>已选 {props.runtimeDraft.selectedSkillNames.length} / {availableConversationSkills.length}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => replaceRuntimeSelection("selectedSkillNames", availableConversationSkillNames)}
+                      >
+                        全选
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => replaceRuntimeSelection("selectedSkillNames", [])}
+                      >
+                        清空
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {availableConversationSkills.length === 0 ? (
+                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">当前没有可注入的 skills。</div>
+                      ) : availableConversationSkills.map((skill) => {
+                        const checked = props.runtimeDraft.selectedSkillNames.includes(skill.name);
+                        return (
+                          <div key={skill.name} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">{skill.name}</div>
+                                <Badge variant="secondary">{skill.source === "builtin-tool" ? "builtin" : "skill"}</Badge>
+                                {skill.tool ? <Badge variant="outline">tool: {skill.tool}</Badge> : null}
+                              </div>
+                              {skill.description ? <div className="text-sm text-muted-foreground">{skill.description}</div> : null}
+                              <div className="text-xs text-muted-foreground">
+                                {skill.command ? `command=${skill.command}` : "无 direct command"}
+                                {skill.action ? ` · action=${skill.action}` : ""}
+                                {skill.terminal ? " · terminal" : ""}
+                              </div>
+                            </div>
+                            <Switch checked={checked} onCheckedChange={(value) => toggleRuntimeSelection("selectedSkillNames", skill.name, value)} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Planning Tools Context</CardTitle>
+                    <CardDescription>skill 进入 planning 后才会注入 `tools_context` / `_tools.schema`。只有选中的 tool 会暴露给模型。</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>已选 {props.runtimeDraft.selectedToolNames.length} / {availableConversationTools.length}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => replaceRuntimeSelection("selectedToolNames", availableConversationToolNames)}
+                      >
+                        全选
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => replaceRuntimeSelection("selectedToolNames", [])}
+                      >
+                        清空
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      {availableConversationTools.length === 0 ? (
+                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">当前没有可注入的 tools。</div>
+                      ) : availableConversationTools.map((tool) => {
+                        const checked = props.runtimeDraft.selectedToolNames.includes(tool.name);
+                        return (
+                          <div key={tool.name} className="flex items-start justify-between gap-3 rounded-md border p-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium">{tool.name}</div>
+                                {tool.resource ? <Badge variant="outline">{tool.resource}</Badge> : null}
+                              </div>
+                              {tool.description ? <div className="text-sm text-muted-foreground">{tool.description}</div> : null}
+                              <div className="text-xs text-muted-foreground">
+                                ops: {tool.operations.map((item) => item.op).join(", ") || "-"}
+                              </div>
+                            </div>
+                            <Switch checked={checked} onCheckedChange={(value) => toggleRuntimeSelection("selectedToolNames", tool.name, value)} />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" onClick={props.onSaveRuntimeConfig} disabled={props.savingRuntimeConfig}>
                   {props.savingRuntimeConfig ? "保存中..." : "保存运行时配置"}
@@ -1321,6 +1449,11 @@ export function SystemSection() {
                 <div className="mono">CONVERSATION_WINDOW_TIMEOUT_SECONDS: {props.config?.conversationWindowTimeoutSeconds ?? "180"}</div>
                 <div className="mono">CONVERSATION_WINDOW_MAX_TURNS: {props.config?.conversationWindowMaxTurns ?? "6"}</div>
                 <div className="mono">CONVERSATION_AGENT_MAX_STEPS: {props.config?.conversationAgentMaxSteps ?? "4"}</div>
+                <div className="mono">skills_context selected: {props.runtimeDraft.selectedSkillNames.length}</div>
+                <div className="mono">tools_context selected: {props.runtimeDraft.selectedToolNames.length}</div>
+                <div className="mono md:col-span-2">
+                  context store: {props.config?.conversationContext?.store?.name ?? "-"} ({props.config?.conversationContext?.store?.driver ?? "-"})
+                </div>
               </div>
             </CardContent>
           </Card>

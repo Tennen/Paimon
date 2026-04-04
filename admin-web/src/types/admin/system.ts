@@ -201,6 +201,40 @@ export type SearchEnginesPayload = {
 
 export type MainConversationMode = "classic" | "windowed-agent";
 
+export type ConversationContextSkillOption = {
+  name: string;
+  source: "skill" | "builtin-tool";
+  description?: string;
+  command?: string;
+  terminal?: boolean;
+  tool?: string;
+  action?: string;
+  params?: string[];
+  keywords?: string[];
+};
+
+export type ConversationContextToolOption = {
+  name: string;
+  description?: string;
+  resource?: string;
+  keywords?: string[];
+  operations: Array<{ op: string; description?: string }>;
+};
+
+export type ConversationContextConfig = {
+  version: 1;
+  selectedSkillNames: string[] | null;
+  selectedToolNames: string[] | null;
+  updatedAt: string;
+};
+
+export type ConversationContextSnapshot = {
+  config: ConversationContextConfig;
+  store: DataStoreDescriptor;
+  availableSkills: ConversationContextSkillOption[];
+  availableTools: ConversationContextToolOption[];
+};
+
 export type SystemMemoryDraft = {
   llmMemoryContextEnabled: boolean;
   memoryCompactEveryRounds: string;
@@ -217,6 +251,8 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  selectedSkillNames: string[];
+  selectedToolNames: string[];
 };
 
 export type SystemOperationState = {
@@ -271,6 +307,7 @@ export type AdminConfig = {
   memorySummaryTopK: string;
   memoryRawRefLimit: string;
   memoryRawRecordLimit: string;
+  conversationContext: ConversationContextSnapshot;
   envPath: string;
   taskStore: DataStoreDescriptor;
   userStore: DataStoreDescriptor;

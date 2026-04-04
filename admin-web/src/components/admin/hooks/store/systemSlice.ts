@@ -17,6 +17,7 @@ import {
   normalizeConversationMode,
   normalizeDirectInputMappingConfig,
   normalizeStorageDriver,
+  resolveConversationContextSelection,
   normalizeStringList,
   normalizeWeComMenuConfig,
   normalizeWeComMenuEvents
@@ -66,13 +67,23 @@ function buildMemoryDraft(config: AdminConfig | null): SystemMemoryDraft {
 }
 
 function buildRuntimeDraft(config: AdminConfig | null): SystemRuntimeDraft {
+  const availableSkillNames = config?.conversationContext?.availableSkills?.map((item) => item.name) ?? [];
+  const availableToolNames = config?.conversationContext?.availableTools?.map((item) => item.name) ?? [];
   return {
     storageDriver: normalizeStorageDriver(String(config?.storageDriver ?? "")),
     storageSqlitePath: String(config?.storageSqlitePath ?? "data/storage/metadata.sqlite").trim(),
     mainConversationMode: normalizeConversationMode(String(config?.mainConversationMode ?? "")),
     conversationWindowTimeoutSeconds: String(config?.conversationWindowTimeoutSeconds ?? "180").trim(),
     conversationWindowMaxTurns: String(config?.conversationWindowMaxTurns ?? "6").trim(),
-    conversationAgentMaxSteps: String(config?.conversationAgentMaxSteps ?? "4").trim()
+    conversationAgentMaxSteps: String(config?.conversationAgentMaxSteps ?? "4").trim(),
+    selectedSkillNames: resolveConversationContextSelection(
+      config?.conversationContext?.config?.selectedSkillNames,
+      availableSkillNames
+    ),
+    selectedToolNames: resolveConversationContextSelection(
+      config?.conversationContext?.config?.selectedToolNames,
+      availableToolNames
+    )
   };
 }
 
@@ -338,7 +349,9 @@ export const createSystemSlice: AdminSliceCreator<AdminSystemSlice> = (set, get)
             mainConversationMode: get().runtimeDraft.mainConversationMode,
             conversationWindowTimeoutSeconds: get().runtimeDraft.conversationWindowTimeoutSeconds.trim(),
             conversationWindowMaxTurns: get().runtimeDraft.conversationWindowMaxTurns.trim(),
-            conversationAgentMaxSteps: get().runtimeDraft.conversationAgentMaxSteps.trim()
+            conversationAgentMaxSteps: get().runtimeDraft.conversationAgentMaxSteps.trim(),
+            selectedSkillNames: get().runtimeDraft.selectedSkillNames,
+            selectedToolNames: get().runtimeDraft.selectedToolNames
           })
         });
         await get().loadConfig();

@@ -67,6 +67,17 @@ export function normalizeStringList(input: unknown): string[] {
     : [];
 }
 
+export function resolveConversationContextSelection(
+  selected: string[] | null | undefined,
+  availableNames: string[]
+): string[] {
+  const availableSet = new Set(availableNames.map((item) => String(item ?? "").trim()).filter(Boolean));
+  if (selected === null || selected === undefined) {
+    return availableNames.slice();
+  }
+  return normalizeStringList(selected).filter((item) => availableSet.has(item));
+}
+
 export function isLikelyRestartConnectionDrop(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const lower = message.toLowerCase();

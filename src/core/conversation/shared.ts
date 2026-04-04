@@ -5,6 +5,14 @@ import { SkillInfo, SkillManager } from "../../skills/skillManager";
 import { ToolRegistry, ToolSchemaItem } from "../../tools/toolRegistry";
 import { ToolRouter } from "../../tools/toolRouter";
 import { Envelope, Image, Response, ToolExecution } from "../../types";
+import { ConversationContextService } from "../../config/conversationContextService";
+import {
+  buildConversationSkillsContext,
+  buildExtraSkillsContext,
+  filterToolRuntimeContextByAllowedNames,
+  resolveConversationSkillAvailability,
+  RoutingSkillContextEntry
+} from "./contextCatalog";
 import {
   ConversationRuntimeSupportOptions,
   ExecuteToolFn,
@@ -19,6 +27,7 @@ export class ConversationRuntimeSupport {
   readonly skillManager: SkillManager;
   readonly toolRegistry: ToolRegistry;
   private readonly writeAuditFn: ConversationRuntimeSupportOptions["writeLlmAudit"];
+  private readonly conversationContextService: ConversationContextService;
 
   constructor(options: ConversationRuntimeSupportOptions) {
     this.toolRouter = options.toolRouter;
@@ -28,6 +37,7 @@ export class ConversationRuntimeSupport {
     this.skillManager = options.skillManager;
     this.toolRegistry = options.toolRegistry;
     this.writeAuditFn = options.writeLlmAudit;
+    this.conversationContextService = options.conversationContextService ?? new ConversationContextService();
   }
 
   resolveLLMEngine(step: LLMExecutionStep): LLMEngine {
@@ -86,8 +96,11 @@ export class ConversationRuntimeSupport {
     };
   }
 
-  buildRoutingSkillsContext(): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> | null {
-    return buildSkillsContext(this.skillManager, undefined, buildExtraSkillsContext(this.toolRegistry));
+  buildRoutingSkillsContext(): Record<string, RoutingSkillContextEntry> | null {
+    return buildConversationSkillsContext(this.skillManager, this.toolRegistry, {
+      allowedSkillNames: this.conversationContextService.getSelectedSkillNames(),
+      allowedToolNames: this.conversationContextService.getSelectedToolNames()
+    });
   }
 
   buildPlanningContext(skillName: string | undefined): {
@@ -95,14 +108,23 @@ export class ConversationRuntimeSupport {
     detail: string;
     toolContext: Record<string, Record<string, unknown>> | null;
   } {
-    const selectedSkill = skillName ? this.skillManager.get(skillName) : undefined;
+    const allowedSkillNames = this.conversationContextService.getSelectedSkillNames();
+    const allowedToolNames = this.conversationContextService.getSelectedToolNames();
+    const skillAvailability = skillName
+      ? resolveConversationSkillAvailability(skillName, this.skillManager, this.toolRegistry, {
+          allowedSkillNames,
+          allowedToolNames
+        })
+      : { enabled: false as const };
+    const effectiveSkillName = skillAvailability.enabled ? skillName : undefined;
+    const selectedSkill = effectiveSkillName ? skillAvailability.skill ?? this.skillManager.get(effectiveSkillName) : undefined;
     const extraSkills = buildExtraSkillsContext(this.toolRegistry);
-    const detail = skillName
-      ? getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry)
+    const detail = effectiveSkillName
+      ? getSkillDetail(effectiveSkillName, this.skillManager, extraSkills, this.toolRegistry)
       : "";
     const forceTools: string[] = [];
-    if (skillName === "homeassistant" || skillName === "celestia") {
-      forceTools.push(skillName);
+    if (effectiveSkillName === "homeassistant" || effectiveSkillName === "celestia") {
+      forceTools.push(effectiveSkillName);
     }
     if (skillName && selectedSkill?.terminal) {
       forceTools.push("terminal");
@@ -110,8 +132,11 @@ export class ConversationRuntimeSupport {
     if (selectedSkill?.tool) {
       forceTools.push(selectedSkill.tool);
     }
-    const fullToolContext = this.toolRegistry.buildRuntimeContext();
-    const toolContext = skillName
+    const fullToolContext = filterToolRuntimeContextByAllowedNames(
+      this.toolRegistry.buildRuntimeContext(),
+      allowedToolNames
+    );
+    const toolContext = effectiveSkillName && fullToolContext
       ? filterToolContextForSkill(detail, fullToolContext, forceTools)
       : null;
     return {
@@ -292,69 +317,10 @@ function sanitizeToolResult(input: unknown): unknown {
   return out;
 }
 
-function buildSkillsContext(
-  skillManager: SkillManager,
-  onlyNames?: string[],
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {}
-): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> | null {
-  const skills = skillManager.list().filter((skill) => !onlyNames || onlyNames.includes(skill.name));
-  const entries = skills.map((skill) => {
-    const command = skill.metadata?.command ?? skill.command;
-    // const keywords = skill.metadata?.keywords ?? skill.keywords;
-    return [
-      skill.name,
-      {
-        description: skill.description,
-        // command,
-        // terminal: skill.terminal,
-        // ...(skill.tool ? { tool: skill.tool } : {}),
-        // ...(skill.action ? { action: skill.action } : {}),
-        // ...(skill.params && skill.params.length > 0 ? { params: skill.params } : {}),
-        // ...(keywords ? { keywords } : {})
-      }
-    ] as const;
-  });
-  const extraEntries = Object.entries(extraSkills).filter(([name]) => !onlyNames || onlyNames.includes(name));
-  const merged = Object.fromEntries([...entries, ...extraEntries]);
-  return Object.keys(merged).length > 0 ? merged : null;
-}
-
-function buildExtraSkillsContext(
-  toolRegistry: ToolRegistry
-): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> {
-  const extra: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {};
-  for (const builtin of [
-    {
-      name: "homeassistant",
-      description: "Control and query Home Assistant devices (services, state, snapshots).",
-      action: "call_service"
-    },
-    {
-      name: "celestia",
-      description: "Control and query Celestia AI devices (semantic commands, raw actions).",
-      action: "invoke_command"
-    }
-  ] as const) {
-    const schema = toolRegistry.listSchema().find((tool) => tool.name === builtin.name);
-    if (!schema) {
-      continue;
-    }
-    extra[builtin.name] = {
-      description: builtin.description,
-      command: builtin.name,
-      terminal: false,
-      tool: builtin.name,
-      action: builtin.action,
-      ...(schema.keywords ? { keywords: schema.keywords } : {})
-    };
-  }
-  return extra;
-}
-
 function getSkillDetail(
   name: string,
   skillManager: SkillManager,
-  extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }>,
+  extraSkills: Record<string, RoutingSkillContextEntry>,
   toolRegistry: ToolRegistry
 ): string {
   if (extraSkills[name] && (name === "homeassistant" || name === "celestia")) {

@@ -546,6 +546,8 @@ CONVERSATION_AGENT_MAX_STEPS=4
 - `CONVERSATION_WINDOW_TIMEOUT_SECONDS`：用户在收到回复后，下一条消息仍算同一个短窗口的超时时间
 - `CONVERSATION_WINDOW_MAX_TURNS`：短窗口最多保留多少轮真实 `user/assistant` 消息
 - `CONVERSATION_AGENT_MAX_STEPS`：`windowed-agent` 单轮内允许的最大 agent/tool 推理步数
+- Admin `System -> 运行时` 里可以单独勾选哪些 `skills` 允许进入 routing 第一步的 `skills_context`
+- 同一页面也可以单独勾选哪些 `tools` 允许进入 skill planning 阶段的 `tools_context` / `_tools.schema`
 - 这些值也可以在 Admin `System -> 运行时` 页面修改；对话性能对比可在 Admin `对话 Benchmark` 页面执行
 
 ### 3. 本地开发启动

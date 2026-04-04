@@ -4,6 +4,7 @@ import { SkillManager } from "../../skills/skillManager";
 import { ToolRegistry } from "../../tools/toolRegistry";
 import { ToolRouter } from "../../tools/toolRouter";
 import { HybridMemoryService } from "../../memory/hybridMemoryService";
+import { ConversationContextService } from "../../config/conversationContextService";
 
 export type MainConversationMode = "classic" | "windowed-agent";
 
@@ -24,6 +25,7 @@ export type ConversationRuntimeSupportOptions = {
   skillManager: SkillManager;
   toolRegistry: ToolRegistry;
   hybridMemoryService: HybridMemoryService;
+  conversationContextService?: ConversationContextService;
   llmEngineResolver?: (step: LLMExecutionStep) => LLMEngine;
   writeLlmAudit: (envelope: Envelope, step: LLMExecutionStep, start: number, engine: LLMEngine) => void;
 };

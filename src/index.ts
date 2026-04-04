@@ -30,6 +30,7 @@ import { registerSystemShortcuts } from "./core/systemShortcuts";
 import { ObservableMenuService } from "./observable/menuService";
 import { DirectInputMappingService } from "./config/directInputMappingService";
 import { ConversationBenchmarkService } from "./core/conversation/benchmarkService";
+import { ConversationContextService } from "./config/conversationContextService";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -56,6 +57,7 @@ const codexConfigService = new CodexConfigService(envStore);
 const evolutionService = new EvolutionOperatorService(evolutionEngine, codexConfigService);
 const observableMenuService = new ObservableMenuService();
 const directInputMappingService = new DirectInputMappingService();
+const conversationContextService = new ConversationContextService();
 
 const registry = new ToolRegistry();
 loadTools(registry, { skillManager, evolutionService });
@@ -83,7 +85,8 @@ const orchestrator = new Orchestrator(
   mainFlowLLMResolver,
   observableMenuService,
   directInputMappingService,
-  conversationWindowService
+  conversationWindowService,
+  conversationContextService
 );
 const sessionManager = new SessionManager(orchestrator);
 const conversationBenchmarkService = new ConversationBenchmarkService({
@@ -106,7 +109,9 @@ new AdminIngressAdapter(
   evolutionEngine,
   undefined,
   evolutionService,
-  conversationBenchmarkService
+  conversationBenchmarkService,
+  skillManager,
+  registry
 ).register(app, sessionManager);
 
 const port = Number(process.env.PORT ?? 3000);

@@ -6,6 +6,9 @@ import { EvolutionOperatorService } from "../../integrations/evolution-operator/
 import { ObservableMenuService } from "../../observable/menuService";
 import { DirectInputMappingService } from "../../config/directInputMappingService";
 import { OpenAIQuotaManager } from "../../integrations/openai/quotaManager";
+import { ConversationContextService } from "../../config/conversationContextService";
+import { SkillManager } from "../../skills/skillManager";
+import { ToolRegistry } from "../../tools/toolRegistry";
 
 export type AdminRouteContext = {
   envStore: EnvConfigStore;
@@ -16,5 +19,8 @@ export type AdminRouteContext = {
   openAIQuotaManager: OpenAIQuotaManager;
   observableMenuService: ObservableMenuService;
   directInputMappingService: DirectInputMappingService;
+  conversationContextService: ConversationContextService;
+  skillManager: SkillManager;
+  toolRegistry: ToolRegistry;
   conversationBenchmarkService?: ConversationBenchmarkService;
 };

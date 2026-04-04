@@ -26,6 +26,7 @@ import {
   parseEvolutionGoalInput,
   parseWeComMenuConfigPayload
 } from "./generalPayloads";
+import { buildConversationContextAdminSnapshot } from "./conversationContextShared";
 
 export function registerGeneralAdminRoutes(app: Express, context: AdminRouteContext): void {
   app.get("/admin/api/config", (_req, res) => {
@@ -82,6 +83,7 @@ export function registerGeneralAdminRoutes(app: Express, context: AdminRouteCont
       memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
       memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
       memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
+      conversationContext: buildConversationContextAdminSnapshot(context),
       envPath,
       taskStore: context.scheduler.getTaskStore(),
       userStore: context.scheduler.getUserStore(),

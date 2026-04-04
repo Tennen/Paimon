@@ -87,6 +87,9 @@ import {
 import { ObservableMenuService } from "../observable/menuService";
 import { DirectInputMappingService } from "../config/directInputMappingService";
 import { ConversationBenchmarkService } from "../core/conversation/benchmarkService";
+import { ConversationContextService } from "../config/conversationContextService";
+import { SkillManager } from "../skills/skillManager";
+import { ToolRegistry } from "../tools/toolRegistry";
 
 type TopicSummaryProfileCreatePayload = {
   name: string;
@@ -117,6 +120,9 @@ export class AdminIngressAdapter implements IngressAdapter {
   private readonly openAIQuotaManager: OpenAIQuotaManager;
   private readonly observableMenuService: ObservableMenuService;
   private readonly directInputMappingService: DirectInputMappingService;
+  private readonly conversationContextService: ConversationContextService;
+  private readonly skillManager: SkillManager;
+  private readonly toolRegistry: ToolRegistry;
   private readonly conversationBenchmarkService?: ConversationBenchmarkService;
 
   constructor(
@@ -125,7 +131,9 @@ export class AdminIngressAdapter implements IngressAdapter {
     evolutionEngine?: EvolutionEngine,
     adminDistCandidates?: string[],
     evolutionService?: EvolutionOperatorService,
-    conversationBenchmarkService?: ConversationBenchmarkService
+    conversationBenchmarkService?: ConversationBenchmarkService,
+    skillManager?: SkillManager,
+    toolRegistry?: ToolRegistry
   ) {
     this.envStore = envStore;
     this.scheduler = scheduler;
@@ -138,6 +146,9 @@ export class AdminIngressAdapter implements IngressAdapter {
     this.openAIQuotaManager = new OpenAIQuotaManager();
     this.observableMenuService = new ObservableMenuService();
     this.directInputMappingService = new DirectInputMappingService();
+    this.conversationContextService = new ConversationContextService();
+    this.skillManager = skillManager ?? new SkillManager();
+    this.toolRegistry = toolRegistry ?? new ToolRegistry();
     this.conversationBenchmarkService = conversationBenchmarkService;
   }
 
@@ -156,6 +167,9 @@ export class AdminIngressAdapter implements IngressAdapter {
       openAIQuotaManager: this.openAIQuotaManager,
       observableMenuService: this.observableMenuService,
       directInputMappingService: this.directInputMappingService,
+      conversationContextService: this.conversationContextService,
+      skillManager: this.skillManager,
+      toolRegistry: this.toolRegistry,
       conversationBenchmarkService: this.conversationBenchmarkService
     };
 
