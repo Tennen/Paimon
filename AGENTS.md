@@ -8,6 +8,7 @@ This file defines hard constraints for coding agents working in this repository.
 - `README.md` is for product capabilities, setup, and operator-facing usage.
 - `docs/PROJECT_STRUCTURE.md` is the canonical structure/module placement reference.
 - When behavior/config/API changes are user-visible, update `README.md` in the same change.
+- When adding/removing top-level integration directories (for example a new `src/integrations/*` domain), update `docs/PROJECT_STRUCTURE.md` and keep this file aligned by reference in the same change.
 - When directory/module placement changes, update both `AGENTS.md` and `docs/PROJECT_STRUCTURE.md` in the same change.
 
 ## Structure Rules (Authoritative Reference)
@@ -87,5 +88,6 @@ This file defines hard constraints for coding agents working in this repository.
   - `npx tsc -p tsconfig.json`
   - `npm run test:evolution`
 - For large-scope changes, use module-scoped incremental commits by default; only skip this when the change cannot be reasonably covered by small-step commits.
+- Unless the user explicitly asks not to, every completed implementation task should end with a `git commit` and `git push` for the finished changes.
 - If user-visible command/API/config changes, sync README sections in the same change.
 - If directory/module placement changes, sync both `AGENTS.md` and `docs/PROJECT_STRUCTURE.md` in the same change.

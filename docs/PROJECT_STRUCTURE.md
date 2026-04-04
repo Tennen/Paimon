@@ -22,6 +22,7 @@ src/
     stt/           # STT provider adapters
   ingress/         # Inbound adapters (http/wecom/admin/notify/bridge)
   integrations/    # Outbound adapters and domain runtimes
+    celestia/
     codex/
     chatgpt-bridge/
     evolution-operator/

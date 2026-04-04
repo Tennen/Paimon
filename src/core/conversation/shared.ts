@@ -101,8 +101,8 @@ export class ConversationRuntimeSupport {
       ? getSkillDetail(skillName, this.skillManager, extraSkills, this.toolRegistry)
       : "";
     const forceTools: string[] = [];
-    if (skillName === "homeassistant") {
-      forceTools.push("homeassistant");
+    if (skillName === "homeassistant" || skillName === "celestia") {
+      forceTools.push(skillName);
     }
     if (skillName && selectedSkill?.terminal) {
       forceTools.push("terminal");
@@ -323,15 +323,29 @@ function buildExtraSkillsContext(
   toolRegistry: ToolRegistry
 ): Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> {
   const extra: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }> = {};
-  const haSchema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
-  if (haSchema) {
-    extra.homeassistant = {
+  for (const builtin of [
+    {
+      name: "homeassistant",
       description: "Control and query Home Assistant devices (services, state, snapshots).",
-      command: "homeassistant",
+      action: "call_service"
+    },
+    {
+      name: "celestia",
+      description: "Control and query Celestia AI devices (semantic commands, raw actions).",
+      action: "invoke_command"
+    }
+  ] as const) {
+    const schema = toolRegistry.listSchema().find((tool) => tool.name === builtin.name);
+    if (!schema) {
+      continue;
+    }
+    extra[builtin.name] = {
+      description: builtin.description,
+      command: builtin.name,
       terminal: false,
-      tool: "homeassistant",
-      action: "call_service",
-      ...(haSchema.keywords ? { keywords: haSchema.keywords } : {})
+      tool: builtin.name,
+      action: builtin.action,
+      ...(schema.keywords ? { keywords: schema.keywords } : {})
     };
   }
   return extra;
@@ -343,40 +357,55 @@ function getSkillDetail(
   extraSkills: Record<string, { description?: string; command?: string; terminal?: boolean; tool?: string; action?: string; params?: string[]; keywords?: string[] }>,
   toolRegistry: ToolRegistry
 ): string {
-  if (extraSkills[name] && name === "homeassistant") {
-    const schema = toolRegistry.listSchema().find((tool) => tool.name === "homeassistant");
-    return buildHomeAssistantSkillDetail(schema);
+  if (extraSkills[name] && (name === "homeassistant" || name === "celestia")) {
+    const schema = toolRegistry.listSchema().find((tool) => tool.name === name);
+    return buildBuiltinToolSkillDetail(name, schema);
   }
   return skillManager.getDetail(name);
 }
 
-function buildHomeAssistantSkillDetail(schema?: ToolSchemaItem): string {
+function buildBuiltinToolSkillDetail(name: "homeassistant" | "celestia", schema?: ToolSchemaItem): string {
+  const config = name === "homeassistant"
+    ? {
+        description: "Control and query Home Assistant devices (services, state, snapshots).",
+        title: "Home Assistant Tool",
+        toolContextPath: "tools_context.homeassistant.entities",
+        fallbackOperations: [
+          "- call_service: params { domain, service, entity_id, data? }",
+          "- get_state: params { entity_id }",
+          "- camera_snapshot: params { entity_id }"
+        ]
+      }
+    : {
+        description: "Control and query Celestia AI devices (semantic commands, raw actions).",
+        title: "Celestia Tool",
+        toolContextPath: "tools_context.celestia.devices",
+        fallbackOperations: [
+          "- list_devices: params { plugin_id?, kind?, q? }",
+          "- invoke_command: params { target?, device_name?, command?, device_id?, action?, params? }"
+        ]
+      };
   const keywordsLine = schema?.keywords ? `    "keywords": ${JSON.stringify(schema.keywords)}` : "";
   const ops = (schema?.operations ?? []).map((op) => `- ${op.op}: params ${JSON.stringify(op.params)}`);
   const operations = ops.length > 0
     ? ["Operations", ...ops]
-    : [
-        "Operations",
-        "- call_service: params { domain, service, entity_id, data? }",
-        "- get_state: params { entity_id }",
-        "- camera_snapshot: params { entity_id }"
-      ];
+    : ["Operations", ...config.fallbackOperations];
   return [
     "---",
-    "name: homeassistant",
-    "description: Control and query Home Assistant devices (services, state, snapshots).",
+    `name: ${name}`,
+    `description: ${config.description}`,
     "terminal: false",
     "metadata:",
     "  {",
-    '    "tool": "homeassistant"',
+    `    "tool": "${name}"`,
     ...(keywordsLine ? [keywordsLine] : []),
     "  }",
     "---",
     "",
-    "# Home Assistant Tool",
+    `# ${config.title}`,
     "",
-    "Use the `homeassistant` tool via tool.call to control devices and query state.",
-    "Refer to tools_context.homeassistant.entities for available entities.",
+    `Use the \`${name}\` tool via tool.call to control devices and query state.`,
+    `Refer to ${config.toolContextPath} for available devices.`,
     "",
     ...operations
   ].join("\n");

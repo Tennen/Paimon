@@ -94,6 +94,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 ### 3. 工具与业务能力
 
 - `homeassistant`: 查询设备状态、调用服务、抓取摄像头快照，支持 `/ha ...` direct command
+- `celestia`: 查询 AI 设备目录、执行语义命令或原始 action，支持 `/celestia ...` direct command
 - `terminal`: 执行本机命令
 - `topic-summary`: 从 RSS 源生成主题摘要，支持 profile/source 管理与去重状态
 - `writing-organizer`: 材料整理流水线（`Material -> Insight -> Document`），支持增量采集、结构化提炼、版本化 Markdown 文档与回滚
@@ -378,6 +379,34 @@ STT_FAST_WHISPER_MODEL=small
 - 若同名 `friendly_name` 对应多个实体，会返回歧义错误，避免误控设备
 - `camera_snapshot` 会把 friendly name 解析为 `camera.*` 实体后抓图
 
+#### Celestia Gateway
+
+Celestia 集成通过 AI 设备 API 暴露智能家居设备目录与命令能力，需要配置：
+
+```env
+CELESTIA_BASE_URL=http://127.0.0.1:18080
+CELESTIA_TOKEN=your_celestia_token
+CELESTIA_DEVICE_REFRESH_MS=60000
+```
+
+LLM 可通过 `celestia` tool 读取 `tools_context.celestia.devices` 中的设备与命令目录；同时也支持直接命令：
+
+- `/celestia list [query]`
+- `/celestia call <device-or-room.command|command> | {"key":"value"}`
+- `/celestia raw <device_id> <action> | {"key":"value"}`
+
+示例：
+
+- `/celestia list feeder`
+- `/celestia call Kitchen Feeder.Feed Once | {"portions":2}`
+- `/celestia raw petkit:feeder:pet-parent manual_feed_dual | {"amount1":20,"amount2":20}`
+
+说明：
+
+- `call` 走 Celestia 的语义解析能力，`target` 支持 `device-or-room.command`
+- `raw` 会直接把 `device_id + action + params` 转发到 Celestia
+- 当本地已加载设备目录时，`raw` 会先校验 `device_id` 是否存在，避免误发到未知设备
+
 #### Market Analysis（基金主流程）
 
 `/market` 当前仅支持基金分析主流程（标准化 -> 特征 -> 规则 -> LLM）：
@@ -479,6 +508,7 @@ Admin 侧新增全局 `Search Engine Profiles`（System 模块）：
 
 - 至少配置一个可用的 LLM Provider
 - 若要启用 Home Assistant，再补 `HA_BASE_URL` 和 `HA_TOKEN`
+- 若要启用 Celestia，再补 `CELESTIA_BASE_URL` 和 `CELESTIA_TOKEN`
 - 若要启用企业微信，再补 `WECOM_*` 配置
 
 #### Memory 检索与压缩（可选）
