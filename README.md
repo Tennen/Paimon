@@ -389,6 +389,8 @@ CELESTIA_TOKEN=your_celestia_token
 CELESTIA_DEVICE_REFRESH_MS=60000
 ```
 
+这些值也可以在 Admin `System -> 运行时` 页面配置，会写入 `.env`；修改后需要重启进程才会让已启动的 Celestia client 完全生效。
+
 LLM 可通过 `celestia` tool 读取 `tools_context.celestia.devices` 中的设备与命令目录；同时也支持直接命令：
 
 - `/celestia list [query]`

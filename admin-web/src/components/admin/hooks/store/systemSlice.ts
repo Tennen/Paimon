@@ -76,6 +76,9 @@ function buildRuntimeDraft(config: AdminConfig | null): SystemRuntimeDraft {
     conversationWindowTimeoutSeconds: String(config?.conversationWindowTimeoutSeconds ?? "180").trim(),
     conversationWindowMaxTurns: String(config?.conversationWindowMaxTurns ?? "6").trim(),
     conversationAgentMaxSteps: String(config?.conversationAgentMaxSteps ?? "4").trim(),
+    celestiaBaseUrl: String(config?.celestiaBaseUrl ?? "").trim(),
+    celestiaToken: String(config?.celestiaToken ?? "").trim(),
+    celestiaDeviceRefreshMs: String(config?.celestiaDeviceRefreshMs ?? "60000").trim(),
     selectedSkillNames: resolveConversationContextSelection(
       config?.conversationContext?.config?.selectedSkillNames,
       availableSkillNames
@@ -350,6 +353,9 @@ export const createSystemSlice: AdminSliceCreator<AdminSystemSlice> = (set, get)
             conversationWindowTimeoutSeconds: get().runtimeDraft.conversationWindowTimeoutSeconds.trim(),
             conversationWindowMaxTurns: get().runtimeDraft.conversationWindowMaxTurns.trim(),
             conversationAgentMaxSteps: get().runtimeDraft.conversationAgentMaxSteps.trim(),
+            celestiaBaseUrl: get().runtimeDraft.celestiaBaseUrl.trim(),
+            celestiaToken: get().runtimeDraft.celestiaToken.trim(),
+            celestiaDeviceRefreshMs: get().runtimeDraft.celestiaDeviceRefreshMs.trim(),
             selectedSkillNames: get().runtimeDraft.selectedSkillNames,
             selectedToolNames: get().runtimeDraft.selectedToolNames
           })

@@ -251,6 +251,9 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  celestiaBaseUrl: string;
+  celestiaToken: string;
+  celestiaDeviceRefreshMs: string;
   selectedSkillNames: string[];
   selectedToolNames: string[];
 };
@@ -301,6 +304,9 @@ export type AdminConfig = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  celestiaBaseUrl: string;
+  celestiaToken: string;
+  celestiaDeviceRefreshMs: string;
   llmMemoryContextEnabled: boolean;
   memoryCompactEveryRounds: string;
   memoryCompactMaxBatchSize: string;

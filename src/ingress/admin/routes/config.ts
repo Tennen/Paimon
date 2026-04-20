@@ -306,6 +306,9 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     const conversationWindowTimeoutSeconds = normalizeOptionalIntegerString(body.conversationWindowTimeoutSeconds);
     const conversationWindowMaxTurns = normalizeOptionalIntegerString(body.conversationWindowMaxTurns);
     const conversationAgentMaxSteps = normalizeOptionalIntegerString(body.conversationAgentMaxSteps);
+    const celestiaBaseUrl = normalizeOptionalString(body.celestiaBaseUrl);
+    const celestiaToken = normalizeOptionalString(body.celestiaToken);
+    const celestiaDeviceRefreshMs = normalizeOptionalIntegerString(body.celestiaDeviceRefreshMs);
     const selectedSkillNames = body.selectedSkillNames === undefined
       ? undefined
       : normalizeOptionalStringArray(body.selectedSkillNames);
@@ -331,6 +334,10 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     }
     if (conversationAgentMaxSteps === null) {
       res.status(400).json({ error: "CONVERSATION_AGENT_MAX_STEPS must be positive integer or empty" });
+      return;
+    }
+    if (celestiaDeviceRefreshMs === null) {
+      res.status(400).json({ error: "CELESTIA_DEVICE_REFRESH_MS must be positive integer or empty" });
       return;
     }
     if (body.selectedSkillNames !== undefined && selectedSkillNames === null) {
@@ -374,6 +381,16 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
         setEnvValue,
         unsetEnvValue
       );
+      writeStringEnv(envPath, "CELESTIA_BASE_URL", celestiaBaseUrl);
+      writeStringEnv(envPath, "CELESTIA_TOKEN", celestiaToken);
+      writeOptionalEnvValue(
+        envPath,
+        "CELESTIA_DEVICE_REFRESH_MS",
+        celestiaDeviceRefreshMs,
+        body.celestiaDeviceRefreshMs,
+        setEnvValue,
+        unsetEnvValue
+      );
       if (selectedSkillNames !== undefined || selectedToolNames !== undefined) {
         const availableNames = getAvailableConversationContextNames(context);
         const current = context.conversationContextService.getSnapshot().config;
@@ -400,6 +417,9 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
       conversationWindowTimeoutSeconds: getEnvValue(envPath, "CONVERSATION_WINDOW_TIMEOUT_SECONDS") || "180",
       conversationWindowMaxTurns: getEnvValue(envPath, "CONVERSATION_WINDOW_MAX_TURNS") || "6",
       conversationAgentMaxSteps: getEnvValue(envPath, "CONVERSATION_AGENT_MAX_STEPS") || "4",
+      celestiaBaseUrl: getEnvValue(envPath, "CELESTIA_BASE_URL"),
+      celestiaToken: getEnvValue(envPath, "CELESTIA_TOKEN"),
+      celestiaDeviceRefreshMs: getEnvValue(envPath, "CELESTIA_DEVICE_REFRESH_MS") || "60000",
       conversationContext: buildConversationContextAdminSnapshot(context)
     });
   });

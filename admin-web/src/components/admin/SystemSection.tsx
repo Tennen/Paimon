@@ -49,6 +49,9 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  celestiaBaseUrl: string;
+  celestiaToken: string;
+  celestiaDeviceRefreshMs: string;
   selectedSkillNames: string[];
   selectedToolNames: string[];
 };
@@ -1323,6 +1326,33 @@ export function SystemSection() {
                     placeholder="4"
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>CELESTIA_BASE_URL</Label>
+                  <Input
+                    value={props.runtimeDraft.celestiaBaseUrl}
+                    onChange={(event) => props.onRuntimeDraftChange("celestiaBaseUrl", event.target.value)}
+                    placeholder="http://127.0.0.1:18080"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>CELESTIA_TOKEN</Label>
+                  <Input
+                    type="password"
+                    value={props.runtimeDraft.celestiaToken}
+                    onChange={(event) => props.onRuntimeDraftChange("celestiaToken", event.target.value)}
+                    placeholder="your_celestia_token"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>CELESTIA_DEVICE_REFRESH_MS</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={props.runtimeDraft.celestiaDeviceRefreshMs}
+                    onChange={(event) => props.onRuntimeDraftChange("celestiaDeviceRefreshMs", event.target.value)}
+                    placeholder="60000"
+                  />
+                </div>
               </div>
               <Separator />
               <div className="grid gap-4 xl:grid-cols-2">
@@ -1449,6 +1479,8 @@ export function SystemSection() {
                 <div className="mono">CONVERSATION_WINDOW_TIMEOUT_SECONDS: {props.config?.conversationWindowTimeoutSeconds ?? "180"}</div>
                 <div className="mono">CONVERSATION_WINDOW_MAX_TURNS: {props.config?.conversationWindowMaxTurns ?? "6"}</div>
                 <div className="mono">CONVERSATION_AGENT_MAX_STEPS: {props.config?.conversationAgentMaxSteps ?? "4"}</div>
+                <div className="mono">CELESTIA_BASE_URL: {props.config?.celestiaBaseUrl || "(unset)"}</div>
+                <div className="mono">CELESTIA_DEVICE_REFRESH_MS: {props.config?.celestiaDeviceRefreshMs ?? "60000"}</div>
                 <div className="mono">skills_context selected: {props.runtimeDraft.selectedSkillNames.length}</div>
                 <div className="mono">tools_context selected: {props.runtimeDraft.selectedToolNames.length}</div>
                 <div className="mono md:col-span-2">
