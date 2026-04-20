@@ -43,6 +43,7 @@ import {
   writeMarketPortfolio
 } from "./admin/market/store";
 import { registerConfigAdminRoutes } from "./admin/routes/config";
+import { registerCelestiaAdminRoutes } from "./admin/routes/celestia";
 import { registerGeneralAdminRoutes } from "./admin/routes/general";
 import { IngressAdapter } from "./types";
 import { registerAdminWebRoutes } from "./admin/adminWeb";
@@ -175,6 +176,7 @@ export class AdminIngressAdapter implements IngressAdapter {
 
     registerGeneralAdminRoutes(app, routeContext);
     registerConfigAdminRoutes(app, routeContext);
+    registerCelestiaAdminRoutes(app, routeContext);
 
     app.get("/admin/api/users", (_req: Request, res: ExResponse) => {
       res.json({ users: this.scheduler.listUsers() });

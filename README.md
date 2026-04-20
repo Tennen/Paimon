@@ -114,6 +114,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 定时任务和推送用户管理
 - Direct Input Mapping 配置（固定文本 -> 目标输入）
 - 企业微信应用 click 菜单配置、发布与最近 `EventKey` 回调查看
+- Celestia 设备目录查看，可按 plugin/kind/query 查询并查看设备 commands/actions/params
 - Topic Summary 配置管理
 - Writing Organizer 主题列表/详情查看与整理操作
 - Market Analysis 配置、持仓批量导入与运行记录查看
@@ -390,6 +391,8 @@ CELESTIA_DEVICE_REFRESH_MS=60000
 ```
 
 这些值也可以在 Admin `System -> 运行时` 页面配置，会写入 `.env`；修改后需要重启进程才会让已启动的 Celestia client 完全生效。
+
+Admin 侧也有单独的 `Celestia` 页面，可查看 `/api/ai/v1/devices` 返回的设备列表、aliases、commands、底层 `action` 和参数定义。
 
 LLM 可通过 `celestia` tool 读取 `tools_context.celestia.devices` 中的设备与命令目录；同时也支持直接命令：
 

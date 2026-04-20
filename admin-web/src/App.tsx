@@ -1,4 +1,5 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { CelestiaSection } from "@/components/admin/CelestiaSection";
 import { ConversationBenchmarkSection } from "@/components/admin/ConversationBenchmarkSection";
 import { DirectInputMappingSection } from "@/components/admin/DirectInputMappingSection";
 import { EvolutionSection } from "@/components/admin/EvolutionSection";
@@ -46,6 +47,7 @@ export default function App() {
           {activeMenu === "messages" ? <MessagesSection /> : null}
           {activeMenu === "direct_input" ? <DirectInputMappingSection /> : null}
           {activeMenu === "wecom" ? <WeComMenuSection /> : null}
+          {activeMenu === "celestia" ? <CelestiaSection /> : null}
         </section>
       </div>
     </main>

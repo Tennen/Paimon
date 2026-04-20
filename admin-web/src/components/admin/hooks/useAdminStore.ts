@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createCelestiaSlice } from "./store/celestiaSlice";
 import { createEvolutionSlice } from "./store/evolutionSlice";
 import { createMarketExecutionSlice } from "./store/marketExecutionSlice";
 import { createMarketPortfolioSlice } from "./store/marketPortfolioSlice";
@@ -19,5 +20,6 @@ export const useAdminStore = create<AdminStore>()((...args) => ({
   ...createMarketExecutionSlice(...args),
   ...createTopicSlice(...args),
   ...createWritingSlice(...args),
+  ...createCelestiaSlice(...args),
   ...createEvolutionSlice(...args)
 }));

@@ -16,6 +16,7 @@ export type MenuKey =
   | "messages"
   | "direct_input"
   | "wecom"
+  | "celestia"
   | "market"
   | "topic"
   | "writing"

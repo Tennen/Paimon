@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import type {
   AdminEvolutionSlice,
+  AdminCelestiaSlice,
   AdminMarketExecutionSlice,
   AdminMarketPortfolioSlice,
   AdminMessagesSlice,
@@ -19,6 +20,7 @@ export type AdminStore = AdminPageSlice
   & AdminMarketExecutionSlice
   & AdminTopicSlice
   & AdminWritingSlice
+  & AdminCelestiaSlice
   & AdminEvolutionSlice;
 
 export type AdminSliceCreator<T> = StateCreator<AdminStore, [], [], T>;

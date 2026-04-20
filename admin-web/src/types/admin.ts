@@ -7,4 +7,5 @@ export * from "./admin/topicSummary";
 export * from "./admin/writing";
 export * from "./admin/evolution";
 export * from "./admin/benchmark";
+export * from "./admin/celestia";
 export * from "./admin/defaults";

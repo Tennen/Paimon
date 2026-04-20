@@ -1,6 +1,8 @@
 import type { FormEvent, SetStateAction } from "react";
 import type {
   AdminConfig,
+  CelestiaDevice,
+  CelestiaDeviceFilters,
   ConversationBenchmarkResponse,
   DirectInputMappingConfig,
   EvolutionStateSnapshot,
@@ -142,6 +144,19 @@ export interface AdminSystemSlice {
   handleSaveWeComMenu: () => Promise<void>;
   handleSaveDirectInputMappings: () => Promise<void>;
   handlePublishWeComMenu: () => Promise<void>;
+}
+
+export interface AdminCelestiaSlice {
+  celestiaDevices: CelestiaDevice[];
+  celestiaConfigured: boolean;
+  celestiaBaseUrl: string;
+  celestiaFilters: CelestiaDeviceFilters;
+  selectedCelestiaDeviceId: string;
+  loadingCelestiaDevices: boolean;
+  celestiaDeviceError: string;
+  setCelestiaFilters: (value: StateUpdater<CelestiaDeviceFilters>) => void;
+  setSelectedCelestiaDeviceId: (deviceId: string) => void;
+  loadCelestiaDevices: () => Promise<void>;
 }
 
 export interface AdminMessagesSlice {
