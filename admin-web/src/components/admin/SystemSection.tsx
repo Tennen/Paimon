@@ -22,6 +22,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useSystemSectionState } from "@/components/admin/hooks/useSystemSectionState";
 import { MemorySection } from "@/components/admin/MemorySection";
+import { SystemRuntimeMemoryFields, SystemRuntimeMemoryStatus } from "@/components/admin/SystemRuntimeMemoryFields";
 import {
   AdminConfig,
   MainConversationMode,
@@ -49,6 +50,12 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  llmMemoryContextEnabled: boolean;
+  memoryCompactEveryRounds: string;
+  memoryCompactMaxBatchSize: string;
+  memorySummaryTopK: string;
+  memoryRawRefLimit: string;
+  memoryRawRecordLimit: string;
   celestiaBaseUrl: string;
   celestiaToken: string;
   celestiaDeviceRefreshMs: string;
@@ -1326,6 +1333,7 @@ export function SystemSection() {
                     placeholder="4"
                   />
                 </div>
+                <SystemRuntimeMemoryFields runtimeDraft={props.runtimeDraft} onRuntimeDraftChange={props.onRuntimeDraftChange} />
                 <div className="space-y-2">
                   <Label>CELESTIA_BASE_URL</Label>
                   <Input
@@ -1479,6 +1487,7 @@ export function SystemSection() {
                 <div className="mono">CONVERSATION_WINDOW_TIMEOUT_SECONDS: {props.config?.conversationWindowTimeoutSeconds ?? "180"}</div>
                 <div className="mono">CONVERSATION_WINDOW_MAX_TURNS: {props.config?.conversationWindowMaxTurns ?? "6"}</div>
                 <div className="mono">CONVERSATION_AGENT_MAX_STEPS: {props.config?.conversationAgentMaxSteps ?? "4"}</div>
+                <SystemRuntimeMemoryStatus config={props.config} />
                 <div className="mono">CELESTIA_BASE_URL: {props.config?.celestiaBaseUrl || "(unset)"}</div>
                 <div className="mono">CELESTIA_DEVICE_REFRESH_MS: {props.config?.celestiaDeviceRefreshMs ?? "60000"}</div>
                 <div className="mono">skills_context selected: {props.runtimeDraft.selectedSkillNames.length}</div>

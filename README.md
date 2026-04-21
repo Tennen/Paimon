@@ -535,6 +535,7 @@ MEMORY_RAW_RECORD_LIMIT=3
 - `MEMORY_SUMMARY_TOP_K`：主 orchestrator 的 summary 命中条数上限
 - `MEMORY_RAW_REF_LIMIT`：summary 命中后允许回补的 rawRefs 数量上限
 - `MEMORY_RAW_RECORD_LIMIT`：最终注入上下文的 raw 回放条数上限
+- 这些值也可以在 Admin `System -> 运行时` 页面修改，会写入 `.env`
 
 #### 主对话运行时（可选）
 

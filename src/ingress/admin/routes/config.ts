@@ -309,6 +309,14 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     const celestiaBaseUrl = normalizeOptionalString(body.celestiaBaseUrl);
     const celestiaToken = normalizeOptionalString(body.celestiaToken);
     const celestiaDeviceRefreshMs = normalizeOptionalIntegerString(body.celestiaDeviceRefreshMs);
+    const memoryUpdates: Array<{ envKey: string; value: string | null; originalInput: unknown }> = [
+      { envKey: "MEMORY_COMPACT_EVERY_ROUNDS", value: normalizeOptionalIntegerString(body.memoryCompactEveryRounds), originalInput: body.memoryCompactEveryRounds },
+      { envKey: "MEMORY_COMPACT_MAX_BATCH_SIZE", value: normalizeOptionalIntegerString(body.memoryCompactMaxBatchSize), originalInput: body.memoryCompactMaxBatchSize },
+      { envKey: "MEMORY_SUMMARY_TOP_K", value: normalizeOptionalIntegerString(body.memorySummaryTopK), originalInput: body.memorySummaryTopK },
+      { envKey: "MEMORY_RAW_REF_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRefLimit), originalInput: body.memoryRawRefLimit },
+      { envKey: "MEMORY_RAW_RECORD_LIMIT", value: normalizeOptionalIntegerString(body.memoryRawRecordLimit), originalInput: body.memoryRawRecordLimit }
+    ];
+    const llmMemoryContextEnabled = parseOptionalBoolean(body.llmMemoryContextEnabled);
     const selectedSkillNames = body.selectedSkillNames === undefined
       ? undefined
       : normalizeOptionalStringArray(body.selectedSkillNames);
@@ -338,6 +346,15 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
     }
     if (celestiaDeviceRefreshMs === null) {
       res.status(400).json({ error: "CELESTIA_DEVICE_REFRESH_MS must be positive integer or empty" });
+      return;
+    }
+    const invalidMemoryUpdate = memoryUpdates.find((item) => item.value === null);
+    if (invalidMemoryUpdate) {
+      res.status(400).json({ error: `${invalidMemoryUpdate.envKey} must be a positive integer or empty` });
+      return;
+    }
+    if (body.llmMemoryContextEnabled !== undefined && llmMemoryContextEnabled === undefined) {
+      res.status(400).json({ error: "llmMemoryContextEnabled must be boolean" });
       return;
     }
     if (body.selectedSkillNames !== undefined && selectedSkillNames === null) {
@@ -391,6 +408,19 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
         setEnvValue,
         unsetEnvValue
       );
+      for (const update of memoryUpdates) {
+        writeOptionalEnvValue(
+          envPath,
+          update.envKey,
+          update.value,
+          update.originalInput,
+          setEnvValue,
+          unsetEnvValue
+        );
+      }
+      if (llmMemoryContextEnabled !== undefined) {
+        setEnvValue(envPath, "LLM_MEMORY_CONTEXT_ENABLED", llmMemoryContextEnabled ? "true" : "false");
+      }
       if (selectedSkillNames !== undefined || selectedToolNames !== undefined) {
         const availableNames = getAvailableConversationContextNames(context);
         const current = context.conversationContextService.getSnapshot().config;
@@ -420,6 +450,12 @@ export function registerConfigAdminRoutes(app: Express, context: AdminRouteConte
       celestiaBaseUrl: getEnvValue(envPath, "CELESTIA_BASE_URL"),
       celestiaToken: getEnvValue(envPath, "CELESTIA_TOKEN"),
       celestiaDeviceRefreshMs: getEnvValue(envPath, "CELESTIA_DEVICE_REFRESH_MS") || "60000",
+      llmMemoryContextEnabled: parseOptionalBoolean(getEnvValue(envPath, "LLM_MEMORY_CONTEXT_ENABLED")) ?? true,
+      memoryCompactEveryRounds: getEnvValue(envPath, "MEMORY_COMPACT_EVERY_ROUNDS"),
+      memoryCompactMaxBatchSize: getEnvValue(envPath, "MEMORY_COMPACT_MAX_BATCH_SIZE"),
+      memorySummaryTopK: getEnvValue(envPath, "MEMORY_SUMMARY_TOP_K"),
+      memoryRawRefLimit: getEnvValue(envPath, "MEMORY_RAW_REF_LIMIT"),
+      memoryRawRecordLimit: getEnvValue(envPath, "MEMORY_RAW_RECORD_LIMIT"),
       conversationContext: buildConversationContextAdminSnapshot(context)
     });
   });

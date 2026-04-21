@@ -251,6 +251,12 @@ export type SystemRuntimeDraft = {
   conversationWindowTimeoutSeconds: string;
   conversationWindowMaxTurns: string;
   conversationAgentMaxSteps: string;
+  llmMemoryContextEnabled: boolean;
+  memoryCompactEveryRounds: string;
+  memoryCompactMaxBatchSize: string;
+  memorySummaryTopK: string;
+  memoryRawRefLimit: string;
+  memoryRawRecordLimit: string;
   celestiaBaseUrl: string;
   celestiaToken: string;
   celestiaDeviceRefreshMs: string;
