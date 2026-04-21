@@ -87,7 +87,7 @@ Ingress -> SessionManager -> Orchestrator -> ToolRouter -> Integrations -> Stora
 - 支持技能发现、技能规划、工具调用的分步式执行
 - 主对话支持两套 runtime：
   - `classic`: 传统 `route -> planning -> tool/respond`
-  - `windowed-agent`: 3 分钟短窗口内保留真实 `messages`，并用短租约 `skill lease` 继续多轮
+  - `windowed-agent`: LangGraph 驱动的短窗口运行时，3 分钟内保留真实 `messages`，并用短租约 `skill lease` 继续多轮
 - 支持直接命令和异步回调型命令
 - 支持会话记忆持久化
 
@@ -547,7 +547,7 @@ CONVERSATION_AGENT_MAX_STEPS=4
 
 说明：
 
-- `MAIN_CONVERSATION_MODE`：主对话默认 runtime，`classic` 为旧的 `route -> planning` 链路，`windowed-agent` 为消息窗口 runtime
+- `MAIN_CONVERSATION_MODE`：主对话默认 runtime，`classic` 为旧的 `route -> planning` 链路，`windowed-agent` 为基于 LangGraph 的消息窗口 runtime
 - `CONVERSATION_WINDOW_TIMEOUT_SECONDS`：用户在收到回复后，下一条消息仍算同一个短窗口的超时时间
 - `CONVERSATION_WINDOW_MAX_TURNS`：短窗口最多保留多少轮真实 `user/assistant` 消息
 - `CONVERSATION_AGENT_MAX_STEPS`：`windowed-agent` 单轮内允许的最大 agent/tool 推理步数
