@@ -1,5 +1,7 @@
 # Paimon Coding Agent Guide
 
+> Archived: do not implement new features in Paimon. Continue all runtime, admin, touchpoint, slash command, and Agent work in `../Celestia`.
+
 This file defines hard constraints for coding agents working in this repository.
 
 ## What Belongs Here

@@ -1,5 +1,7 @@
 # Paimon
 
+> Archived: Paimon is no longer the active project. All active development has moved to `../Celestia`; this repository remains only as historical reference for migrated Agent capabilities.
+
 Paimon 是一个面向个人自动化和消息驱动场景的单进程 Agent Runtime。
 
 它把来自企业微信、HTTP 或 Home Assistant 的输入统一转换成内部事件，再由 LLM 进行意图判断、技能规划和工具调用，最后把结果回传给用户或外部系统。项目目标不是做一个通用聊天壳，而是把“消息入口 + 本地模型 + 自动化工具 + 持久化 + 运维后台”收敛到一个可以长期运行的服务里。
